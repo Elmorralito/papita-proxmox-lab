@@ -1,0 +1,16 @@
+---
+description: Terraform (HCL) style and conventions for AWS and provider usage
+globs: ["**/*.tf"]
+alwaysApply: false
+---
+
+NOTE: This rule file was generated or updated by the `/rules-architect` command.
+
+# Terraform style and conventions
+
+- Use Terraform 1.x syntax; pin `required_version` (e.g. `>= 1.6.5, < 2.0.0`) and constrain provider versions in `required_providers`.
+- Prefer `locals` for derived values and repeated expressions; keep `variables.tf` for input, `outputs.tf` for outputs.
+- Use snake_case for resource names, variable names, and local names; use kebab-case for resource names when the provider expects it.
+- Add brief comments for non-obvious resources or business logic; avoid redundant comments.
+- Prefer `resource` and `data` blocks over `terraform_remote_state` or external scripts where possible.
+- Use consistent formatting (run `terraform fmt`) and validate with `terraform validate` before committing.

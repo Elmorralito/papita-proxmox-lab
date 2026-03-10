@@ -1,0 +1,120 @@
+[tool.poetry]
+name = "proxmox-aws-cluster"
+version = "2026.0.0"
+description = "Repository for Proxmox AWS Cluster."
+authors = ["Proxmox AWS Cluster", "Elmoralito <drestrepohinc@gmail.com>"]
+package-mode = false
+
+[tool.poetry.dependencies]
+python = ">=3.9.1,<4.0.0"
+
+[tool.poetry.group.pre-commit.dependencies]
+black = "^24.4.2"
+mypy = "^1.14.1"
+pre-commit = "^3.7.1"
+pylint = "^3.2.6"
+flake8 = "^7.1.0"
+isort = "^5.13.2"
+build = "^1.2.2.post1"
+flake8-pyproject = "^1.2.3"
+poetry = "^2.2.1"
+interrogate = "^1.7.0"
+
+[tool.pylint.'MESSAGES CONTROL']
+disable = [
+    "broad-except",
+    "redefined-outer-name",
+    "import-outside-toplevel",
+    "too-few-public-methods",
+    "raw-checker-failed",
+    "bad-inline-option",
+    "locally-disabled",
+    "file-ignored",
+    "suppressed-message",
+    "useless-suppression",
+    "deprecated-pragma",
+    "use-symbolic-message-instead",
+    "wildcard-import",
+    "unused-wildcard-import",
+    "missing-module-docstring",
+    "missing-function-docstring",
+    "missing-class-docstring",
+    "duplicate-code",
+    "unused-argument",
+    "attribute-defined-outside-init",
+    "use-a-generator",
+    "unnecessary-comprehension",
+    "consider-using-dict-comprehension",
+    "E1101",
+    "too-many-instance-attributes"
+]
+
+
+[tool.pylint.'FORMAT']
+max-line-length = 120
+max-module-lines = 1000
+
+
+[tool.black]
+line-length = 120
+target-version = ["py311"]
+include = "\\.pyi?$"
+
+
+[tool.mypy]
+mypy_path = ["*"]
+exclude = ["tests"]
+python_version = "3.11"
+disable_error_code = ["union-attr", "misc"]
+warn_unused_ignores = true
+disallow_any_decorated = false
+disallow_untyped_defs = false
+ignore_missing_imports = true
+disallow_untyped_calls = false
+namespace_packages = true
+
+
+[tool.isort]
+skip = [".gitignore", ".dockerignore"]
+extend_skip = [".md", ".json", ".yaml", ".yml", ".sh"]
+py_version=311
+atomic = true
+profile = "black"
+line_length = 120
+skip_gitignore = true
+
+
+[tool.flake8]
+ignore = ["E203", "W503"]
+exclude = [".git", "__pycache__", "dist", "*.ipynb"]
+max-line-length = 120
+max-complexity = 18
+
+
+[tool.interrogate]
+paths = ["./"]
+exclude = [
+    "./node_modules",
+    "./tests",
+    "./terraform",
+    "./deploy",
+    "./libs",
+    "./dist",
+    "./build",
+    "./venv",
+    "./__pycache__",
+    "./.pytest_cache",
+    "./.mypy_cache",
+    "./.pre-commit-cache",
+
+]
+fail-under = 90
+verbose = 3
+color = true
+ignore-init-method = true
+ignore-init-module = true
+ignore-module = true
+ignore-private = true
+ignore-magic = true
+ignore-property-decorators = false
+ignore-nested-functions = true

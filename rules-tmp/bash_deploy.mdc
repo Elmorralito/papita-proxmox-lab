@@ -1,0 +1,16 @@
+---
+description: Bash style and conventions for deploy and toolkit scripts
+globs: ["deploy/**/*.sh", "**/*.sh"]
+alwaysApply: false
+---
+
+NOTE: This rule file was generated or updated by the `/rules-architect` command.
+
+# Bash deploy script conventions
+
+- Use `#!/usr/bin/env bash`, `set -euo pipefail`, and `set -e`-safe patterns; avoid unquoted expansions.
+- Source dependencies with explicit paths (e.g. `source "${PROJECT_PATH}/deploy/utils.sh"`); use `shellcheck` and fix or disable only with justification (e.g. `# shellcheck disable=SC1090,SC1091`).
+- Prefer functions for reuse; use `local` for variables inside functions; pass arguments explicitly rather than relying on globals where practical.
+- Use `[[ ]]` for conditionals and `$( )` for command substitution; quote variables (e.g. `"${VAR:-}"`).
+- For CLI argument parsing, support long and short options; document usage in a dedicated `usage()` (or sourced `usage.sh`) and validate required args (e.g. `ENV`, `ACTION`) before proceeding.
+- Log with a consistent helper (e.g. `log "INFO" "message"`); use `exit 1` for usage/validation failures and a distinct exit code (e.g. 255) for fatal setup errors.
