@@ -56,10 +56,10 @@ provider "aws" {
   }
 }
 
-# provider "tailscale" {
-#   api_key = var.tailscale_api_key
-#   tailnet = var.tailscale_tailnet
-# }
+provider "tailscale" {
+  api_key = var.tailscale_api_key
+  tailnet = var.tailscale_tailnet
+}
 
 module "aws" {
   source                     = "./aws"

@@ -167,14 +167,14 @@ variable "efs_backup_policy_status" {
 
 # --- Tailscale Configuration ──────────────────────────────────────
 
-# variable "tailscale_api_key" {
-#   description = "The Tailscale API key"
-#   type        = string
-#   default     = null
-# }
+variable "tailscale_api_key" {
+  description = "The Tailscale API key"
+  type        = string
+  default     = null
+}
 
-# variable "tailscale_tailnet" {
-#   description = "The Tailscale tailnet"
-#   type        = string
-#   default     = null
-# }
+variable "tailscale_tailnet" {
+  description = "The Tailscale tailnet"
+  type        = string
+  default     = null
+}

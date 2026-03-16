@@ -1,0 +1,14 @@
+# REQUIRED DEPS
+git
+vim
+jq
+unattended-upgrades
+
+# OPTIONAL DEPS
+locales
+build-essential
+debian-keyring
+debian-tag2upload-keyring
+libc-devtools
+libtool
+bison

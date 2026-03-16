@@ -1,0 +1,13 @@
+[Unit]
+Description=Pre-shutdown procedure for pve node
+DefaultDependencies=no
+Before=shutdown.target reboot.target halt.target poweroff.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/true
+ExecStop=/usr/local/bin/pre-shutdown-proc.sh
+RemainAfterExit=true
+
+[Install]
+WantedBy=multi-user.target

@@ -54,7 +54,9 @@ No resources.
 | <a name="input_profile"></a> [profile](#input\_profile) | The AWS profile | `string` | `"default"` | no |
 | <a name="input_project"></a> [project](#input\_project) | The project name | `string` | `"hybrid-proxmox-aws-cluster"` | no |
 | <a name="input_region"></a> [region](#input\_region) | The AWS region | `string` | n/a | yes |
+| <a name="input_tailscale_api_key"></a> [tailscale\_api\_key](#input\_tailscale\_api\_key) | The Tailscale API key | `string` | `null` | no |
 | <a name="input_tailscale_cidr_blocks"></a> [tailscale\_cidr\_blocks](#input\_tailscale\_cidr\_blocks) | CIDR blocks for Tailscale (allowed to access EFS on port 2049). | `list(string)` | `[]` | no |
+| <a name="input_tailscale_tailnet"></a> [tailscale\_tailnet](#input\_tailscale\_tailnet) | The Tailscale tailnet | `string` | `null` | no |
 
 ## Outputs
 

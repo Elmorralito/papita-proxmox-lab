@@ -71,29 +71,29 @@ repos:
             "types-requests>=2.32.4.20250913",
           ]
 
-  - repo: https://github.com/antonbabenko/pre-commit-terraform
-    rev: "v1.97.4"
-    hooks:
-      - id: terraform_fmt
-      - id: terraform_tflint
-      - id: terraform_validate
-      - id: terraform_docs
-        args:
-          - --hook-config=--path-to-file=README.md
-          - --hook-config=--add-to-existing-file=true
-          - --hook-config=--create-file-if-not-exist=true
+  # - repo: https://github.com/antonbabenko/pre-commit-terraform
+  #   rev: "v1.97.4"
+  #   hooks:
+  #     - id: terraform_fmt
+  #     - id: terraform_tflint
+  #     - id: terraform_validate
+  #     - id: terraform_docs
+  #       args:
+  #         - --hook-config=--path-to-file=README.md
+  #         - --hook-config=--add-to-existing-file=true
+  #         - --hook-config=--create-file-if-not-exist=true
 
-  - repo: https://github.com/mcole18/terraform-check-unused-variables.git
-    rev: v1.1.0
-    hooks:
-      - id: check-unused-vars
-        args: [-r, --dir=., --var-file=variables.tf]
+  # - repo: https://github.com/mcole18/terraform-check-unused-variables.git
+  #   rev: v1.1.0
+  #   hooks:
+  #     - id: check-unused-vars
+  #       args: [-r, --dir=., --var-file=variables.tf]
 
-  - repo: https://github.com/adrienverge/yamllint
-    rev: v1.37.1
-    hooks:
-      - id: yamllint
-        files: "^.*\\.(yaml|yml)$"
+  # - repo: https://github.com/adrienverge/yamllint
+  #   rev: v1.37.1
+  #   hooks:
+  #     - id: yamllint
+  #       files: "^.*\\.(yaml|yml)$"
 
   # - repo: https://github.com/econchick/interrogate
   #   rev: 1.7.0

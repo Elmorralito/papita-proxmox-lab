@@ -88,6 +88,14 @@ resource "aws_security_group" "efs_mount_target_sg" {
     cidr_blocks = var.tailscale_cidr_blocks
   }
 
+  ingress {
+    description = "DNS UDP from VPC Endpoint"
+    from_port   = 53
+    to_port     = 53
+    protocol    = "udp"
+    cidr_blocks = [local.vpc_cidr]
+  }
+
   egress {
     from_port   = 0
     to_port     = 0
@@ -113,5 +121,16 @@ resource "aws_vpc_endpoint" "efs_endpoint" {
 
   tags = {
     Name = "${var.resource_basename}-efs-endpoint"
+  }
+}
+
+data "aws_vpc_endpoint" "efs_validated" {
+  id = aws_vpc_endpoint.efs_endpoint[0].id
+
+  lifecycle {
+    postcondition {
+      condition     = self.state == "available"
+      error_message = "EFS VPC Endpoint ${aws_vpc_endpoint.efs_endpoint[0].id} is not in 'available' state."
+    }
   }
 }

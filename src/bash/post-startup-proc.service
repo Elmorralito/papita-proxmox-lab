@@ -1,0 +1,11 @@
+[Unit]
+Description=Post-startup procedure for pve node
+After=network-online.target pveproxy.service pve-manager.service pve-cluster.service pvestatd.service
+
+[Service]
+ExecStart=/usr/local/bin/post-startup-proc.sh
+Type=oneshot
+RemainAfterExit=true
+
+[Install]
+WantedBy=multi-user.target
