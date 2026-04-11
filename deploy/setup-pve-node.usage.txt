@@ -19,7 +19,7 @@ How to run
 First prompt (after the on-screen step list)
   y              Start from step 1 (full run)
   n              Exit immediately; no further steps
-  1-9            Skip all steps before this number; begin at that step
+  1-10           Skip all steps before this number; begin at that step
   (empty)        Same as starting from the beginning (step 1)
   h, help, ?, usage, -h, --help
                  Show this manual again in the pager, then ask again (CLI --help as above)
@@ -27,7 +27,7 @@ First prompt (after the on-screen step list)
 Failure behavior
   Step 1 (APT) can exit the whole script on error (missing apt-dependencies.list,
   failed apt install, or jq / vim / unattended-upgrades missing after install).
-  Steps 2-9: errors are usually logged and the script continues with the next step.
+  Steps 2-10: errors are usually logged and the script continues with the next step.
 
 --- Step 1 — APT configuration ---
   Gate: answer "n" at 1. QUESTION to skip the entire step.
@@ -93,3 +93,16 @@ Failure behavior
   Gate: "n" skips. If "y": if proxmoxlib.js.bak exists, restores it first; backs up
   proxmoxlib.js, inserts a line after checked_command to bypass the subscription check,
   restarts pveproxy. Vendor file—may be overwritten on upgrades.
+
+--- Step 10 — Proxmox web UI (8006) Tailscale-only (iptables) ---
+  After you answer "y" to step 10, if /etc/default/pve-main-node matches this host’s
+  HOSTNAME (set in step 7.2), the iptables changes are skipped so the main node keeps
+  broader UI access; you still see the prompt first.
+  WARNING: Use only after every planned cluster node is connected on Tailscale and you
+  can open the UI via Tailscale; otherwise you may lose non-Tailscale access during setup.
+  Gate: "n" skips. If "y" and not main node: inserts iptables INPUT rules papita-drop-8006
+  and papita-allow-ts-8006 so rule order is ACCEPT tcp/8006 from 100.64.0.0/10, then
+  DROP tcp/8006 for all other sources (same idea as Monica/Tailscale hardening notes).
+  Installs iptables-persistent and runs netfilter-persistent save. IPv4 INPUT only;
+  validate with https://<tailscale-ip>:8006 vs public IP. Proxmox datacenter/node firewall
+  can add defense-in-depth if you mirror ACCEPT-before-DROP there.

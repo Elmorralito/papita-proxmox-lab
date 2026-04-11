@@ -109,7 +109,7 @@ prompt_until_yqn() {
     done
 }
 
-# Initial PVE menu: empty, y, n, or step 1–9.
+# Initial PVE menu: empty, y, n, or step 1–10.
 prompt_pve_start() {
     local -n _out_start="$1"
     local line lowered
@@ -131,11 +131,11 @@ prompt_pve_start() {
                 return 0
                 ;;
         esac
-        if [[ "$line" =~ ^[0-9]+$ ]] && ((line >= 1 && line <= 9)); then
+        if [[ "$line" =~ ^[0-9]+$ ]] && ((line >= 1 && line <= 10)); then
             _out_start="$line"
             return 0
         fi
-        log WARN "Enter y, n, h/help/?/usage/-h/--help for usage, a step number (1–9), or leave empty to start from the beginning."
+        log WARN "Enter y, n, h/help/?/usage/-h/--help for usage, a step number (1–10), or leave empty to start from the beginning."
     done
 }
 

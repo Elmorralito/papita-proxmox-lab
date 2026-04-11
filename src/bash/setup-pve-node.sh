@@ -54,6 +54,7 @@ confirm_pve_setup() {
 7. Setup Post-startup procedure
 8. Setup Pre-shutdown procedure
 9. Remove PVE subscription alert
+10. Restrict Proxmox web UI (8006) to Tailscale only
 
   Usage: at the "Input:" prompt, enter h, help, ?, usage, -h, or --help to open the full manual in less (q to quit), then choose again.
 EOF
@@ -595,6 +596,51 @@ remove_pve_subscription_alert() {
 }
 
 # -----------------------------------------------------------------------------
+# Step 10: allow Proxmox HTTPS UI (8006) only from Tailscale CGNAT (iptables).
+# See operational notes: run only when all cluster nodes are on Tailscale and reachable.
+# -----------------------------------------------------------------------------
+setup_pve_webui_tailscale_only() {
+    if [ "$START_FROM_STEP" -gt 10 ]; then
+        log INFO "Skipping Proxmox web UI Tailscale-only restriction..."
+        return 0
+    fi
+
+    log WARN "Step 10 adds iptables rules so TCP port 8006 (Proxmox web UI) accepts traffic only from Tailscale (100.64.0.0/10)."
+    log WARN "Do NOT enable this until every planned cluster node is connected on Tailscale (and you can reach the UI via Tailscale)."
+    log WARN "Otherwise you can lock out non-Tailscale access before the cluster is fully reachable and complicate recovery."
+    prompt_until_yn "10. QUESTION: Apply Tailscale-only restriction for port 8006? (y/n): " confirm
+    if [ "$confirm" != "y" ]; then
+        log INFO "Skipping Proxmox web UI Tailscale-only restriction..."
+        return 0
+    fi
+
+    if [[ -f /etc/default/pve-main-node ]]; then
+        local _pve_main_designate
+        _pve_main_designate="$(sed 's/^[[:space:]]*//;s/[[:space:]]*$//' /etc/default/pve-main-node)"
+        if [[ -n "$_pve_main_designate" && "$_pve_main_designate" == "$HOSTNAME" ]]; then
+            log INFO "This host is the cluster main node (/etc/default/pve-main-node from step 7.2). Skipping iptables configuration for step 10."
+            return 0
+        fi
+    fi
+
+    if iptables-save -t filter 2>/dev/null | grep -qF "papita-allow-ts-8006"; then
+        log INFO "iptables rules for papita-allow-ts-8006 / papita-drop-8006 already present; skipping insert."
+    else
+        log INFO "Inserting iptables rules (ACCEPT from Tailscale before DROP on 8006)..."
+        iptables -I INPUT 1 -p tcp --dport 8006 -m comment --comment "papita-drop-8006" -j DROP
+        iptables -I INPUT 1 -p tcp -s 100.64.0.0/10 --dport 8006 -m comment --comment "papita-allow-ts-8006" -j ACCEPT
+    fi
+
+    log INFO "Ensuring iptables rules persist across reboots..."
+    apt-get install -y iptables-persistent
+    netfilter-persistent save
+
+    log INFO "Step 10 done. Verify: UI via Tailscale https://<tailscale-ip>:8006 ; from public IP it should not connect."
+    log WARN "Optional: Datacenter/Node firewall in Proxmox UI can complement this; order ACCEPT before DROP if you mirror rules there."
+    return 0
+}
+
+# -----------------------------------------------------------------------------
 # Main
 # -----------------------------------------------------------------------------
 main() {
@@ -626,6 +672,8 @@ main() {
     setup_pre_shutdown_procedure || log WARN "Pre-shutdown procedure setup failed; continuing."
 
     remove_pve_subscription_alert || log WARN "PVE subscription alert removal failed; continuing."
+
+    setup_pve_webui_tailscale_only || log WARN "Proxmox web UI Tailscale-only restriction failed; continuing."
 
     log WARN "Remember to setup the other PVE nodes in /etc/hosts after setup is complete."
     log INFO "Done."
