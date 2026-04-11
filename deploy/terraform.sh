@@ -19,6 +19,14 @@ TF_ENV_PATH="${TF_PATH}/environments"
     exit 255
 }
 
+# shellcheck source=${PROJECT_PATH}/deploy/usage.sh
+{
+    cd "${PROJECT_PATH}" && source "${PROJECT_PATH}/deploy/usage.sh"
+} || {
+    echo "[ERROR] Runtime - cannot load usage path."
+    exit 255
+}
+
 function run_terraform() {
     local action
     action="$1"
@@ -96,6 +104,10 @@ while [[ "$#" -gt 0 ]]; do
             INPUT_TAILSCALE_PARAMS="1"
             shift 1
             ;;
+        --help | -h)
+            usage_terraform
+            shift 1
+            ;;
         *)
             shift
             ;;
@@ -104,7 +116,7 @@ done
 
 if [ -z "$ENV" ]; then
     log "ERROR" "No environment was provided."
-    exit 1
+    usage_terraform
 fi
 
 # Always deploy from terraform/plans/ (plans/main.tf); backend config is in tfvars
@@ -112,7 +124,7 @@ TF_VARS_FILE="${TF_VARS_FILE:-"${TF_ENV_PATH}/config.${ENV}.tfvars"}"
 
 if [[ ! -f "$TF_VARS_FILE" ]]; then
     log "ERROR" "Terraform var file not found: ${TF_VARS_FILE}"
-    exit 1
+    usage_terraform
 fi
 
 _TF_BACKEND_BUCKET=$(grep -E '\s*tf_backend_bucket\s*=' "$TF_VARS_FILE" | awk '{print $NF}' | tr -d '"')
@@ -169,6 +181,6 @@ case "$ACTION" in
         ;;
     *)
         log "ERROR" "Action not supported."
-        exit 1
+        usage_terraform
         ;;
 esac

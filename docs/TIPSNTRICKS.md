@@ -35,7 +35,7 @@ This is done by doing:
    ```
 
 > [!NOTE]
-> The ID of the ceph OSD storage can be identified by running:
+> **The ID of the ceph OSD storage can be identified by running:**
 >
 > ```shell
 > ceph-volume lvm list # or...
@@ -47,17 +47,19 @@ This is done by doing:
 > ```shell
 > pveceph osd details <id>
 > ```
-
-> [!NOTE]
-> To wipe a disk
+>
+> ---
+>
+> **To wipe a disk**
 >
 > ```shell
 > lsblk # List volumes and partitions
 > dd if=/dev/zero of="/dev/<disk label>" bs=1M status=progress # wipe disk
 > ```
-
-> [!NOTE]
-> To remove corrupted pools from GUI and VE
+>
+> ---
+>
+> **To remove corrupted pools from GUI and VE**
 >
 > ```shell
 > ceph osd lspools # or ...
@@ -65,7 +67,7 @@ This is done by doing:
 > pvesm remove "<Pool name>"
 > ```
 
-## Remove Proxmox Subscription Alert on GUI
+## Remove Proxmox Subscription Alert on GUI (Already set in pve-setup)
 
 **\*Ref:** https://www.youtube.com/watch?v=AlMh0shKDEM&t=256s*
 
@@ -82,7 +84,7 @@ This is done by doing:
    systemctl restart pveproxy.service
    ```
 
-An alternative is to run the following command:
+Alternatively run the following command:
 
 ```shell
 cp /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js.bak && sed -i '/checked_command: function (orig_cmd) {$/a\    return (typeof orig_cmd === "function" && (orig_cmd(), true));' /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js && systemctl restart pveproxy.service
@@ -92,3 +94,45 @@ cp /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js /usr/share/javascr
 >
 > 1. This procedure may vary depending on the major version of Proxmox.
 > 2. This is only applied in the node where the GUI is being used. In case of using the GUI from other nodes, it's necessary to apply this action in those nodes as well.
+
+## Remove node from cluster
+
+Removing a node from a Proxmox VE (PVE) cluster must be done via the command line, as there is no option to do this directly through the Web GUI.
+
+### Prerequisites
+
+- **Migrate or Stop Resources:** Move all Virtual Machines (VMs) and Containers (CTs) to other nodes or back them up and delete them from the node being removed.
+- **Ceph (If Applicable):** If using Ceph, you must first destroy all OSDs, Monitors, and Managers on the target node before proceeding with cluster removal.
+- **Powered Off:** Shut down the node you intend to remove and disconnect it from the network.
+  Proxmox
+
+### Step-by-Step Removal Process
+
+1. Perform these steps from the command line of a remaining node in the cluster:
+2. Verify Node Name: List all nodes to identify the exact name of the node you want to delete.
+
+```bash
+pvecm nodes
+```
+
+3. **Delete the Node:** Remove the node from the cluster configuration.
+
+```bash
+pvecm delnode <NODE_NAME>
+```
+
+_Replace <NODE_NAME> with the name found in step 1._
+
+4. **Clean Up the Web GUI (Ghost Node):** If the node still appears in the Datacenter view with a red icon, manually remove its configuration directory from the cluster file system.
+
+```bash
+rm -rf /etc/pve/nodes/<NODE_NAME>
+```
+
+> [!NOTE]
+>
+> ### Post-Removal Notes
+>
+> - ** Never Power On Again:** Do not reconnect the removed node to the network while it still has its old PVE configuration, as it could conflict with the existing cluster.
+> - **Reusing the Node:** If you want to use the removed hardware as a standalone server or rejoin it as a "new" node, it is strongly recommended to reinstall Proxmox VE from scratch.
+> - **SSH Keys:** You may want to manually remove the old node's keys from /etc/pve/priv/authorized_keys to keep your security configuration clean.

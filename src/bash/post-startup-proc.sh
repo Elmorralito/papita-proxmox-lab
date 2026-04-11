@@ -11,7 +11,10 @@ set -euo pipefail
 # -----------------------------------------------------------------------------
 set_noout_flag() {
     echo "INFO: Unsetting noout flag for ceph cluster..."
-    ceph osd unset noout
+    ceph osd unset noout || {
+        echo "ERROR: Failed to unset noout flag for ceph cluster. Continuing..."
+        return 0
+    }
     echo "INFO: Noout flag unset for ceph cluster."
     return 0
 }
@@ -19,12 +22,24 @@ set_noout_flag() {
 refresh_ceph_osd_nodes() {
     echo "INFO: Refreshing ceph OSD nodes..."
     sleep 5
-    ceph osd tree
-    systemctl restart ceph-osd.target
+    ceph osd tree || {
+        echo "ERROR: Failed to refresh ceph OSD nodes. Continuing..."
+        return 0
+    }
+    systemctl restart ceph-osd.target || {
+        echo "ERROR: Failed to restart ceph-osd.target. Continuing..."
+        return 0
+    }
     sleep 5
-    systemctl restart ceph-mgr.target
+    systemctl restart ceph-mgr.target || {
+        echo "ERROR: Failed to restart ceph-mgr.target. Continuing..."
+        return 0
+    }
     sleep 5
-    systemctl restart pvestatd.service
+    systemctl restart pvestatd.service || {
+        echo "ERROR: Failed to restart pvestatd.service. Continuing..."
+        return 0
+    }
     sleep 5
     echo "INFO: Ceph OSD nodes refreshed."
     return 0

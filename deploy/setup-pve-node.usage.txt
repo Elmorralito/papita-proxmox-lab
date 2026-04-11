@@ -1,0 +1,95 @@
+setup-pve-node.sh — reference manual
+=====================================
+
+What it is
+  Guided, interactive setup for a Proxmox VE node: APT/repos, power and network
+  helpers, Tailscale, optional Ceph-related boot/shutdown hooks, and UI tweaks.
+  Run as root on the node. Prompts are validated (y/n, y/c/n, y/?/n, cron lines,
+  WoL-capable interfaces, etc.) via deploy/utils.sh.
+
+How to run
+  Local (repository checkout; deploy/utils.sh, deploy/usage.sh, and this file must resolve):
+    bash src/bash/setup-pve-node.sh
+    bash src/bash/setup-pve-node.sh --help    # this manual in a pager, then exit
+
+  Remote (deploy/proxmox.sh copies src/bash/, deploy/utils.sh, deploy/usage.sh, and
+  deploy/setup-pve-node.usage.txt into <target-path>/deploy/, then runs setup-pve-node.sh over SSH):
+    ./deploy/proxmox.sh -ip <host> ...
+
+First prompt (after the on-screen step list)
+  y              Start from step 1 (full run)
+  n              Exit immediately; no further steps
+  1-9            Skip all steps before this number; begin at that step
+  (empty)        Same as starting from the beginning (step 1)
+  h, help, ?, usage, -h, --help
+                 Show this manual again in the pager, then ask again (CLI --help as above)
+
+Failure behavior
+  Step 1 (APT) can exit the whole script on error (missing apt-dependencies.list,
+  failed apt install, or jq / vim / unattended-upgrades missing after install).
+  Steps 2-9: errors are usually logged and the script continues with the next step.
+
+--- Step 1 — APT configuration ---
+  Gate: answer "n" at 1. QUESTION to skip the entire step.
+  Repositories:
+    • If /etc/apt/sources.list.d/ does not exist: writes /etc/apt/sources.list with
+      embedded stretch-era Debian + PVE URLs (legacy path—verify for your PVE release).
+    • If it exists: writes .sources files for pve-no-subscription (trixie),
+      pve-enterprise (trixie), ceph-squid (trixie, enterprise), using the Proxmox archive keyring.
+  Then: apt update && apt dist-upgrade -y && apt autoremove -y && clean && autoclean.
+  Dependencies:
+    • Packages from apt-dependencies.list beside the script (comment and blank lines
+      skipped). Confirms at 1.1 before apt install -y.
+    • Exits if unattended-upgrades, jq, or vim are not available after install.
+  Enables: systemctl enable --now unattended-upgrades.
+  Crontab:
+    • Prompts for a schedule (validated); empty input uses default 0 4 * * 6.
+    • Removes any /etc/crontab line containing the same upgrade shell command, then
+      appends: <schedule> apt-get update && dist-upgrade -y && autoremove -y && clean && autoclean.
+
+--- Step 2 — Hibernate / sleep off ---
+  Gate: "n" skips. If "y": vm.swappiness=0 in /etc/sysctl.d/99-hibernate.conf;
+  appends lid/suspend/hibernate ignore lines to /etc/systemd/logind.conf; masks
+  sleep.target, suspend.target, hibernate.target, hybrid-sleep.target; restarts systemd-logind.
+
+--- Step 3 — Wake-on-LAN ---
+  Gate: "n" skips. If "y": prompts until an interface exists and ethtool shows Wake-on;
+  ethtool -s <if> wol pg; creates /etc/systemd/system/wol.service to re-apply on boot;
+  enable/start wol.service; reads MAC and runs pvenode config set --wakeonlan <mac>.
+
+--- Step 4 — Locales ---
+  Gate: "n" skips. If "y": prompts for locale (default en_US) and charset (default UTF-8);
+  locale-gen and update-locale LANG=locale.charset.
+
+--- Step 5 — Tailscale (install + forwarding + firewall + optional NAT) ---
+  y = run curl -fsSL https://tailscale.com/install.sh | sh, then sysctl/firewall prompts.
+  c = skip install, still configure sysctl and ask firewall/NAT questions (Tailscale already installed).
+  n = skip the whole step.
+  Appends IPv4/IPv6 forwarding to /etc/sysctl.d/99-tailscale.conf (or /etc/sysctl.conf),
+  then sysctl -p.
+  5.1: optional rule in /etc/pve/firewall/cluster.fw to ACCEPT from Tailscale 100.64.0.0/10
+  (skips if rule present; new file has enable: 0 until you enable the cluster firewall).
+  5.2: optional MASQUERADE on vmbr0 (iptables + iptables-persistent), then restart tailscaled—
+  only if you need the documented Tailscale/Proxmox workaround.
+
+--- Step 6 — tailscale up ---
+  Gate: "n" skips. If "y": Tailscale hostname prompt—empty input uses this node's FQDN
+  (hostname -f, else hostname); subnet routes (or empty + optional defaults
+  from misc/tailscale/default.gateways.list, comma-separated); tags (or empty + optional
+  defaults from misc/tailscale/default.tags.list). Runs:
+  tailscale up --accept-dns --ssh --reset [options].
+
+--- Step 7 — Post-startup (Ceph noout off after boot) ---
+  y = install; ? = show explanation and post-startup-proc.sh in less, then 7.1 confirm; n = skip.
+  Symlinks into /usr/local/bin and /etc/systemd/system; daemon-reload; enable/start service.
+  Startup hook runs ceph osd unset noout (via post-startup-proc.sh) after boot.
+  7.2: if this node is the "main" node, writes /etc/default/pve-main-node with the machine hostname.
+
+--- Step 8 — Pre-shutdown (Ceph noout before power-off) ---
+  Same y/?/n flow as step 7 for pre-shutdown-proc.sh; symlinks, enable/start unit.
+  Shutdown/reboot hook runs ceph osd set noout (via pre-shutdown-proc.sh) before power-off.
+
+--- Step 9 — PVE subscription nag (web UI) ---
+  Gate: "n" skips. If "y": if proxmoxlib.js.bak exists, restores it first; backs up
+  proxmoxlib.js, inserts a line after checked_command to bypass the subscription check,
+  restarts pveproxy. Vendor file—may be overwritten on upgrades.

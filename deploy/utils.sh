@@ -4,8 +4,9 @@ GREEN_TEXT='\033[0;32m'
 RED_TEXT='\033[0;31m'
 YELLOW_TEXT='\033[0;33m'
 NC_TEXT='\033[0m'
-BOLD_TEXT=$(tput bold)
-NORMAL_TEXT=$(tput sgr0)
+# No tput: works when TERM is unset (SSH, IDE terminals). SGR bold on/off; does not reset colors.
+BOLD_TEXT='\033[1m'
+NORMAL_TEXT='\033[22m'
 
 log() {
     local level="$1"
@@ -24,6 +25,183 @@ log() {
     echo -e "${color}$(date +"%Y-%m-%d %H:%M:%S") :: ${BOLD_TEXT}$(basename "$0")${NORMAL_TEXT} ${color}:: ${BOLD_TEXT}${level}${NORMAL_TEXT} ${color}:: $*${NC_TEXT}"
 }
 
+# -----------------------------------------------------------------------------
+# Interactive prompts (shared by setup-pve-node.sh: repo checkout or remote deploy)
+# Requires: log(). Uses bash namerefs (bash 4.3+).
+# -----------------------------------------------------------------------------
+
+# Trim leading/trailing whitespace (bash parameter expansion).
+_str_trim() {
+    local s="$1"
+    s="${s#"${s%%[![:space:]]*}"}"
+    s="${s%"${s##*[![:space:]]}"}"
+    printf '%s' "$s"
+}
+
+# Loop until user enters y or n (case-insensitive). Second arg: name of variable to set.
+prompt_until_yn() {
+    local prompt_text="$1"
+    local -n _out_yn="$2"
+    local line lowered
+    while true; do
+        read -r -p "$prompt_text" line || return 1
+        line="$(_str_trim "$line")"
+        lowered="${line,,}"
+        case "$lowered" in
+            y | n)
+                _out_yn="$lowered"
+                return 0
+                ;;
+            *)
+                log WARN "Please enter y or n."
+                ;;
+        esac
+    done
+}
+
+# Loop until y, c, or n (Tailscale install vs continue-only).
+prompt_until_ycn() {
+    local prompt_text="$1"
+    local -n _out_ycn="$2"
+    local line lowered
+    while true; do
+        read -r -p "$prompt_text" line || return 1
+        line="$(_str_trim "$line")"
+        lowered="${line,,}"
+        case "$lowered" in
+            y | c | n)
+                _out_ycn="$lowered"
+                return 0
+                ;;
+            *)
+                log WARN "Please enter y (install), c (continue without install), or n (skip)."
+                ;;
+        esac
+    done
+}
+
+# Loop until y, ?, or n (help vs proceed vs skip).
+prompt_until_yqn() {
+    local prompt_text="$1"
+    local -n _out_yqn="$2"
+    local line lowered
+    while true; do
+        read -r -p "$prompt_text" line || return 1
+        line="$(_str_trim "$line")"
+        lowered="${line,,}"
+        case "$lowered" in
+            y)
+                _out_yqn="y"
+                return 0
+                ;;
+            n)
+                _out_yqn="n"
+                return 0
+                ;;
+            '?')
+                _out_yqn="?"
+                return 0
+                ;;
+            *)
+                log WARN "Please enter y (yes), ? (help), or n (no)."
+                ;;
+        esac
+    done
+}
+
+# Initial PVE menu: empty, y, n, or step 1–9.
+prompt_pve_start() {
+    local -n _out_start="$1"
+    local line lowered
+    while true; do
+        read -r -p "Input: " line || return 1
+        line="$(_str_trim "$line")"
+        if [ -z "$line" ]; then
+            _out_start=""
+            return 0
+        fi
+        lowered="${line,,}"
+        case "$lowered" in
+            y | n)
+                _out_start="$lowered"
+                return 0
+                ;;
+            h | help | '?' | usage | -h | --help)
+                _out_start="__USAGE__"
+                return 0
+                ;;
+        esac
+        if [[ "$line" =~ ^[0-9]+$ ]] && ((line >= 1 && line <= 9)); then
+            _out_start="$line"
+            return 0
+        fi
+        log WARN "Enter y, n, h/help/?/usage/-h/--help for usage, a step number (1–9), or leave empty to start from the beginning."
+    done
+}
+
+# Crontab line: empty -> default; otherwise must match schedule pattern.
+prompt_crontab_schedule() {
+    local -n _out_cron="$1"
+    local default_sched="$2"
+    local line
+    while true; do
+        read -r -p "1.2. QUESTION: Define upgrade CRONTAB schedule: " line || return 1
+        line="$(_str_trim "$line")"
+        if [ -z "$line" ]; then
+            _out_cron="$default_sched"
+            log INFO "Using default schedule: ${default_sched}"
+            return 0
+        fi
+        if [[ "$line" =~ ^([0-9\*]+[[:space:]]+){4,5}[0-9\*]+$ ]]; then
+            _out_cron="$line"
+            return 0
+        fi
+        log WARN "Invalid schedule. Use 5 or 6 cron fields (e.g. 0 4 * * 6 or 0 4 * * * root)."
+    done
+}
+
+# Interface must exist and support Wake-on-LAN per ethtool.
+prompt_existing_wol_interface() {
+    local -n _out_if="$1"
+    local ifname check_wol
+    while true; do
+        read -r -p "3.1. QUESTION: Enter interface name: " ifname || return 1
+        ifname="$(_str_trim "$ifname")"
+        if [ -z "$ifname" ]; then
+            log WARN "Interface name cannot be empty."
+            continue
+        fi
+        if ! ip link show "$ifname" &>/dev/null; then
+            log WARN "Interface ${ifname} not found. Try: ip link"
+            continue
+        fi
+        check_wol=$(ethtool "$ifname" 2>/dev/null | grep "Wake-on:" || true)
+        if [ -z "$check_wol" ]; then
+            log WARN "Wake-on-LAN is not reported for ${ifname}. Choose another interface."
+            continue
+        fi
+        _out_if="$ifname"
+        return 0
+    done
+}
+
+# Optional locale/charset: empty allowed; caller applies defaults.
+prompt_locale_field() {
+    local prompt_text="$1"
+    local -n _out_loc="$2"
+    local line
+    read -r -p "$prompt_text" line || return 1
+    line="$(_str_trim "$line")"
+    _out_loc="$line"
+}
+
+# Single line, trimmed (empty allowed).
+prompt_line_trimmed() {
+    local prompt_text="$1"
+    local -n _out_line="$2"
+    read -r -p "$prompt_text" _out_line || return 1
+    _out_line="$(_str_trim "$_out_line")"
+}
 
 run_command() {
     COMMAND="$2"

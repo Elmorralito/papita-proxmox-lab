@@ -2,36 +2,41 @@
 
 set -euo pipefail
 
-GREEN_TEXT='\033[0;32m'
-RED_TEXT='\033[0;31m'
-YELLOW_TEXT='\033[0;33m'
-NC_TEXT='\033[0m'
-BOLD_TEXT=$(tput bold)
-NORMAL_TEXT=$(tput sgr0)
-
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
+REPO_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
+# Remote (proxmox.sh): utils.sh lives next to this script. Local repo: deploy/utils.sh.
+if [[ -f "${SCRIPT_DIR}/utils.sh" ]]; then
+    # shellcheck disable=SC1091
+    source "${SCRIPT_DIR}/utils.sh"
+elif [[ -f "${REPO_ROOT}/deploy/utils.sh" ]]; then
+    # shellcheck disable=SC1091
+    source "${REPO_ROOT}/deploy/utils.sh"
+else
+    echo "[ERROR] Cannot find utils.sh (tried ${SCRIPT_DIR}/utils.sh and ${REPO_ROOT}/deploy/utils.sh)." >&2
+    exit 255
+fi
+
+if [[ -f "${SCRIPT_DIR}/usage.sh" ]]; then
+    # shellcheck disable=SC1091
+    source "${SCRIPT_DIR}/usage.sh"
+elif [[ -f "${REPO_ROOT}/deploy/usage.sh" ]]; then
+    # shellcheck disable=SC1091
+    source "${REPO_ROOT}/deploy/usage.sh"
+else
+    echo "[ERROR] Cannot find usage.sh (tried ${SCRIPT_DIR}/usage.sh and ${REPO_ROOT}/deploy/usage.sh)." >&2
+    exit 255
+fi
+
 APT_DEPENDENCIES_LIST="${SCRIPT_DIR}/apt-dependencies.list"
 START_FROM_STEP=0
 DEFAULT_CRONTAB_SCHEDULE="0 4 * * 6"
-
-log() {
-    local level="$1"
-    shift
-    local color="${NC_TEXT}"
-    if [[ "${level}" == "ERROR" ]]; then
-        color="${RED_TEXT}"
-    elif [[ "${level}" == "INFO" ]]; then
-        color="${GREEN_TEXT}"
-    elif [[ "${level}" == "WARN" ]]; then
-        color="${YELLOW_TEXT}"
-    elif [[ "$level" == "TRACE" ]]; then
-        echo -e "$*"
-        return
-    fi
-    echo -e "${color}$(date +"%Y-%m-%d %H:%M:%S") :: ${BOLD_TEXT}$(basename "$0")${NORMAL_TEXT} ${color}:: ${BOLD_TEXT}${level}${NORMAL_TEXT} ${color}:: $*${NC_TEXT}"
-}
-
-
+# paste -sd, avoids a trailing comma from tr '\n' ',' (empty tag after last newline).
+DEFAULT_SUBNET_ROUTES="$(
+    sed '/^[[:space:]]*$/d' "${SCRIPT_DIR}/misc/tailscale/default.gateways.list" | paste -sd, -
+)"
+DEFAULT_TAGS="\"$(
+    sed '/^[[:space:]]*$/d' "${SCRIPT_DIR}/misc/tailscale/default.tags.list" | paste -sd, -
+)\""
 
 # -----------------------------------------------------------------------------
 # Confirmation: exit script if user declines
@@ -39,7 +44,7 @@ log() {
 confirm_pve_setup() {
 
     cat <<EOF
-## QUESTION: Are you sure you want to setup PVE? (y/n) or a number to skip to a specific step:
+## QUESTION: Are you sure you want to setup PVE? (y/n), a number to skip to a specific step, or usage keys below:
 1. Setup APT configuration
 2. Setup Hibernate
 3. Setup Wake-on-LAN
@@ -49,8 +54,17 @@ confirm_pve_setup() {
 7. Setup Post-startup procedure
 8. Setup Pre-shutdown procedure
 9. Remove PVE subscription alert
+
+  Usage: at the "Input:" prompt, enter h, help, ?, usage, -h, or --help to open the full manual in less (q to quit), then choose again.
 EOF
-    read -r -p "Input: " confirm
+    while true; do
+        prompt_pve_start confirm
+        if [[ "$confirm" == "__USAGE__" ]]; then
+            usage_setup_pve_node || log WARN "Usage manual could not be shown (see message above)."
+            continue
+        fi
+        break
+    done
 
     if [ -z "$confirm" ]; then
         log WARN "Invalid input. Starting from the beginning..."
@@ -86,7 +100,7 @@ setup_apt_config() {
         return 0
     fi
 
-    read -r -p "1. QUESTION: Setup APT configuration? (y/n): " confirm
+    prompt_until_yn "1. QUESTION: Setup APT configuration? (y/n): " confirm
 
     if [ "$confirm" != "y" ]; then
         log INFO "Skipping APT configuration..."
@@ -148,7 +162,7 @@ EOF
     apt_deps=$(grep -vE '^(\s*#|\s*$)' "${APT_DEPENDENCIES_LIST}" | tr '\n' ' ')
     log WARN "Installing dependencies: ${apt_deps}"
     log WARN "To modify the dependencies list, edit file: ${APT_DEPENDENCIES_LIST}"
-    read -r -p "1.1. QUESTION: Continue to install dependencies? (y/n): " confirm
+    prompt_until_yn "1.1. QUESTION: Continue to install dependencies? (y/n): " confirm
     if [ "$confirm" != "y" ]; then
         log INFO "Skipping dependencies installation..."
         return 0
@@ -165,22 +179,13 @@ EOF
     log INFO "Setting up security patches..."
     systemctl enable --now unattended-upgrades
 
-    read -r -p "1.2. QUESTION: Define upgrade CRONTAB schedule: " crontab_schedule
-
-    if [ -z "$crontab_schedule" ]; then
-        log INFO "No upgrade CRONTAB schedule provided. Using default: ${DEFAULT_CRONTAB_SCHEDULE}"
-        crontab_schedule="${DEFAULT_CRONTAB_SCHEDULE}"
-    else
-        log INFO "Upgrade CRONTAB schedule: $crontab_schedule"
-    fi
-    if [[ ! "$crontab_schedule" =~ ^([0-9\*]+[[:space:]]+){4,5}[0-9\*]+$ ]]; then
-        log WARN "Invalid upgrade CRONTAB schedule. Using default: ${DEFAULT_CRONTAB_SCHEDULE}"
-        crontab_schedule="${DEFAULT_CRONTAB_SCHEDULE}"
-    fi
+    crontab_schedule=
+    prompt_crontab_schedule crontab_schedule "${DEFAULT_CRONTAB_SCHEDULE}"
+    log INFO "Upgrade CRONTAB schedule: ${crontab_schedule}"
     log INFO "Setting up upgrade CRONTAB..."
     cron_command="apt-get update && apt-get dist-upgrade -y && apt-get autoremove -y && apt-get clean && apt-get autoclean"
     awk -v cmd="$cron_command" 'index($0, cmd)==0' /etc/crontab > /etc/crontab.tmp && mv /etc/crontab.tmp /etc/crontab
-    echo "$crontab_schedule $cron_command" | tee -a /etc/crontab
+    echo "${crontab_schedule} $cron_command" | tee -a /etc/crontab
 
     log INFO "APT Configuration and auto-upgrades set up. Done."
 }
@@ -194,7 +199,7 @@ setup_hibernate() {
         return 0
     fi
 
-    read -r -p "2. QUESTION: Set hibernate off? (y/n): " confirm
+    prompt_until_yn "2. QUESTION: Set hibernate off? (y/n): " confirm
 
     if [ "$confirm" != "y" ]; then
         return 0
@@ -231,26 +236,17 @@ setup_wake_on_lan() {
         return 0
     fi
 
-    read -r -p "3. QUESTION: Setup Wake-on-LAN? (y/n): " confirm
+    prompt_until_yn "3. QUESTION: Setup Wake-on-LAN? (y/n): " confirm
 
     if [ "$confirm" != "y" ]; then
         return 0
     fi
 
-    read -r -p "3.1. QUESTION: Enter interface name: " interface
-
-    if ! ip link show "$interface" &>/dev/null; then
-        log ERROR "Interface $interface not found."
-        return 1
-    fi
-    check_wol=$(ethtool "$interface" 2>/dev/null | grep "Wake-on:" || true)
-    if [ -z "$check_wol" ]; then
-        log ERROR "Wake-on-LAN is not supported on interface $interface."
-        return 1
-    fi
+    interface=
+    prompt_existing_wol_interface interface
     log INFO "Wake-on-LAN is supported on interface $interface."
     log INFO "Setting up Wake-on-LAN for interface $interface..."
-    if ! ethtool -s "$interface" wol pg; then
+    if ! ethtool -s "${interface}" wol pg; then
         log ERROR "Failed to set up Wake-on-LAN for interface $interface."
         return 1
     fi
@@ -261,7 +257,7 @@ After=network.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/sbin/ethtool -s $interface wol pg
+ExecStart=/usr/sbin/ethtool -s "${interface}" wol pg
 
 [Install]
 WantedBy=multi-user.target
@@ -294,19 +290,19 @@ setup_locales() {
         return 0
     fi
 
-    read -r -p "4. QUESTION: Setup locales? (y/n): " confirm
+    prompt_until_yn "4. QUESTION: Setup locales? (y/n): " confirm
 
     if [ "$confirm" != "y" ]; then
         return 0
     fi
 
-    read -r -p "4.1. QUESTION: Enter locale: " locale
+    prompt_locale_field "4.1. QUESTION: Enter locale: " locale
 
     if [ -z "$locale" ]; then
         locale="en_US"
     fi
 
-    read -r -p "4.2. QUESTION: Enter charset: " charset
+    prompt_locale_field "4.2. QUESTION: Enter charset: " charset
 
     if [ -z "$charset" ]; then
         charset="UTF-8"
@@ -333,7 +329,7 @@ setup_tailscale() {
         return 0
     fi
 
-    read -r -p "5. QUESTION: Setup Tailscale? (y/c/n): " confirm
+    prompt_until_ycn "5. QUESTION: Setup Tailscale? (y/c/n): " confirm
 
     if [ "$confirm" != "y" ] && [ "$confirm" != "c" ]; then
         log INFO "Skipping Tailscale setup..."
@@ -359,14 +355,14 @@ setup_tailscale() {
         sudo sysctl -p /etc/sysctl.conf
     fi
 
-    read -r -p "5.1. QUESTION: Allow Tailscale (100.64.0.0/10) in Proxmox firewall? (y/n): " confirm
+    prompt_until_yn "5.1. QUESTION: Allow Tailscale (100.64.0.0/10) in Proxmox firewall? (y/n): " confirm
 
     if [ "$confirm" == "y" ]; then
         setup_proxmox_firewall_tailscale || log WARN "Proxmox firewall rule for Tailscale failed; continuing."
     fi
 
 
-    read -r -p "5.2. QUESTION: Masquerade firewall due to known issue with Tailscale? (y/n): " confirm
+    prompt_until_yn "5.2. QUESTION: Masquerade firewall due to known issue with Tailscale? (y/n): " confirm
 
     if [ "$confirm" != "y" ]; then
         return 0
@@ -422,28 +418,53 @@ init_tailscale() {
         return 0
     fi
 
-    read -r -p "6. QUESTION: Initialize Tailscale? (y/n): " confirm
+    prompt_until_yn "6. QUESTION: Initialize Tailscale? (y/n): " confirm
 
     if [ "$confirm" != "y" ]; then
         return 0
     fi
     log INFO "Initializing Tailscale..."
-    read -r -p "6.1. QUESTION: Specify Tailscale hostname: " hostname
+    local ts_host_input=""
+    prompt_line_trimmed "6.1. QUESTION: Specify Tailscale hostname (empty = this node's FQDN): " ts_host_input
 
-    if [ -n "$hostname" ]; then
-        hostname=" --hostname=${hostname}"
+    if [ -z "$ts_host_input" ]; then
+        ts_host_input="$(hostname -f 2>/dev/null || true)"
+        if [ -z "$ts_host_input" ]; then
+            ts_host_input="$(hostname 2>/dev/null || true)"
+        fi
+        if [ -n "$ts_host_input" ]; then
+            log INFO "Using node hostname for Tailscale: ${ts_host_input}"
+        else
+            log WARN "Could not read hostname; tailscale up will run without --hostname."
+        fi
     fi
 
-    read -r -p "6.2. QUESTION: Advertise which routes to Tailscale? (e.g. 10.0.0.0/8): " subnet_routes
+    hostname=""
+    if [ -n "$ts_host_input" ]; then
+        hostname=" --hostname=${ts_host_input}"
+    fi
+
+    prompt_line_trimmed "6.2. QUESTION: Advertise which routes to Tailscale? (e.g. 10.0.0.0/8) or leave empty for default: " subnet_routes
 
     if [ -n "$subnet_routes" ]; then
         subnet_routes=" --advertise-routes=${subnet_routes}"
+    else
+        prompt_until_yn "6.2.1. QUESTION: Use default subnet routes? (y/n): " confirm
+        if [ "$confirm" == "y" ]; then
+            subnet_routes=" --advertise-routes=${DEFAULT_SUBNET_ROUTES}"
+        fi
     fi
 
-    read -r -p "6.3. QUESTION: Specify tag names to advertise? (e.g. tag:pve-node,tag:...): " tag_names
-
+    prompt_line_trimmed "6.3. QUESTION: Specify tag names to advertise? (e.g. tag:pve-node,tag:...) or leave empty for default: " tag_names
     if [ -n "$tag_names" ]; then
+        tag_names="$(_str_trim "$tag_names")"
+        while [[ "$tag_names" == *, ]]; do tag_names="${tag_names%,}"; done
         tag_names=" --advertise-tags=${tag_names}"
+    else
+        prompt_until_yn "6.3.1. QUESTION: Use default tag names? (y/n): " confirm
+        if [ "$confirm" == "y" ]; then
+            tag_names=" --advertise-tags=${DEFAULT_TAGS}"
+        fi
     fi
 
     COMMAND="tailscale up --accept-dns --ssh --reset${hostname}${subnet_routes}${tag_names}"
@@ -466,7 +487,7 @@ setup_post_startup_procedure() {
         return 0
     fi
 
-    read -r -p "7. QUESTION: Setup post-startup procedure? (y/?/n): " confirm
+    prompt_until_yqn "7. QUESTION: Setup post-startup procedure? (y/?/n): " confirm
     if [ "$confirm" != "y" ] && [ "$confirm" != "?" ]; then
         return 0
     fi
@@ -477,7 +498,8 @@ setup_post_startup_procedure() {
         log INFO "Below is the content of 'post-startup-proc.sh' that will be installed and run at startup:"
         less "${SCRIPT_DIR}/post-startup-proc.sh"
 
-        read -r -p "7.1. QUESTION: Continue to set up post-startup procedure now? (y/n): " confirm_continue
+        confirm_continue=
+        prompt_until_yn "7.1. QUESTION: Continue to set up post-startup procedure now? (y/n): " confirm_continue
         if [ "$confirm_continue" != "y" ]; then
             log INFO "Skipping post-startup procedure setup."
             return 0
@@ -492,7 +514,7 @@ setup_post_startup_procedure() {
     systemctl daemon-reload
     systemctl enable post-startup-proc.service
     systemctl start post-startup-proc.service
-    read -r -p "7.2. QUESTION: Is this node $HOSTNAME the main node? (y/n): " confirm
+    prompt_until_yn "7.2. QUESTION: Is this node $HOSTNAME the main node? (y/n): " confirm
     if [ "$confirm" == "y" ]; then
         log INFO "Setting up /etc/default/pve-main-node..."
         echo "$HOSTNAME" > /etc/default/pve-main-node
@@ -514,7 +536,7 @@ setup_pre_shutdown_procedure() {
         return 0
     fi
 
-    read -r -p "8. QUESTION: Setup pre-shutdown procedure? (y/?/n): " confirm
+    prompt_until_yqn "8. QUESTION: Setup pre-shutdown procedure? (y/?/n): " confirm
     if [ "$confirm" != "y" ] && [ "$confirm" != "?" ]; then
         return 0
     fi
@@ -525,7 +547,7 @@ setup_pre_shutdown_procedure() {
         log INFO "Below is the content of 'pre-shutdown-proc.sh' that will be installed and run at shutdown:"
         less "${SCRIPT_DIR}/pre-shutdown-proc.sh"
 
-        read -r -p "8.1. QUESTION: Continue to set up pre-shutdown procedure now? (y/n): " confirm_continue
+        prompt_until_yn "8.1. QUESTION: Continue to set up pre-shutdown procedure now? (y/n): " confirm_continue
         if [ "$confirm_continue" != "y" ]; then
             log INFO "Skipping pre-shutdown procedure setup."
             return 0
@@ -551,7 +573,7 @@ remove_pve_subscription_alert() {
         return 0
     fi
 
-    read -r -p "9. QUESTION: Remove PVE subscription alert? (y/n): " confirm
+    prompt_until_yn "9. QUESTION: Remove PVE subscription alert? (y/n): " confirm
     if [ "$confirm" != "y" ]; then
         log INFO "Skipping PVE subscription alert removal..."
         return 0
@@ -576,6 +598,13 @@ remove_pve_subscription_alert() {
 # Main
 # -----------------------------------------------------------------------------
 main() {
+    case "${1:-}" in
+        -h | --help)
+            usage_setup_pve_node || true
+            exit 0
+            ;;
+    esac
+
     confirm_pve_setup
 
     # Apt configuration: on failure the script exits (set -e)
