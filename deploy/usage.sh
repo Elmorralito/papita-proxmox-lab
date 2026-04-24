@@ -12,14 +12,16 @@ PAPITA_DEPLOY_DIR="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
 
 usage_toolkit() {
   echo -e "${GREEN_TEXT}Usage:${NC_TEXT} $0 ACTION -e {dev|prod} [OPTIONS]"
-  cat << EOF
+  cat << EOM
 
   ACTION (required, position 1):
     build       Build all library wheels from libs/
     devsync     Build wheels and sync into local dev environment (pip install)
     test        Build wheels and run pytest with coverage
     terraform   Deploy infrastructure via Terraform (same as deploy)
-    deploy      Deploy infrastructure via Terraform
+    proxmox     Deploy infrastructure via Proxmox
+    deploy_terraform      Same as action terraform
+    deploy_proxmox      Same as action proxmox
     none        No action; useful with --pre-commit only
 
   Environment (required):
@@ -31,6 +33,19 @@ usage_toolkit() {
 
   Terraform:
     -ta, --terraform-action   Terraform subcommand (default: deploy)
+    *all terraform.sh options
+    ----
+    $(usage_terraform "0" | sed 's/^/    /')
+    ----
+
+  Proxmox:
+    -pa, --proxmox-action   Proxmox subcommand (default: setup-node)
+    -ip, --ip-address     Proxmox cluster member to SSH into (IP or DNS)
+    -hn, --hostname     Proxmox cluster member hostname
+    *all proxmox.sh options
+    ----
+    $(usage_proxmox "0" | sed 's/^/    /')
+    ----
 
   AWS:
     -p, --profile, --aws-profile   AWS profile (default: default)
@@ -46,8 +61,12 @@ usage_toolkit() {
   Other:
     --pre-commit   Run pre-commit hooks before the chosen action
     -h, --help     Show this message
+EOM
 
-EOF
+  if [[ "${1:-}" == "0" ]]; then
+    return 0
+  fi
+
   exit 1
 }
 
@@ -80,34 +99,58 @@ usage_terraform() {
     Otherwise set TAILSCALE_API_KEY and TAILSCALE_TAILNET when your init needs them.
 
 EOF
+  if [[ "${1:-}" == "0" ]]; then
+    return 0
+  fi
+
   exit 1
 }
 
 usage_proxmox() {
-  echo -e "${GREEN_TEXT}Usage:${NC_TEXT} $0 [OPTIONS]"
+  echo -e "${GREEN_TEXT}Usage:${NC_TEXT} $0 ACTION [OPTIONS]"
   cat << EOF
 
-  Copies src/bash/, deploy/utils.sh, deploy/usage.sh, and deploy/setup-pve-node.usage.txt
-  to <target-path>/deploy/ and runs setup-pve-node.sh over SSH.
+  Remote Proxmox helper over SSH (multiplexed session). Requires local jq, ssh, and scp.
+
+  ACTION (required, position 1):
+    setup-node     Replace <target-path>/deploy with src/bash/, utils.sh, usage.sh,
+                   setup-pve-node.usage.txt; chmod a+rx; run setup-pve-node.sh (TTY allocated).
+    get-temp, get-temperature
+                   On each cluster member: SSH (env PAPITA_SSH_PASSWORD if needed, else password prompt) and run lm-sensors JSON;
+                   print a short temperature table per node.
+    start-cluster  On the host at -ip: detect local node (pvecm nodes), list all cluster node
+                   names from pvesh (JSON .node, any status—needed for WoL to offline peers),
+                   send Wake-on-LAN to
+                   each peer via pvenode wakeonlan <node> (skips the local node).
+    stop-cluster   From the host at -ip: for each peer node, pvesh create /nodes/<node>/stopall
+                   then /nodes/<node>/status --command shutdown (cluster API, not repeated
+                   shutdown on the SSH target). Then pvenode stopall on the local node; with
+                   -sln, also request local hypervisor shutdown via the same API.
 
   Required:
-    -ip, --ip-address     Proxmox host IP or DNS name
+    -ip, --ip-address     Proxmox cluster member to SSH into (IP or DNS)
 
   Optional:
     -user, --username     SSH user (default: root)
-    -tp, --target-path   Remote directory for the deploy bundle (default: /root)
-                         Files land under <target-path>/deploy/
+    -tp, --target-path   Remote base path for deploy (default: /<username>, e.g. /root)
+                         Bundle path: <target-path>/deploy/
+    -sln, --shutdown-local-node   With stop-cluster only: also shutdown the local node
+    -y, --yes                    Automatic yes to questions
 
-  Flow:
-    1. Open one SSH connection (multiplexing); password/key is reused for scp and later ssh
-    2. scp src/bash/, utils.sh, usage.sh, setup-pve-node.usage.txt -> USER@IP:TARGET_PATH/deploy
+  setup-node flow:
+    1. SSH multiplexing; reuse for scp and later ssh
+    2. rm -rf remote <target-path>/deploy; scp bundle into .../deploy/
     3. chmod -R a+rx on remote deploy/
-    4. ssh: cd deploy && bash setup-pve-node.sh
+    4. ssh -tt: cd deploy && bash setup-pve-node.sh
 
   Other:
     -h, --help     Show this message
 
 EOF
+  if [[ "${1:-}" == "0" ]]; then
+    return 0
+  fi
+
   exit 1
 }
 
@@ -126,5 +169,14 @@ usage_setup_pve_node() {
     more "$usage_file"
   else
     cat "$usage_file"
+  fi
+}
+
+check_action_help() {
+  local function_name action
+  function_name="$1"
+  action="$2"
+  if [[ "${action:-}" == "help" || "${action:-}" == "-h" || "${action:-}" == "--help" ]]; then
+    "$function_name"
   fi
 }

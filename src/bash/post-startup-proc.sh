@@ -2,86 +2,89 @@
 
 set -euo pipefail
 
-# This script is used to perform a post-startup procedure on the node.
-# It is used to ensure that the node is in a safe state after startup.
-# It is used to ensure that the node is in a safe state after startup.
+# Post-startup hook (systemd oneshot): clear Ceph maintenance from pre-shutdown, and on
+# the designated main node optionally wake peer Proxmox nodes via WoL.
 
 # -----------------------------------------------------------------------------
-# Set noout flag to false for ceph cluster
+# Ceph: clear noout (paired with pre-shutdown-proc.sh "ceph osd set noout")
 # -----------------------------------------------------------------------------
 set_noout_flag() {
-    echo "INFO: Unsetting noout flag for ceph cluster..."
-    ceph osd unset noout || {
-        echo "ERROR: Failed to unset noout flag for ceph cluster. Continuing..."
+    if ! command -v ceph >/dev/null 2>&1; then
+        echo "INFO: ceph not installed; skipping ceph osd unset noout."
         return 0
-    }
-    echo "INFO: Noout flag unset for ceph cluster."
+    fi
+    echo "INFO: Unsetting Ceph OSD noout..."
+    if ceph osd unset noout; then
+        echo "INFO: Ceph OSD noout unset."
+    else
+        echo "WARN: Failed to unset Ceph OSD noout (cluster down, quorum loss, or no Ceph); continuing."
+    fi
     return 0
 }
 
-refresh_ceph_osd_nodes() {
-    echo "INFO: Refreshing ceph OSD nodes..."
-    sleep 5
-    ceph osd tree || {
-        echo "ERROR: Failed to refresh ceph OSD nodes. Continuing..."
-        return 0
-    }
-    systemctl restart ceph-osd.target || {
-        echo "ERROR: Failed to restart ceph-osd.target. Continuing..."
-        return 0
-    }
-    sleep 5
-    systemctl restart ceph-mgr.target || {
-        echo "ERROR: Failed to restart ceph-mgr.target. Continuing..."
-        return 0
-    }
-    sleep 5
-    systemctl restart pvestatd.service || {
-        echo "ERROR: Failed to restart pvestatd.service. Continuing..."
-        return 0
-    }
-    sleep 5
-    echo "INFO: Ceph OSD nodes refreshed."
-    return 0
+# -----------------------------------------------------------------------------
+# Wake-on-LAN: only on the node named in /etc/default/pve-main-node (step 7.2)
+# -----------------------------------------------------------------------------
+_current_host_matches_label() {
+    local label=$1
+    [[ -z "$label" ]] && return 1
+    local h_builtin h_host h_short h_long
+    h_builtin=${HOSTNAME:-}
+    h_host=$(hostname 2>/dev/null || true)
+    h_short=$(hostname -s 2>/dev/null || true)
+    h_long=$(hostname -f 2>/dev/null || true)
+    [[ "$label" == "$h_builtin" || "$label" == "$h_host" || "$label" == "$h_short" || "$label" == "$h_long" ]]
 }
 
 wake_on_lan_nodes() {
-    if [ ! -f /etc/default/pve-main-node ]; then
-        echo "INFO: Skipping wake-on-LAN nodes. /etc/default/pve-main-node not found."
+    if [[ ! -f /etc/default/pve-main-node ]]; then
+        echo "INFO: Skipping Wake-on-LAN: /etc/default/pve-main-node not found."
         return 0
     fi
-    main_node=$(cat /etc/default/pve-main-node)
-    if [ "$HOSTNAME" != "$main_node" ]; then
-        echo "INFO: Skipping wake-on-LAN nodes. $HOSTNAME is not the main node."
+    local designated
+    designated=$(sed 's/^[[:space:]]*//;s/[[:space:]]*$//' /etc/default/pve-main-node)
+    if [[ -z "$designated" ]]; then
+        echo "INFO: Skipping Wake-on-LAN: /etc/default/pve-main-node is empty."
         return 0
     fi
-    echo "INFO: Waking up on-LAN nodes..."
-    if ! which jq &>/dev/null || ! which pvesh &>/dev/null || ! which pvenode &>/dev/null; then
-        echo "ERROR: jq, pvesh, or pvenode not found. Skipping..."
+    if ! _current_host_matches_label "$designated"; then
+        echo "INFO: Skipping Wake-on-LAN: this host is not the main node (${designated})."
         return 0
     fi
-    nodes=$(pvesh get /cluster/resources --type node --output-format json | jq -r .[].node)
-    for node in $nodes; do
-        echo "INFO: Waking up $node..."
-        if [ "$node" == "$HOSTNAME" ]; then
-            echo "INFO: Skipping $node. It is the current node."
+    if ! command -v jq >/dev/null 2>&1 || ! command -v pvesh >/dev/null 2>&1 || ! command -v pvenode >/dev/null 2>&1; then
+        echo "WARN: jq, pvesh, or pvenode not found; skipping Wake-on-LAN."
+        return 0
+    fi
+
+    echo "INFO: Waking cluster nodes via Wake-on-LAN (main node)..."
+    local json_out
+    if ! json_out=$(pvesh get /cluster/resources --type node --output-format json 2>/dev/null); then
+        echo "WARN: pvesh failed to list nodes; skipping Wake-on-LAN."
+        return 0
+    fi
+
+    local node
+    while IFS= read -r node; do
+        [[ -z "$node" ]] && continue
+        if _current_host_matches_label "$node"; then
+            echo "INFO: Skipping WoL for ${node} (this host)."
             continue
         fi
-        pvenode wakeonlan "$node" || {
-            echo "ERROR: Failed to wake up $node. Continuing..."
-            continue
-        }
-    done
-    echo "INFO: On-LAN nodes woken up."
+        echo "INFO: Sending WoL to ${node}..."
+        if ! pvenode wakeonlan "$node"; then
+            echo "WARN: pvenode wakeonlan failed for ${node}; continuing."
+        fi
+    done < <(jq -r '.[] | .node // empty' <<<"$json_out" 2>/dev/null || true)
+
+    echo "INFO: Wake-on-LAN pass complete."
     return 0
 }
 
 # -----------------------------------------------------------------------------
-# Main function
+# Main
 # -----------------------------------------------------------------------------
 main() {
     set_noout_flag
-    refresh_ceph_osd_nodes
     wake_on_lan_nodes
     return 0
 }

@@ -19,7 +19,7 @@ How to run
 First prompt (after the on-screen step list)
   y              Start from step 1 (full run)
   n              Exit immediately; no further steps
-  1-10           Skip all steps before this number; begin at that step
+  1-11           Skip all steps before this number; begin at that step
   (empty)        Same as starting from the beginning (step 1)
   h, help, ?, usage, -h, --help
                  Show this manual again in the pager, then ask again (CLI --help as above)
@@ -27,7 +27,7 @@ First prompt (after the on-screen step list)
 Failure behavior
   Step 1 (APT) can exit the whole script on error (missing apt-dependencies.list,
   failed apt install, or jq / vim / unattended-upgrades missing after install).
-  Steps 2-10: errors are usually logged and the script continues with the next step.
+  Steps 2-11: errors are usually logged and the script continues with the next step.
 
 --- Step 1 — APT configuration ---
   Gate: answer "n" at 1. QUESTION to skip the entire step.
@@ -48,14 +48,20 @@ Failure behavior
       appends: <schedule> apt-get update && dist-upgrade -y && autoremove -y && clean && autoclean.
 
 --- Step 2 — Hibernate / sleep off ---
-  Gate: "n" skips. If "y": vm.swappiness=0 in /etc/sysctl.d/99-hibernate.conf;
-  appends lid/suspend/hibernate ignore lines to /etc/systemd/logind.conf; masks
-  sleep.target, suspend.target, hibernate.target, hybrid-sleep.target; restarts systemd-logind.
+  Gate: "n" skips. If "y": vm.swappiness=0 in /etc/sysctl.d/99-hibernate.conf (reduces
+  swap use); /etc/systemd/sleep.conf.d/99-papita-no-sleep.conf sets AllowSuspend/Hibernation/
+  HybridSleep/SuspendThenHibernate to no (preferred over masking sleep units, which can
+  interfere with clean poweroff). logind drop-in 99-papita-logind-sleep.conf: lid/suspend
+  keys ignored, IdleAction=ignore, HandlePowerKey=poweroff, HandleRebootKey=reboot for
+  reliable S5 (Wake-on-LAN). Unmasks legacy sleep.target/suspend/hibernate/hybrid-sleep if
+  a previous run masked them; daemon-reload; restart systemd-logind.
 
 --- Step 3 — Wake-on-LAN ---
-  Gate: "n" skips. If "y": prompts until an interface exists and ethtool shows Wake-on;
-  ethtool -s <if> wol pg; creates /etc/systemd/system/wol.service to re-apply on boot;
-  enable/start wol.service; reads MAC and runs pvenode config set --wakeonlan <mac>.
+  Gate: "n" skips. If "y": prompts until an interface exists and ethtool shows Wake-on
+  (EOF on that prompt aborts the step). ethtool -s <if> wol pg; writes
+  /etc/systemd/system/wol.service (After/Wants network-online.target) to re-apply on boot;
+  enable/start wol.service; MAC from /sys/class/net/<if>/address; pvenode config set
+  --wakeonlan <mac> (fails the step if MAC cannot be read).
 
 --- Step 4 — Locales ---
   Gate: "n" skips. If "y": prompts for locale (default en_US) and charset (default UTF-8);
@@ -65,12 +71,12 @@ Failure behavior
   y = run curl -fsSL https://tailscale.com/install.sh | sh, then sysctl/firewall prompts.
   c = skip install, still configure sysctl and ask firewall/NAT questions (Tailscale already installed).
   n = skip the whole step.
-  Appends IPv4/IPv6 forwarding to /etc/sysctl.d/99-tailscale.conf (or /etc/sysctl.conf),
-  then sysctl -p.
+  Writes /etc/sysctl.d/99-tailscale.conf (idempotent) for IPv4/IPv6 forwarding, then sysctl -p.
   5.1: optional rule in /etc/pve/firewall/cluster.fw to ACCEPT from Tailscale 100.64.0.0/10
   (skips if rule present; new file has enable: 0 until you enable the cluster firewall).
-  5.2: optional MASQUERADE on vmbr0 (iptables + iptables-persistent), then restart tailscaled—
-  only if you need the documented Tailscale/Proxmox workaround.
+  5.2: optional MASQUERADE on vmbr0 with comment papita-tailscale-masq-vmbr0 (skips if present);
+  apt-get install iptables-persistent; netfilter-persistent save; restart tailscaled—only if you
+  need the documented Tailscale/Proxmox workaround (bridge may not be vmbr0 on every node).
 
 --- Step 6 — tailscale up ---
   Gate: "n" skips. If "y": Tailscale hostname prompt—empty input uses this node's FQDN
@@ -82,7 +88,8 @@ Failure behavior
 --- Step 7 — Post-startup (Ceph noout off after boot) ---
   y = install; ? = show explanation and post-startup-proc.sh in less, then 7.1 confirm; n = skip.
   Symlinks into /usr/local/bin and /etc/systemd/system; daemon-reload; enable/start service.
-  Startup hook runs ceph osd unset noout (via post-startup-proc.sh) after boot.
+  Startup hook runs ceph osd unset noout after boot; on the main node (7.2) it may also
+  send WoL to other cluster nodes via pvenode wakeonlan.
   7.2: if this node is the "main" node, writes /etc/default/pve-main-node with the machine hostname.
 
 --- Step 8 — Pre-shutdown (Ceph noout before power-off) ---
@@ -106,3 +113,16 @@ Failure behavior
   Installs iptables-persistent and runs netfilter-persistent save. IPv4 INPUT only;
   validate with https://<tailscale-ip>:8006 vs public IP. Proxmox datacenter/node firewall
   can add defense-in-depth if you mirror ACCEPT-before-DROP there.
+
+--- Step 11 — Proxmox Web UI TLS via Tailscale ---
+  Reference: https://tailscale.com/docs/integrations/proxmox
+  Gate: you must answer "y" to 11. QUESTION (this is the main cluster node) or the
+  entire step is skipped — certificate setup is intended for one designated primary host.
+  If "y", 11.1 asks whether to run tailscale cert + pvenode cert set (writes certs under
+  /var/lib/papita-tailscale-pve-cert, restarts API proxy). Requires tailscale (steps 5–6),
+  jq (step 1), and pvenode.
+  Optional 11.2: installs /usr/local/sbin/papita-pve-tailscale-cert-renew.sh and
+  /etc/cron.d/papita-pve-tailscale-cert; 11.2.1 prompts for five cron time fields (empty
+  uses default 0 */12 * * *, as in Tailscale’s Proxmox doc). Alternative from Tailscale
+  (not scripted here): Serve
+  proxy to localhost:8006 for HTTPS on 443 — see the same integration page.

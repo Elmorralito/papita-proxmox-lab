@@ -136,3 +136,104 @@ rm -rf /etc/pve/nodes/<NODE_NAME>
 > - ** Never Power On Again:** Do not reconnect the removed node to the network while it still has its old PVE configuration, as it could conflict with the existing cluster.
 > - **Reusing the Node:** If you want to use the removed hardware as a standalone server or rejoin it as a "new" node, it is strongly recommended to reinstall Proxmox VE from scratch.
 > - **SSH Keys:** You may want to manually remove the old node's keys from /etc/pve/priv/authorized_keys to keep your security configuration clean.
+
+## refresh vmbr0 ip address proxmox
+
+To refresh or change the vmbr0 IP address in Proxmox, edit /etc/network/interfaces to update the IP, subnet, and gateway, then update /etc/hosts to match. Apply changes by running ifdown vmbr0 && ifup vmbr0, or restart the network service/reboot. The GUI method (System > Network) is generally preferred.
+
+### Method 1: Command Line Interface (CLI) - Recommended
+
+1. **Edit Network Configuration:** Open the file using vi or nano:
+
+   ```bash
+   nano /etc/network/interfaces
+   ```
+
+   Update the address, netmask, and gateway under the vmbr0 section.
+
+2. **Edit Hosts File:** Ensure the hostname points to the new IP:
+
+   ```bash
+   nano /etc/hosts
+   ```
+
+   Change the old IP to the new IP.
+
+3. **Apply Changes:** Restart the networking service or reboot:
+
+   ```bash
+   systemctl restart networking
+   # OR
+   reboot now
+   ```
+
+   **Optional:** If connectivity fails, clear the ARP cache on your router.
+
+4. **Stop PVE Services:** Run on all nodes to prevent conflicts:
+
+   ```bash
+   systemctl stop pve-cluster corosync
+   ```
+
+5. **Start Local Mode:** Run on the node you are editing:
+
+   ```bash
+   pmxcfs -l
+   ```
+
+6. **Edit File:** Edit `/etc/pve/corosync.conf` to update the IP addresses of the nodes and increase `config_version`.
+
+7. Restart Services:
+
+   ```bash
+   killall pmxcfs
+   systemctl start pve-cluster
+   ```
+
+8. Reboot all nodes.
+
+### Method 2: Web Interface (GUI)
+
+1. Go to the Proxmox GUI, select your node, and click System > Network.
+2. Select **vmbr0** and click Edit.
+3. Update the IPv4/CIDR and Gateway fields.
+4. Click OK to save.
+5. Click Apply Configuration at the top.
+
+#### Important Considerations
+
+- **IP Conflict:** Make sure the new IP is not already in use.
+- **Gateway:** Ensure the gateway is correct for the new subnet.
+- **Cluster Node:** If in a cluster, update the IP in /etc/pve/corosync.conf if necessary, though the GUI usually handles this better.
+- **Loss of Connectivity:** Changing the IP will break current browser sessions. Reconnect using the new IP address.
+
+> [!NOTE]
+> Accessing the web interface via `https://< new-IP >:8006`.
+
+## [pfSense] When installing pfSense as Firewall and network traffic manager for VMs
+
+After installing and initial configuration:
+
+> [!WARNING]
+> If there is no connection to the web GUI or ping from external endpoints to the WAN IP
+
+It's possible that the IP filtering from the pfSense's firewall is blocking WAN external incoming connections to the Web GUI.
+
+The **solution** is to modify the file `/cf/conf/config.xml` from console and using `vi` to add the following:
+
+```xml
+<!--in section <system> add.. -->
+      <disablefilter>1</disablefilter>
+```
+
+Finally, reboot the VM and reconfigure the network interfaces if necessary.
+
+> [!TIP]
+> Default credentials on web GUI:
+>
+> - **username:** `admin`
+> - **password:** `pfsense`
+
+## [pfSense] Connect with Tailscale
+
+**Walkthrough:** [Link here...](https://davidisaksson.dev/posts/tailscale-on-pfsense/)

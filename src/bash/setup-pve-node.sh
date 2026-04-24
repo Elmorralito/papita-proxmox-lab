@@ -30,6 +30,8 @@ fi
 APT_DEPENDENCIES_LIST="${SCRIPT_DIR}/apt-dependencies.list"
 START_FROM_STEP=0
 DEFAULT_CRONTAB_SCHEDULE="0 4 * * 6"
+# Tailscale Proxmox cert renewal cron (step 11.2); five fields only — user/command appended by script.
+DEFAULT_TAILSCALE_PVE_CERT_CRON_SCHEDULE="0 */12 * * *"
 # paste -sd, avoids a trailing comma from tr '\n' ',' (empty tag after last newline).
 DEFAULT_SUBNET_ROUTES="$(
     sed '/^[[:space:]]*$/d' "${SCRIPT_DIR}/misc/tailscale/default.gateways.list" | paste -sd, -
@@ -55,11 +57,12 @@ confirm_pve_setup() {
 8. Setup Pre-shutdown procedure
 9. Remove PVE subscription alert
 10. Restrict Proxmox web UI (8006) to Tailscale only
+11. Proxmox Web UI: Tailscale-issued TLS certificate (HTTPS 8006)
 
   Usage: at the "Input:" prompt, enter h, help, ?, usage, -h, or --help to open the full manual in less (q to quit), then choose again.
 EOF
     while true; do
-        prompt_pve_start confirm
+        prompt_pve_start confirm 11
         if [[ "$confirm" == "__USAGE__" ]]; then
             usage_setup_pve_node || log WARN "Usage manual could not be shown (see message above)."
             continue
@@ -101,26 +104,21 @@ setup_apt_config() {
         return 0
     fi
 
-    prompt_until_yn "1. QUESTION: Setup APT configuration? (y/n): " confirm
+    prompt_until_ynet "1. QUESTION: Setup APT configuration? (y/n, e or t to exit setup): " confirm
 
     if [ "$confirm" != "y" ]; then
         log INFO "Skipping APT configuration..."
         return 0
     fi
-    log INFO "Setting up APT configuration..."
-    if [[ ! -d /etc/apt/sources.list.d/ ]]; then
-        log WARN "/etc/apt/sources.list.d/ directory not found. Creating..."
-        cat <<EOF > /etc/apt/sources.list
-deb http://ftp.debian.ord/debian stretch main contrib
-
-deb http://download.proxmox.com/debian/pve stretch pve-no-subscription
-
-deb http://security.debian.org strech/updates main contrib
-
+    log INFO "Setting up APT repositories..."
+    cat <<EOF > /etc/apt/sources.list
+deb http://deb.debian.org/debian bookworm main contrib non-free non-free-firmware
+deb http://security.debian.org/debian-security bookworm-security main contrib non-free non-free-firmware
+deb http://deb.debian.org/debian bookworm-updates main contrib non-free non-free-firmware
 EOF
-    else
+    if [[ -d /etc/apt/sources.list.d/ ]]; then
         log INFO "/etc/apt/sources.list.d/ directory found."
-        log INFO "Chanding APT repositories..."
+        log INFO "Changing APT repositories..."
         log INFO "pve-no-subscription repository..."
         cat <<EOF > /etc/apt/sources.list.d/pve-no-subscription.sources
 Types: deb
@@ -192,7 +190,8 @@ EOF
 }
 
 # -----------------------------------------------------------------------------
-# Hibernate: set swappiness, logind, mask sleep targets. On failure return to main.
+# Hibernate: low swappiness (server-ish); disable sleep via sleep.conf + logind (no masked
+# sleep targets—masks can stall or confuse shutdown, blocking clean S5 needed for WoL).
 # -----------------------------------------------------------------------------
 setup_hibernate() {
     if [ "$START_FROM_STEP" -gt 2 ]; then
@@ -200,7 +199,7 @@ setup_hibernate() {
         return 0
     fi
 
-    prompt_until_yn "2. QUESTION: Set hibernate off? (y/n): " confirm
+    prompt_until_ynet "2. QUESTION: Set hibernate off? (y/n, e or t to exit setup): " confirm
 
     if [ "$confirm" != "y" ]; then
         return 0
@@ -210,17 +209,37 @@ setup_hibernate() {
 vm.swappiness = 0
 EOF
 
-    log INFO "Setting logind to ignore lid switch..."
-    cat <<EOF >> /etc/systemd/logind.conf
+    log INFO "Disabling suspend/hibernate via systemd sleep.conf (idempotent)..."
+    install -d -m 0755 /etc/systemd/sleep.conf.d
+    cat <<'EOF' > /etc/systemd/sleep.conf.d/99-papita-no-sleep.conf
+[Sleep]
+AllowSuspend=no
+AllowHibernation=no
+AllowHybridSleep=no
+AllowSuspendThenHibernate=no
+EOF
+
+    log INFO "Configuring systemd-logind (drop-in, idempotent)..."
+    install -d -m 0755 /etc/systemd/logind.conf.d
+    rm -f /etc/systemd/logind.conf.d/99-papita-ignore-lidswitch.conf
+    cat <<'EOF' > /etc/systemd/logind.conf.d/99-papita-logind-sleep.conf
+[Login]
+# Do not suspend on lid/keys; lid closed while headless does not power off the node.
 HandleLidSwitch=ignore
 HandleLidSwitchExternalPower=ignore
 HandleLidSwitchDocked=ignore
 HandleSuspendKey=ignore
 HandleHibernateKey=ignore
+# Idle sessions must not try to suspend; power button should reach full poweroff (S5) for WoL.
+IdleAction=ignore
+HandlePowerKey=poweroff
+HandleRebootKey=reboot
 EOF
 
-    log INFO "Masking sleep, suspend, hibernate, and hybrid-sleep targets..."
-    systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
+    log INFO "Removing legacy sleep.target masks (if any) so shutdown is not blocked..."
+    systemctl unmask sleep.target suspend.target hibernate.target hybrid-sleep.target 2>/dev/null || true
+
+    systemctl daemon-reload
     systemctl restart systemd-logind
 
     log INFO "Hibernate configuration is set up. Done."
@@ -237,14 +256,17 @@ setup_wake_on_lan() {
         return 0
     fi
 
-    prompt_until_yn "3. QUESTION: Setup Wake-on-LAN? (y/n): " confirm
+    prompt_until_ynet "3. QUESTION: Setup Wake-on-LAN? (y/n, e or t to exit setup): " confirm
 
     if [ "$confirm" != "y" ]; then
         return 0
     fi
 
     interface=
-    prompt_existing_wol_interface interface
+    if ! prompt_existing_wol_interface interface; then
+        log ERROR "Wake-on-LAN interface prompt aborted."
+        return 1
+    fi
     log INFO "Wake-on-LAN is supported on interface $interface."
     log INFO "Setting up Wake-on-LAN for interface $interface..."
     if ! ethtool -s "${interface}" wol pg; then
@@ -253,12 +275,13 @@ setup_wake_on_lan() {
     fi
     cat <<EOF > /etc/systemd/system/wol.service
 [Unit]
-Description=Wake-on-LAN
-After=network.target
+Description=Wake-on-LAN (${interface})
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/sbin/ethtool -s "${interface}" wol pg
+ExecStart=/usr/sbin/ethtool -s ${interface} wol pg
 
 [Install]
 WantedBy=multi-user.target
@@ -267,9 +290,13 @@ EOF
     systemctl enable wol.service
     systemctl start wol.service
     log INFO "Wake-on-LAN is set up for interface $interface."
-    mac_addr=$(ip link show "$interface" | awk '/ether/ {print $2}')
+    mac_addr=
+    if [[ -r "/sys/class/net/${interface}/address" ]]; then
+        read -r mac_addr < "/sys/class/net/${interface}/address"
+    fi
     if [ -z "$mac_addr" ]; then
         log ERROR "Could not determine MAC address for interface $interface."
+        return 1
     fi
     log INFO "Enabling Wake-on-LAN for MAC address in cluster config..."
     if ! pvenode config set --wakeonlan "$mac_addr"; then
@@ -291,7 +318,7 @@ setup_locales() {
         return 0
     fi
 
-    prompt_until_yn "4. QUESTION: Setup locales? (y/n): " confirm
+    prompt_until_ynet "4. QUESTION: Setup locales? (y/n, e or t to exit setup): " confirm
 
     if [ "$confirm" != "y" ]; then
         return 0
@@ -330,7 +357,7 @@ setup_tailscale() {
         return 0
     fi
 
-    prompt_until_ycn "5. QUESTION: Setup Tailscale? (y/c/n): " confirm
+    prompt_until_ycnet "5. QUESTION: Setup Tailscale? (y/c/n, e or t to exit setup): " confirm
 
     if [ "$confirm" != "y" ] && [ "$confirm" != "c" ]; then
         log INFO "Skipping Tailscale setup..."
@@ -344,17 +371,13 @@ setup_tailscale() {
         log INFO "Tailscale installed."
     fi
     log INFO "Continuing with Tailscale setup..."
-    if [ -d "/etc/sysctl.d" ]; then
-        log INFO "/etc/sysctl.d/ directory found. Setting up Tailscale..."
-        echo 'net.ipv4.ip_forward = 1' | tee -a /etc/sysctl.d/99-tailscale.conf
-        echo 'net.ipv6.conf.all.forwarding = 1' | tee -a /etc/sysctl.d/99-tailscale.conf
-        sysctl -p /etc/sysctl.d/99-tailscale.conf
-    else
-        log INFO "/etc/sysctl.d/ directory not found. Setting up Tailscale..."
-        echo 'net.ipv4.ip_forward = 1' | tee -a /etc/sysctl.conf
-        echo 'net.ipv6.conf.all.forwarding = 1' | tee -a /etc/sysctl.conf
-        sudo sysctl -p /etc/sysctl.conf
-    fi
+    install -d -m 0755 /etc/sysctl.d
+    cat <<'EOF' > /etc/sysctl.d/99-tailscale.conf
+# Papita Proxmox lab: forwarding for Tailscale exit/subnet routes
+net.ipv4.ip_forward = 1
+net.ipv6.conf.all.forwarding = 1
+EOF
+    sysctl -p /etc/sysctl.d/99-tailscale.conf
 
     prompt_until_yn "5.1. QUESTION: Allow Tailscale (100.64.0.0/10) in Proxmox firewall? (y/n): " confirm
 
@@ -368,10 +391,14 @@ setup_tailscale() {
     if [ "$confirm" != "y" ]; then
         return 0
     fi
-    log WARN "Masquerading firewall due to known issue with Tailscale..."
-    iptables -t nat -A POSTROUTING -o vmbr0 -j MASQUERADE
-    apt install iptables-persistent -y
-    netfilter-persistent save -y
+    log WARN "Masquerading firewall due to known issue with Tailscale (outbound interface vmbr0)..."
+    if iptables-save -t nat 2>/dev/null | grep -qF "papita-tailscale-masq-vmbr0"; then
+        log INFO "iptables NAT MASQUERADE rule papita-tailscale-masq-vmbr0 already present; skipping insert."
+    else
+        iptables -t nat -A POSTROUTING -o vmbr0 -m comment --comment "papita-tailscale-masq-vmbr0" -j MASQUERADE
+    fi
+    apt-get install -y iptables-persistent
+    netfilter-persistent save
     log INFO "Restarting tailscaled.service..."
     systemctl restart tailscaled.service
     log INFO "Tailscale is set up. Done."
@@ -419,7 +446,7 @@ init_tailscale() {
         return 0
     fi
 
-    prompt_until_yn "6. QUESTION: Initialize Tailscale? (y/n): " confirm
+    prompt_until_ynet "6. QUESTION: Initialize Tailscale? (y/n, e or t to exit setup): " confirm
 
     if [ "$confirm" != "y" ]; then
         return 0
@@ -488,7 +515,7 @@ setup_post_startup_procedure() {
         return 0
     fi
 
-    prompt_until_yqn "7. QUESTION: Setup post-startup procedure? (y/?/n): " confirm
+    prompt_until_yqnet "7. QUESTION: Setup post-startup procedure? (y/?/n, e or t to exit setup steps): " confirm
     if [ "$confirm" != "y" ] && [ "$confirm" != "?" ]; then
         return 0
     fi
@@ -537,7 +564,7 @@ setup_pre_shutdown_procedure() {
         return 0
     fi
 
-    prompt_until_yqn "8. QUESTION: Setup pre-shutdown procedure? (y/?/n): " confirm
+    prompt_until_yqnet "8. QUESTION: Setup pre-shutdown procedure? (y/?/n, e or t to exit setup steps): " confirm
     if [ "$confirm" != "y" ] && [ "$confirm" != "?" ]; then
         return 0
     fi
@@ -574,7 +601,7 @@ remove_pve_subscription_alert() {
         return 0
     fi
 
-    prompt_until_yn "9. QUESTION: Remove PVE subscription alert? (y/n): " confirm
+    prompt_until_ynet "9. QUESTION: Remove PVE subscription alert? (y/n, e or t to exit setup steps): " confirm
     if [ "$confirm" != "y" ]; then
         log INFO "Skipping PVE subscription alert removal..."
         return 0
@@ -608,7 +635,7 @@ setup_pve_webui_tailscale_only() {
     log WARN "Step 10 adds iptables rules so TCP port 8006 (Proxmox web UI) accepts traffic only from Tailscale (100.64.0.0/10)."
     log WARN "Do NOT enable this until every planned cluster node is connected on Tailscale (and you can reach the UI via Tailscale)."
     log WARN "Otherwise you can lock out non-Tailscale access before the cluster is fully reachable and complicate recovery."
-    prompt_until_yn "10. QUESTION: Apply Tailscale-only restriction for port 8006? (y/n): " confirm
+    prompt_until_ynet "10. QUESTION: Apply Tailscale-only restriction for port 8006? (y/n, e or t to exit setup steps): " confirm
     if [ "$confirm" != "y" ]; then
         log INFO "Skipping Proxmox web UI Tailscale-only restriction..."
         return 0
@@ -637,6 +664,117 @@ setup_pve_webui_tailscale_only() {
 
     log INFO "Step 10 done. Verify: UI via Tailscale https://<tailscale-ip>:8006 ; from public IP it should not connect."
     log WARN "Optional: Datacenter/Node firewall in Proxmox UI can complement this; order ACCEPT before DROP if you mirror rules there."
+    return 0
+}
+
+# -----------------------------------------------------------------------------
+# Step 11: Tailscale-issued TLS certificate for Proxmox Web UI (port 8006).
+# Walkthrough: https://tailscale.com/docs/integrations/proxmox
+# Only runs when the operator confirms this is the main node (single designated place).
+# -----------------------------------------------------------------------------
+setup_pve_tailscale_ui_certificate() {
+    if [ "$START_FROM_STEP" -gt 11 ]; then
+        log INFO "Skipping Proxmox HTTPS certificate via Tailscale..."
+        return 0
+    fi
+
+    log INFO "Step 11 replaces the default self-signed Proxmox UI certificate with one issued via Tailscale (trusted in browsers on your tailnet)."
+    log INFO "Upstream guide: https://tailscale.com/docs/integrations/proxmox"
+
+    prompt_until_ynet "11. QUESTION: Is this the main Proxmox cluster node (enable step 11 certificate setup only here)? (y/n, e or t to exit setup steps): " confirm_main
+    if [ "${confirm_main:-}" != "y" ]; then
+        log INFO "Skipping step 11 — run it on the main node when you want Tailscale-managed TLS for that host's UI."
+        return 0
+    fi
+
+    prompt_until_yn "11.1. QUESTION: Fetch Tailscale certificate and install it with pvenode cert set (restarts API proxy)? (y/n): " confirm
+    if [ "$confirm" != "y" ]; then
+        log INFO "Skipping Proxmox HTTPS certificate via Tailscale..."
+        return 0
+    fi
+
+    if ! command -v tailscale &>/dev/null; then
+        log ERROR "tailscale not found. Complete steps 5–6 first."
+        return 1
+    fi
+    if ! command -v jq &>/dev/null; then
+        log ERROR "jq not found (required for tailscale status --json). Install via step 1 / apt-dependencies.list."
+        return 1
+    fi
+    if ! command -v pvenode &>/dev/null; then
+        log ERROR "pvenode not found. This does not look like a Proxmox VE node."
+        return 1
+    fi
+
+    local cert_dir="/var/lib/papita-tailscale-pve-cert"
+    install -d -m 0700 "$cert_dir"
+
+    local ts_name
+    if ! ts_name="$(tailscale status --json | jq -r '.Self.DNSName | if . == null then empty else .[:-1] end')"; then
+        log ERROR "Failed to read Tailscale status JSON."
+        return 1
+    fi
+    if [[ -z "$ts_name" ]]; then
+        log ERROR "Tailscale DNS name is empty. Is the node logged in (tailscale up)?"
+        return 1
+    fi
+
+    log INFO "Using Tailscale certificate name: ${ts_name}"
+    (
+        set -euo pipefail
+        cd "$cert_dir"
+        tailscale cert "$ts_name"
+        pvenode cert set "${ts_name}.crt" "${ts_name}.key" --force --restart
+    ) || {
+        log ERROR "tailscale cert or pvenode cert set failed."
+        return 1
+    }
+
+    log INFO "Step 11 certificate installed. Open the UI with https://${ts_name}:8006 (or your tailnet MagicDNS name) without the old self-signed warning."
+
+    prompt_until_yn "11.2. QUESTION: Install renewal helper + /etc/cron.d entry (Tailscale-style periodic renew)? (y/n): " confirm_cron
+    if [ "${confirm_cron:-}" != "y" ]; then
+        log INFO "Skipping renewal cron; re-run step 11 or renew manually before certificate expiry."
+        return 0
+    fi
+
+    local cert_renew_schedule=""
+    prompt_crontab_schedule cert_renew_schedule "${DEFAULT_TAILSCALE_PVE_CERT_CRON_SCHEDULE}" \
+        "11.2.1. QUESTION: Renewal cron schedule (five time fields; empty = default ${DEFAULT_TAILSCALE_PVE_CERT_CRON_SCHEDULE}): "
+
+    local renew_script="/usr/local/sbin/papita-pve-tailscale-cert-renew.sh"
+    cat <<'RENEW_EOF' >"${renew_script}.tmp"
+#!/bin/bash
+# Papita: renew Tailscale-issued cert for Proxmox UI (see Tailscale Proxmox integration).
+set -euo pipefail
+CERT_DIR="/var/lib/papita-tailscale-pve-cert"
+cd "$CERT_DIR"
+NAME="$(tailscale status --json | jq -r '.Self.DNSName | if . == null then empty else .[:-1] end')"
+if [[ -z "$NAME" ]]; then
+    echo "[papita-pve-tailscale-cert-renew] empty Tailscale DNS name; abort." >&2
+    exit 1
+fi
+tailscale cert "$NAME"
+pvenode cert set "${NAME}.crt" "${NAME}.key" --force --restart
+RENEW_EOF
+    mv -f "${renew_script}.tmp" "$renew_script"
+    chmod 0755 "$renew_script"
+
+    local cron_file="/etc/cron.d/papita-pve-tailscale-cert"
+    if [[ -f "$cron_file" ]] && grep -qF "papita-pve-tailscale-cert-renew" "$cron_file" 2>/dev/null; then
+        log INFO "Cron entry already present in ${cron_file}; not duplicating."
+    else
+        cat <<EOF >"$cron_file"
+# Papita: renew Proxmox UI cert from Tailscale (step 11).
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+${cert_renew_schedule} root ${renew_script}
+EOF
+        chmod 0644 "$cron_file"
+        log INFO "Installed ${cron_file} (schedule: ${cert_renew_schedule})."
+    fi
+
+    log INFO "Step 11 done."
     return 0
 }
 
@@ -674,6 +812,8 @@ main() {
     remove_pve_subscription_alert || log WARN "PVE subscription alert removal failed; continuing."
 
     setup_pve_webui_tailscale_only || log WARN "Proxmox web UI Tailscale-only restriction failed; continuing."
+
+    setup_pve_tailscale_ui_certificate || log WARN "Proxmox Tailscale UI certificate step failed; continuing."
 
     log WARN "Remember to setup the other PVE nodes in /etc/hosts after setup is complete."
     log INFO "Done."

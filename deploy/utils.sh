@@ -59,10 +59,35 @@ prompt_until_yn() {
     done
 }
 
-# Loop until y, c, or n (Tailscale install vs continue-only).
-prompt_until_ycn() {
+# Loop until y or n (case-insensitive). e/t log and exit the whole script with status 0.
+prompt_until_ynet() {
     local prompt_text="$1"
-    local -n _out_ycn="$2"
+    local -n _out_ynet="$2"
+    local line lowered
+    while true; do
+        read -r -p "$prompt_text" line || return 1
+        line="$(_str_trim "$line")"
+        lowered="${line,,}"
+        case "$lowered" in
+            y | n)
+                _out_ynet="$lowered"
+                return 0
+                ;;
+            e | t)
+                log INFO "Exiting setup."
+                exit 0
+                ;;
+            *)
+                log WARN "Please enter y (yes), n (no), or e/t (exit setup)."
+                ;;
+        esac
+    done
+}
+
+# Loop until y, c, or n (Tailscale install vs continue-only).
+prompt_until_ycnet() {
+    local prompt_text="$1"
+    local -n _out_ycnet="$2"
     local line lowered
     while true; do
         read -r -p "$prompt_text" line || return 1
@@ -70,8 +95,12 @@ prompt_until_ycn() {
         lowered="${line,,}"
         case "$lowered" in
             y | c | n)
-                _out_ycn="$lowered"
+                _out_ycnet="$lowered"
                 return 0
+                ;;
+            e | t)
+                log INFO "Exiting setup."
+                exit 0
                 ;;
             *)
                 log WARN "Please enter y (install), c (continue without install), or n (skip)."
@@ -81,9 +110,9 @@ prompt_until_ycn() {
 }
 
 # Loop until y, ?, or n (help vs proceed vs skip).
-prompt_until_yqn() {
+prompt_until_yqnet() {
     local prompt_text="$1"
-    local -n _out_yqn="$2"
+    local -n _out_yqnet="$2"
     local line lowered
     while true; do
         read -r -p "$prompt_text" line || return 1
@@ -91,28 +120,33 @@ prompt_until_yqn() {
         lowered="${line,,}"
         case "$lowered" in
             y)
-                _out_yqn="y"
+                _out_yqnet="y"
                 return 0
                 ;;
             n)
-                _out_yqn="n"
+                _out_yqnet="n"
                 return 0
                 ;;
             '?')
-                _out_yqn="?"
+                _out_yqnet="?"
                 return 0
                 ;;
+            e | t)
+                log INFO "Exiting setup."
+                exit 0
+                ;;
             *)
-                log WARN "Please enter y (yes), ? (help), or n (no)."
+                log WARN "Please enter y (yes), ? (help), n (no), or e/t (exit setup)."
                 ;;
         esac
     done
 }
 
-# Initial PVE menu: empty, y, n, or step 1–10.
+# Initial PVE menu: empty, y, n, or step 1–11.
 prompt_pve_start() {
     local -n _out_start="$1"
-    local line lowered
+    local line lowered max_step
+    max_step="$2"
     while true; do
         read -r -p "Input: " line || return 1
         line="$(_str_trim "$line")"
@@ -131,32 +165,35 @@ prompt_pve_start() {
                 return 0
                 ;;
         esac
-        if [[ "$line" =~ ^[0-9]+$ ]] && ((line >= 1 && line <= 10)); then
+        if [[ "$line" =~ ^[0-9]+$ ]] && ((line >= 1 && line <= max_step)); then
             _out_start="$line"
             return 0
         fi
-        log WARN "Enter y, n, h/help/?/usage/-h/--help for usage, a step number (1–10), or leave empty to start from the beginning."
+        log WARN "Enter y, n, h/help/?/usage/-h/--help for usage, a step number (1-${max_step}), or leave empty to start from the beginning."
     done
 }
 
-# Crontab line: empty -> default; otherwise must match schedule pattern.
+# Crontab line: empty -> default; otherwise five time fields (step/user/command added separately by caller).
+# Third argument, if set, is the full read -p prompt string (include trailing space if desired).
 prompt_crontab_schedule() {
     local -n _out_cron="$1"
     local default_sched="$2"
+    local prompt_msg="${3:-1.2. QUESTION: Define upgrade CRONTAB schedule: }"
     local line
     while true; do
-        read -r -p "1.2. QUESTION: Define upgrade CRONTAB schedule: " line || return 1
+        read -r -p "${prompt_msg}" line || return 1
         line="$(_str_trim "$line")"
         if [ -z "$line" ]; then
             _out_cron="$default_sched"
             log INFO "Using default schedule: ${default_sched}"
             return 0
         fi
-        if [[ "$line" =~ ^([0-9\*]+[[:space:]]+){4,5}[0-9\*]+$ ]]; then
+        # Five fields; allow step lists/ranges (e.g. */12, 1-5).
+        if [[ "$line" =~ ^[-,0-9*/]+([[:space:]]+[-,0-9*/]+){4}$ ]]; then
             _out_cron="$line"
             return 0
         fi
-        log WARN "Invalid schedule. Use 5 or 6 cron fields (e.g. 0 4 * * 6 or 0 4 * * * root)."
+        log WARN "Invalid schedule. Enter five cron time fields (e.g. 0 4 * * 6 or 0 */12 * * *)."
     done
 }
 

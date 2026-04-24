@@ -23,6 +23,8 @@ RAW_ARGS=("${@}")
 ACTION="$1"
 shift
 
+check_action_help usage_toolkit "$ACTION"
+
 aws_cli() {
   local cmd="aws $*"
   if [[ -n "${AWS_PROFILE:-}" ]]; then
@@ -77,8 +79,13 @@ run_pytest() {
   log "INFO" "All tests passed."
 }
 
-deploy() {
-  log "INFO" "Starting deployment to '${ENV}' environment..."
+deploy_proxmox() {
+  log "INFO" "Starting deployment to Proxmox on environment: ${ENV}..."
+  run_command 1 "${PROJECT_PATH}/deploy/proxmox.sh ${TEMP_PROXMOX_ACTION:-"setup-node"} --ip-address ${TEMP_IP_ADDRESS} --hostname ${TEMP_HOSTNAME} ${RAW_ARGS[*]:1}"
+}
+
+deploy_terraform() {
+  log "INFO" "Starting deployment to Terraform on environment: ${ENV}..."
   run_command 1 "${PROJECT_PATH}/deploy/terraform.sh ${TF_ACTION:-"deploy"} --env ${ENV} --profile ${AWS_PROFILE} --region ${AWS_REGION} ${RAW_ARGS[*]:1}"
 }
 
@@ -165,6 +172,18 @@ while [[ "$#" -gt 0 ]]; do
     TEMP_TF_ACTION="$2"
     shift 2
     ;;
+  --proxmox-action | -pa)
+    TEMP_PROXMOX_ACTION="$2"
+    shift 2
+    ;;
+  --ip-address | -ip)
+    TEMP_IP_ADDRESS="$2"
+    shift 2
+    ;;
+  --hostname | -hn)
+    TEMP_HOSTNAME="$2"
+    shift 2
+    ;;
   --help | -h)
     usage_toolkit
     ;;
@@ -245,8 +264,11 @@ test)
   build
   run_pytest
   ;;
-terraform | deploy )
-  deploy
+proxmox|deploy_proxmox)
+  deploy_proxmox
+  ;;
+terraform|deploy_terraform)
+  deploy_terraform
   ;;
 none)
   log "INFO" "Doing noting..."

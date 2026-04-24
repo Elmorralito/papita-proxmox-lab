@@ -82,6 +82,8 @@ EOM
 ACTION="$1"
 shift
 
+check_action_help usage_terraform "$ACTION"
+
 while [[ "$#" -gt 0 ]]; do
     case "$1" in
         --env | --environment | -e)

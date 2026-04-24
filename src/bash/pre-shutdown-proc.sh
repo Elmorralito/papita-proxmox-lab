@@ -2,22 +2,28 @@
 
 set -euo pipefail
 
-# This script is used to perform a pre-shutdown procedure on the node.
-# It is used to ensure that the node is in a safe state before shutdown.
-# It is used to ensure that the node is in a safe state before shutdown.
+# Pre-shutdown hook (systemd ExecStop): set Ceph OSD noout before power-off/reboot so OSDs
+# are not marked out while the node is down. Paired with post-startup-proc.sh (ceph osd unset noout).
 
 # -----------------------------------------------------------------------------
-# Set noout flag to true for ceph cluster
+# Ceph: set noout (paired with post-startup-proc.sh "ceph osd unset noout")
 # -----------------------------------------------------------------------------
 set_noout_flag() {
-    echo "Setting noout flag to true for ceph cluster..."
-    ceph osd set noout true
-    echo "Noout flag set to true for ceph cluster."
+    if ! command -v ceph >/dev/null 2>&1; then
+        echo "INFO: ceph not installed; skipping ceph osd set noout."
+        return 0
+    fi
+    echo "INFO: Setting Ceph OSD noout before shutdown..."
+    if ceph osd set noout; then
+        echo "INFO: Ceph OSD noout set."
+    else
+        echo "WARN: Failed to set Ceph OSD noout (cluster down, no Ceph, or quorum loss); continuing shutdown."
+    fi
     return 0
 }
 
 # -----------------------------------------------------------------------------
-# Main function
+# Main
 # -----------------------------------------------------------------------------
 main() {
     set_noout_flag

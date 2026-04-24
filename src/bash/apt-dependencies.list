@@ -1,14 +1,19 @@
-# REQUIRED DEPS
-git
-vim
+# Packages installed by setup-pve-node.sh step 1 (non-comment lines only; blank lines ignored).
+# Each entry should be used or verified by the setup scripts; add ad-hoc tools below if you want them on every node.
+
+curl
 jq
+locales
 unattended-upgrades
+lm-sensors
+libpve-network-perl
+dnsmasq
 
 # OPTIONAL DEPS
-locales
 build-essential
 debian-keyring
 debian-tag2upload-keyring
 libc-devtools
 libtool
 bison
+frr-pythontools
