@@ -8,6 +8,7 @@ unattended-upgrades
 lm-sensors
 libpve-network-perl
 dnsmasq
+vim
 
 # OPTIONAL DEPS
 build-essential
