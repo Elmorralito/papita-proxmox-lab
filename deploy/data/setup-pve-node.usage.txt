@@ -12,8 +12,9 @@ How to run
     bash src/bash/setup-pve-node.sh
     bash src/bash/setup-pve-node.sh --help    # this manual in a pager, then exit
 
-  Remote (deploy/proxmox.sh copies src/bash/, deploy/utils.sh, deploy/usage.sh, and
-  deploy/setup-pve-node.usage.txt into <target-path>/deploy/, then runs setup-pve-node.sh over SSH):
+  Remote (deploy/proxmox.sh copies src/bash/, deploy/utils.sh, and deploy/usage.sh into
+  <target-path>/deploy/, plus deploy/docs/setup-pve-node.usage.txt into .../deploy/docs/,
+  then runs setup-pve-node.sh over SSH):
     ./deploy/proxmox.sh -ip <host> ...
 
 First prompt (after the on-screen step list)

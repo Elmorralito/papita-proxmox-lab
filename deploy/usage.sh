@@ -114,7 +114,7 @@ usage_proxmox() {
 
   ACTION (required, position 1):
     setup-node     Replace <target-path>/deploy with src/bash/, utils.sh, usage.sh,
-                   setup-pve-node.usage.txt; chmod a+rx; run setup-pve-node.sh (TTY allocated).
+                   docs/setup-pve-node.usage.txt; chmod a+rx; run setup-pve-node.sh (TTY allocated).
     get-temp, get-temperature
                    On each cluster member: SSH (env PAPITA_SSH_PASSWORD if needed, else password prompt) and run lm-sensors JSON;
                    print a short temperature table per node.
@@ -156,7 +156,7 @@ EOF
 
 # Interactive setup on the node; shows the manual in a pager and returns (does not exit — for use inside setup-pve-node.sh).
 usage_setup_pve_node() {
-  local usage_file="${PAPITA_DEPLOY_DIR}/setup-pve-node.usage.txt"
+  local usage_file="${PAPITA_DEPLOY_DIR}/docs/setup-pve-node.usage.txt"
   if [[ ! -f "$usage_file" ]]; then
     echo "[ERROR] Missing usage documentation: ${usage_file}" >&2
     return 1
@@ -170,6 +170,30 @@ usage_setup_pve_node() {
   else
     cat "$usage_file"
   fi
+}
+
+usage_tailscale_pfsense_lan() {
+  local usage_file="${PAPITA_DEPLOY_DIR}/data/tailscale-pfsense-lan.usage.txt"
+  if [[ ! -f "$usage_file" ]]; then
+    echo "[ERROR] Missing usage documentation: ${usage_file}" >&2
+    if [[ "${1:-}" == "0" ]]; then
+      return 1
+    fi
+    exit 1
+  fi
+  echo -e "${GREEN_TEXT}tailscale-pfsense-lan.sh${NC_TEXT} — full manual (${usage_file})"
+  echo "Pager: use arrow keys / PgUp / PgDn; q quits."
+  if [[ -t 1 ]] && command -v less >/dev/null 2>&1; then
+    less -- "$usage_file"
+  elif [[ -t 1 ]] && command -v more >/dev/null 2>&1; then
+    more "$usage_file"
+  else
+    cat "$usage_file"
+  fi
+  if [[ "${1:-}" == "0" ]]; then
+    return 0
+  fi
+  exit 1
 }
 
 check_action_help() {

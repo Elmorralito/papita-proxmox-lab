@@ -48,9 +48,10 @@ setup_node() {
     scp "${SSH_COMMON_OPTS[@]}" -r "$PROJECT_PATH/src/bash" "$TARGET_USERNAME@$IP_ADDRESS:$TARGET_REMOTE_PATH/deploy"
     scp "${SSH_COMMON_OPTS[@]}" "$PROJECT_PATH/deploy/utils.sh" "$TARGET_USERNAME@$IP_ADDRESS:$TARGET_REMOTE_PATH/deploy/utils.sh"
     scp "${SSH_COMMON_OPTS[@]}" "$PROJECT_PATH/deploy/usage.sh" "$TARGET_USERNAME@$IP_ADDRESS:$TARGET_REMOTE_PATH/deploy/usage.sh"
-    scp "${SSH_COMMON_OPTS[@]}" "$PROJECT_PATH/deploy/setup-pve-node.usage.txt" "$TARGET_USERNAME@$IP_ADDRESS:$TARGET_REMOTE_PATH/deploy/setup-pve-node.usage.txt"
+    ssh "${SSH_COMMON_OPTS[@]}" "$TARGET_USERNAME@$IP_ADDRESS" mkdir -p "${TARGET_REMOTE_PATH}/deploy/docs"
+    scp "${SSH_COMMON_OPTS[@]}" "$PROJECT_PATH/deploy/docs/setup-pve-node.usage.txt" "$TARGET_USERNAME@$IP_ADDRESS:$TARGET_REMOTE_PATH/deploy/docs/setup-pve-node.usage.txt"
 
-    log "INFO" "Deployed src/bash/, utils.sh, usage.sh, and setup-pve-node.usage.txt to $IP_ADDRESS:$TARGET_REMOTE_PATH/deploy."
+    log "INFO" "Deployed src/bash/, utils.sh, usage.sh, and docs/setup-pve-node.usage.txt to $IP_ADDRESS:$TARGET_REMOTE_PATH/deploy."
 
     ssh "${SSH_COMMON_OPTS[@]}" "$TARGET_USERNAME@$IP_ADDRESS" chmod -R a+rx "${TARGET_REMOTE_PATH}/deploy"
 
