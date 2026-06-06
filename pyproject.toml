@@ -1,7 +1,3 @@
-[virtualenvs]
-in-project = true
-path = ".venv"
-
 [tool.poetry]
 name = "proxmox-aws-cluster"
 version = "2026.0.0"

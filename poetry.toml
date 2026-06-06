@@ -1,0 +1,7 @@
+[virtualenvs]
+in-project = true
+prompt = "papita-proxmox-lab-py{python_version}"
+
+[virtualenvs.options]
+no-pip = true
+system-site-packages = false
