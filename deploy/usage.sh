@@ -114,8 +114,8 @@ usage_proxmox() {
 
   ACTION (required, position 1):
     setup-node     Replace <target-path>/deploy with src/bash/, src/python/ (→ deploy/python/
-                   with misc/cluster/*.py and data/default.*), utils.sh, usage.sh,
-                   deploy/data/setup-pve-node.usage.txt; chmod a+rx; run setup-pve-node.sh (TTY).
+                   with misc/cluster/*.py and datafiles/default.*), utils.sh, usage.sh,
+                   deploy/docs/setup-pve-node.usage.txt; chmod a+rx; run setup-pve-node.sh (TTY).
     get-temp, get-temperature
                    On each cluster member: SSH (env PAPITA_SSH_PASSWORD if needed, else password prompt) and run lm-sensors JSON;
                    print a short temperature table per node.
@@ -142,7 +142,7 @@ usage_proxmox() {
     1. SSH multiplexing; reuse for scp and later ssh
     2. rm -rf remote <target-path>/deploy; tar-stream src/bash → .../deploy/
        (includes misc/tailscale/); tar-stream src/python → .../deploy/python/
-    3. scp utils.sh, usage.sh, data/setup-pve-node.usage.txt; chmod -R a+rx; verify bundle
+    3. scp utils.sh, usage.sh, docs/setup-pve-node.usage.txt; chmod -R a+rx; verify bundle
     4. ssh -tt: cd deploy && bash setup-pve-node.sh
 
   Other:
@@ -158,7 +158,7 @@ EOF
 
 # Interactive setup on the node; shows the manual in a pager and returns (does not exit — for use inside setup-pve-node.sh).
 usage_setup_pve_node() {
-  local usage_file="${PAPITA_DEPLOY_DIR}/data/setup-pve-node.usage.txt"
+  local usage_file="${PAPITA_DEPLOY_DIR}/docs/setup-pve-node.usage.txt"
   if [[ ! -f "$usage_file" ]]; then
     echo "[ERROR] Missing usage documentation: ${usage_file}" >&2
     return 1
@@ -175,7 +175,7 @@ usage_setup_pve_node() {
 }
 
 usage_tailscale_pfsense_lan() {
-  local usage_file="${PAPITA_DEPLOY_DIR}/data/tailscale-pfsense-lan.usage.txt"
+  local usage_file="${PAPITA_DEPLOY_DIR}/docs/tailscale-pfsense-lan.usage.txt"
   if [[ ! -f "$usage_file" ]]; then
     echo "[ERROR] Missing usage documentation: ${usage_file}" >&2
     if [[ "${1:-}" == "0" ]]; then

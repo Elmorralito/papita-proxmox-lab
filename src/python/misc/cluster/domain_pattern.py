@@ -52,7 +52,7 @@ def load_zone_suffixes(path: Path | None) -> tuple[str, ...]:
 
     Args:
         path: Optional path to a zone-suffix list (e.g.
-            ``default.domain.suffixes.list``); may be ``None``.
+            ``datafiles/default.domain.suffixes.list``); may be ``None``.
 
     Returns:
         Tuple of zone label strings, never empty (falls back to defaults).

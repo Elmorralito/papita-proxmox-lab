@@ -70,7 +70,7 @@ setup_node() {
         src/bash/misc/tailscale/default.lan.routes.list \
         src/bash/misc/tailscale/default.tags.list \
         src/python/misc/cluster/discover_hosts.py \
-        src/python/data/default.hosts.list; do
+        src/python/datafiles/default.hosts.list; do
         if [[ ! -f "$PROJECT_PATH/$required_local_file" ]]; then
             log "ERROR" "Local bundle incomplete: missing ${required_local_file}"
             exit 255
@@ -90,10 +90,10 @@ setup_node() {
         __pycache__ '*.pyc'
     scp "${SSH_COMMON_OPTS[@]}" "$PROJECT_PATH/deploy/utils.sh" "$TARGET_USERNAME@$IP_ADDRESS:$TARGET_REMOTE_PATH/deploy/utils.sh"
     scp "${SSH_COMMON_OPTS[@]}" "$PROJECT_PATH/deploy/usage.sh" "$TARGET_USERNAME@$IP_ADDRESS:$TARGET_REMOTE_PATH/deploy/usage.sh"
-    ssh "${SSH_COMMON_OPTS[@]}" "$TARGET_USERNAME@$IP_ADDRESS" mkdir -p "${TARGET_REMOTE_PATH}/deploy/data"
-    scp "${SSH_COMMON_OPTS[@]}" "$PROJECT_PATH/deploy/data/setup-pve-node.usage.txt" "$TARGET_USERNAME@$IP_ADDRESS:$TARGET_REMOTE_PATH/deploy/data/setup-pve-node.usage.txt"
+    ssh "${SSH_COMMON_OPTS[@]}" "$TARGET_USERNAME@$IP_ADDRESS" mkdir -p "${TARGET_REMOTE_PATH}/deploy/docs"
+    scp "${SSH_COMMON_OPTS[@]}" "$PROJECT_PATH/deploy/docs/setup-pve-node.usage.txt" "$TARGET_USERNAME@$IP_ADDRESS:$TARGET_REMOTE_PATH/deploy/docs/setup-pve-node.usage.txt"
 
-    log "INFO" "Deployed src/bash/, src/python/ (misc/cluster + data), utils.sh, usage.sh, and data/setup-pve-node.usage.txt to $IP_ADDRESS:$TARGET_REMOTE_PATH/deploy."
+    log "INFO" "Deployed src/bash/, src/python/ (misc/cluster + datafiles), utils.sh, usage.sh, and docs/setup-pve-node.usage.txt to $IP_ADDRESS:$TARGET_REMOTE_PATH/deploy."
 
     ssh "${SSH_COMMON_OPTS[@]}" "$TARGET_USERNAME@$IP_ADDRESS" chmod -R a+rx "${TARGET_REMOTE_PATH}/deploy"
 
@@ -104,7 +104,7 @@ setup_node() {
         misc/tailscale/default.lan.routes.list \
         misc/tailscale/default.tags.list \
         python/misc/cluster/discover_hosts.py \
-        python/data/default.hosts.list; do
+        python/datafiles/default.hosts.list; do
         if ! ssh "${SSH_COMMON_OPTS[@]}" "$TARGET_USERNAME@$IP_ADDRESS" \
             "test -f ${TARGET_REMOTE_PATH}/deploy/${required_deploy_file}"; then
             log "ERROR" "Deploy bundle incomplete on ${IP_ADDRESS}: missing ${required_deploy_file}"

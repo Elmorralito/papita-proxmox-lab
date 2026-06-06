@@ -1,7 +1,0 @@
-# Zone labels tried when step 7.1 domain suffix ends with .* (e.g. oldtimers.*).
-# One label per line; empty line means try the base name alone (oldtimers).
-lan
-local
-internal
-home
-home.arpa

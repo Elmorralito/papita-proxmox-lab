@@ -29,14 +29,14 @@ fi
 
 APT_DEPENDENCIES_LIST="${SCRIPT_DIR}/apt-dependencies.list"
 
-# Python bundle: proxmox.sh copies src/python/ → <deploy>/python/ (misc/cluster + data).
+# Python bundle: proxmox.sh copies src/python/ → <deploy>/python/ (misc/cluster + datafiles).
 _resolve_python_root() {
     local candidate=""
     for candidate in \
         "${SCRIPT_DIR}/python" \
         "${SCRIPT_DIR}/../python" \
         "${REPO_ROOT}/src/python"; do
-        if [[ -d "${candidate}/misc/cluster" && -d "${candidate}/data" ]]; then
+        if [[ -d "${candidate}/misc/cluster" && -d "${candidate}/datafiles" ]]; then
             cd "${candidate}" && pwd
             return 0
         fi
@@ -46,9 +46,9 @@ _resolve_python_root() {
 }
 
 PYTHON_ROOT="$(_resolve_python_root)" || PYTHON_ROOT="${SCRIPT_DIR}/python"
-CLUSTER_HOSTS_LIST="${PYTHON_ROOT}/data/default.hosts.list"
-CLUSTER_HOSTS_REGEX_FILE="${PYTHON_ROOT}/data/default.hosts.regex"
-CLUSTER_ZONE_SUFFIXES_FILE="${PYTHON_ROOT}/data/default.domain.suffixes.list"
+CLUSTER_HOSTS_LIST="${PYTHON_ROOT}/datafiles/default.hosts.list"
+CLUSTER_HOSTS_REGEX_FILE="${PYTHON_ROOT}/datafiles/default.hosts.regex"
+CLUSTER_ZONE_SUFFIXES_FILE="${PYTHON_ROOT}/datafiles/default.domain.suffixes.list"
 DISCOVER_HOSTS_PY="${PYTHON_ROOT}/misc/cluster/discover_hosts.py"
 PAPITA_HOSTS_BLOCK_BEGIN="# BEGIN papita-pve-cluster-hosts"
 PAPITA_HOSTS_BLOCK_END="# END papita-pve-cluster-hosts"
@@ -609,7 +609,7 @@ setup_cluster_hosts() {
     fi
 
     if ! _validate_python_cluster_bundle; then
-        log ERROR "Python cluster bundle incomplete (expected ${PYTHON_ROOT}/misc/cluster/ and ${PYTHON_ROOT}/data/)."
+        log ERROR "Python cluster bundle incomplete (expected ${PYTHON_ROOT}/misc/cluster/ and ${PYTHON_ROOT}/datafiles/)."
         return 1
     fi
 

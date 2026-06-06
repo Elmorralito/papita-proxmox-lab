@@ -78,7 +78,7 @@ namespace_packages = true
 skip = [".gitignore", ".dockerignore"]
 extend_skip = [".md", ".json", ".yaml", ".yml", ".sh"]
 known_first_party = [
-    "python.data",
+    "python.datafiles",
     "python.misc",
 ]
 sections = ["FUTURE", "STDLIB", "THIRDPARTY", "FIRSTPARTY", "LOCALFOLDER"]

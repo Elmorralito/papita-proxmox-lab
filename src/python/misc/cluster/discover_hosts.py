@@ -68,7 +68,8 @@ def load_candidates(path: Path) -> list[str]:
     ``path`` does not exist or is not a regular file.
 
     Args:
-        path: Filesystem path to the candidates list (e.g. ``default.hosts.list``).
+        path: Filesystem path to the candidates list (e.g.
+            ``datafiles/default.hosts.list``).
 
     Returns:
         Ordered list of non-empty hostname strings with comments stripped.
