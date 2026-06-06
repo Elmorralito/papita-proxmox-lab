@@ -77,12 +77,16 @@ namespace_packages = true
 [tool.isort]
 skip = [".gitignore", ".dockerignore"]
 extend_skip = [".md", ".json", ".yaml", ".yml", ".sh"]
-py_version=311
+known_first_party = [
+    "python.data",
+    "python.misc",
+]
+sections = ["FUTURE", "STDLIB", "THIRDPARTY", "FIRSTPARTY", "LOCALFOLDER"]
+py_version = 312
 atomic = true
 profile = "black"
 line_length = 120
 skip_gitignore = true
-
 
 [tool.flake8]
 ignore = ["E203", "W503"]

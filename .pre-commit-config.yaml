@@ -71,6 +71,35 @@ repos:
             "types-requests>=2.32.4.20250913",
           ]
 
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.37.1
+    hooks:
+      - id: yamllint
+        files: "^.*\\.(yaml|yml)$"
+
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.7
+    hooks:
+      - id: actionlint
+        args: ["-color"]
+
+  - repo: https://github.com/econchick/interrogate
+    rev: 1.7.0
+    hooks:
+      - id: interrogate
+        args: ["-c", "pyproject.toml"]
+        files: "^.*/[src|tests]"
+        pass_filenames: false
+        always_run: true
+
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.45.0
+    hooks:
+      - id: markdownlint
+        stages: [pre-commit, manual]
+        args: ["--fix", "--disable", "MD013,MD033,MD041,MD024,MD025"]
+        types_or: [markdown]
+
   # - repo: https://github.com/antonbabenko/pre-commit-terraform
   #   rev: "v1.97.4"
   #   hooks:

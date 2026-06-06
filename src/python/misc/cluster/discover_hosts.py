@@ -1,5 +1,18 @@
 #!/usr/bin/env python3
-"""Resolve cluster peer hostnames into /etc/hosts lines via DNS (step 7)."""
+"""Discover Proxmox cluster peer hostnames via DNS and emit /etc/hosts lines.
+
+Used during PVE node setup (step 7) before ``pvecm`` cluster join. Reads short
+hostnames from a candidates file, expands them into FQDNs using configurable
+domain suffix keywords (see ``domain_pattern``), resolves the first matching
+IPv4 address for each candidate, filters results by domain glob and a caller-
+supplied regex, and prints tab-separated ``/etc/hosts`` entries to stdout.
+
+Each emitted line has the form ``IP\\tFQDN\\tshortname``. Warnings for
+unresolvable names go to stderr. When no hosts match, the process exits with
+code 2.
+
+Public entry point: ``main()`` (also invoked when run as ``__main__``).
+"""
 
 from __future__ import annotations
 
@@ -32,6 +45,15 @@ else:
 
 
 def resolve_ipv4(name: str) -> str | None:
+    """Resolve the first IPv4 address for a hostname or FQDN.
+
+    Args:
+        name: Hostname or fully qualified domain name to look up.
+
+    Returns:
+        Dotted-quad IPv4 address string, or ``None`` when DNS lookup fails or no
+        IPv4 record exists for ``name``.
+    """
     try:
         infos = socket.getaddrinfo(name, None, family=socket.AF_INET, type=socket.SOCK_STREAM)
         return str(infos[0][4][0])
@@ -40,6 +62,17 @@ def resolve_ipv4(name: str) -> str | None:
 
 
 def load_candidates(path: Path) -> list[str]:
+    """Load short hostnames from a newline-delimited candidates file.
+
+    Blank lines and inline ``#`` comments are ignored. Returns an empty list when
+    ``path`` does not exist or is not a regular file.
+
+    Args:
+        path: Filesystem path to the candidates list (e.g. ``default.hosts.list``).
+
+    Returns:
+        Ordered list of non-empty hostname strings with comments stripped.
+    """
     if not path.is_file():
         return []
     lines: list[str] = []
@@ -51,6 +84,21 @@ def load_candidates(path: Path) -> list[str]:
 
 
 def emit_host(ip: str, fqdn: str, seen: set[str]) -> bool:
+    """Print one ``/etc/hosts`` line if the IP/FQDN pair has not been emitted yet.
+
+    Output format: ``{ip}\\t{fqdn}\\t{short}`` where ``short`` is the label before
+    the first dot in ``fqdn``. Duplicate pairs are suppressed using ``seen``.
+
+    Args:
+        ip: Resolved IPv4 address.
+        fqdn: Fully qualified domain name that resolved to ``ip``.
+        seen: Mutable set of already-printed ``"{ip}\\t{fqdn}"`` keys; updated on
+            success.
+
+    Returns:
+        ``True`` if a new line was printed; ``False`` if this pair was skipped as
+        a duplicate.
+    """
     key = f"{ip}\t{fqdn}"
     if key in seen:
         return False
@@ -66,6 +114,23 @@ def resolve_candidate_fqdn(
     zone_suffixes: tuple[str, ...],
     resolver: Callable[[str], str | None],
 ) -> tuple[str | None, str | None]:
+    """Try FQDN variants for a short name until one resolves via ``resolver``.
+
+    Candidate FQDNs are built in order by ``fqdn_candidates`` from ``short``,
+    ``domain``, and ``zone_suffixes``. The first name for which ``resolver``
+    returns a non-empty address wins.
+
+    Args:
+        short: Short hostname or existing FQDN (passed through when dotted).
+        domain: Domain suffix keyword or literal suffix (e.g. ``oldtimers.*``).
+        zone_suffixes: Zone labels used when expanding trailing ``.*`` domains.
+        resolver: Callable that maps a hostname/FQDN to an IPv4 string or
+            ``None`` (typically ``resolve_ipv4``).
+
+    Returns:
+        A ``(fqdn, ip)`` tuple for the first successful lookup, or ``(None, None)``
+        when no candidate resolves.
+    """
     for fqdn in fqdn_candidates(short, domain, zone_suffixes=zone_suffixes):
         ip = resolver(fqdn)
         if ip:
@@ -96,6 +161,22 @@ def _parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    """Run host discovery from CLI arguments and print matching ``/etc/hosts`` lines.
+
+    Parses ``--domain``, ``--pattern``, ``--candidates-file``, optional
+    ``--zone-suffixes-file``, and ``--include-self``. Each candidate from the
+    candidates file is resolved and kept only when its FQDN matches both the
+    domain glob (if any) and ``--pattern``. With ``--include-self``, the local
+    hostname and FQDN are tried once; the first matching self entry is emitted.
+
+    Side effects:
+        Matching host lines are written to stdout. Warnings and errors go to
+        stderr. Uses blocking DNS lookups via ``socket.getaddrinfo``.
+
+    Returns:
+        ``0`` when at least one host line was printed; ``1`` when ``--pattern``
+        is an invalid regex; ``2`` when no hosts resolved after filtering.
+    """
     args = _parse_args()
 
     try:
