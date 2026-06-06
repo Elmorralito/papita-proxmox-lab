@@ -1,0 +1,5 @@
+# Candidate short hostnames for DNS discovery (step 7). One name per line; # comments allowed.
+# FQDN is built as <name>.<domain> unless the line already contains a dot.
+pvenode-001
+pvenode-002
+pvenode-003
