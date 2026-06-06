@@ -1,3 +1,4 @@
+# Tailscale ACL tags for --advertise-tags (one tag per line; # comments allowed).
 tag:private-node
 tag:pve-oldtimers-cluster
 tag:server-node

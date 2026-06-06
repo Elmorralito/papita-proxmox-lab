@@ -25,18 +25,30 @@ papita-proxmox-lab/
 │   ├── toolkit.sh             # Main CLI: build|test|proxmox|terraform + AWS auth
 │   ├── proxmox.sh             # SSH to PVE: setup-node, cluster start/stop, get-temp
 │   ├── terraform.sh           # init → workspace → plan|apply|destroy
-│   ├── utils.sh               # log(), prompts, aws_sso_login, aws_mfa_login, run_command
+│   ├── utils.sh               # log(), prompts (prompt_pve_start, prompt_until_*), AWS auth, run_command
 │   ├── usage.sh               # usage_toolkit, usage_proxmox, usage_terraform, usage_setup_pve_node
-│   └── setup-pve-node.usage.txt
-├── src/bash/                  # Copied to PVE nodes at /root/deploy by proxmox.sh
-│   ├── setup-pve-node.sh      # Interactive 11-step PVE bootstrap (APT, WoL, Tailscale, systemd)
-│   ├── post-startup-proc.sh   # Boot hook: ceph noout unset, WoL peers from main node
-│   ├── pre-shutdown-proc.sh   # Shutdown hook: ceph osd set noout
+│   ├── tailscale-pfsense-lan.sh   # Tailscale ACL + pfSense LAN helper (workstation)
+│   └── data/
+│       ├── setup-pve-node.usage.txt       # PVE setup manual (less during prompts)
+│       └── tailscale-pfsense-lan.usage.txt
+├── src/bash/                  # SCP'd to /root/deploy on PVE by proxmox.sh setup-node
+│   ├── setup-pve-node.sh      # Interactive 17-step PVE bootstrap (PVE_SETUP_LAST_STEP=17)
+│   ├── post-startup-proc.sh   # Boot: quorum wait, ceph noout unset, WoL from main node
+│   ├── pre-shutdown-proc.sh   # Shutdown: optional pvesh stopall, ceph osd set noout
 │   ├── post-startup-proc.service / pre-shutdown-proc.service
-│   ├── apt-dependencies.list
+│   ├── apt-dependencies.list  # Step 1 packages (jq, lm-sensors, chrony, smartmontools, …)
 │   └── misc/tailscale/
 │       ├── default.tags.list      # Tailscale ACL tags (tag:private-node, …)
-│       └── default.gateways.list  # Subnet routes (100.64.0.0/10)
+│       ├── default.gateways.list  # Optional PVE subnet routes (empty; pfSense advertises LAN)
+│       └── default.lan.routes.list  # Main-node fallback LAN route (172.16.0.0/16)
+├── src/python/                # SCP'd to /root/deploy/python on PVE (proxmox.sh setup-node)
+│   ├── misc/cluster/
+│   │   ├── discover_hosts.py      # Step 7: DNS peer discovery → /etc/hosts
+│   │   └── domain_pattern.py      # Wildcard domain suffix keywords (oldtimers.*)
+│   └── data/
+│       ├── default.hosts.list     # Candidate node short names
+│       ├── default.hosts.regex    # FQDN filter regex
+│       └── default.domain.suffixes.list  # Zone labels for .* suffix expansion
 ├── terraform/
 │   ├── environments/          # NOT in git — config.{dev|prod|poc}.tfvars (see .gitignore)
 │   └── plans/
@@ -80,16 +92,38 @@ Required: `-e dev|prod`. Optional: `--env-file`, AWS SSO/MFA flags, `--pre-commi
 | Action | Purpose |
 |--------|---------|
 | `setup-node` | SCP `src/bash/` to node, run `setup-pve-node.sh` |
-| `get-temp` | Cluster-wide temperature via `sensors -j` |
+| `get-temp` | Cluster-wide temperature via `sensors -j` (requires step 5) |
 | `start-cluster` | WoL peer nodes via `pvenode wakeonlan` |
 | `stop-cluster` | Per-node `pvesh stopall` + hypervisor shutdown |
 | `cluster-nodes` / `local-node` | Discovery helpers |
 
-Requires `--ip-address`. SSH: ControlMaster multiplexing; password via `PAPITA_SSH_PASSWORD` or keys.
+Requires `--ip-address`. SSH: ControlMaster multiplexing; password via `PAPITA_SSH_PASSWORD` or keys. Sources `utils.sh` before local prerequisite checks (`jq`, `ssh`, `scp`).
 
 ### PVE setup steps (`setup-pve-node.sh`)
 
-1. APT config → 2. Hibernate → 3. WoL → 4. Locales → 5–6. Tailscale → 7. Post-startup systemd → 8. Pre-shutdown systemd → 9. Remove subscription nag → 10. Restrict UI to Tailscale → 11. Tailscale TLS cert for :8006
+Step skip: `_skip_pve_step N` when `START_FROM_STEP > N`. Menu max: `PVE_SETUP_LAST_STEP` (17).
+
+| Step | Topic |
+|------|--------|
+| 1 | APT/repos, deps, unattended-upgrades, upgrade cron, optional microcode |
+| 2 | Hibernate/sleep off (sysctl, sleep.conf, logind) |
+| 3 | Wake-on-LAN (ethtool, wol.service, pvenode wakeonlan MAC) |
+| 4 | Locales |
+| 5 | lm-sensors (`sensors-detect --auto`; enables `get-temp`) |
+| 6 | chrony NTP (configurable servers) |
+| 7 | `/etc/hosts` cluster peers via `discover_hosts.py` (pre-`pvecm`) |
+| 8 | Tailscale install, sysctl, optional cluster.fw rule, optional NAT masq |
+| 9 | `tailscale up` + optional post-init sanity check (9.4) |
+| 10 | Post-startup systemd (quorum wait, ceph noout unset, main-node WoL) |
+| 11 | Pre-shutdown systemd (optional `pvesh stopall`, ceph noout set) |
+| 12 | Email (postfix + `pvesh` mailto/mailfrom) |
+| 13 | SMART cron (`papita-smart-scan.sh`) |
+| 14 | Enable Proxmox cluster firewall (`cluster.fw` enable: 1) |
+| 15 | Remove PVE subscription nag |
+| 16 | vzdump cron (`papita-vzdump-all.sh`, configurable schedule) |
+| 17 | Tailscale TLS cert for UI :8006 (main node only) |
+
+**Node-installed helpers (when steps run):** `/usr/local/sbin/papita-{smart-scan,vzdump-all,tailscale-cert-renew}.sh`, `/etc/default/papita-{post-startup,pre-shutdown}`, `/etc/cron.d/papita-*`.
 
 ### Terraform (`deploy/terraform.sh`)
 
@@ -127,7 +161,7 @@ terraform/plans/main.tf
 
 ## Conventions for agents
 
-- **Shell:** `set -euo pipefail`; source `deploy/utils.sh` + `deploy/usage.sh`; use `log INFO|WARN|ERROR`.
+- **Shell:** `set -euo pipefail`; source `deploy/utils.sh` + `deploy/usage.sh` before calling `log`; use `log INFO|WARN|ERROR` (or `log "INFO" "…"` in deploy scripts).
 - **Remote deploy path on PVE:** `/root/deploy` (default).
 - **Secrets:** never commit `.tfvars`, `.env`, Tailscale API keys; load via env or `--env-file`.
 - **Python:** dev tooling only today; extend `libs/` + `tests/` when adding packages.

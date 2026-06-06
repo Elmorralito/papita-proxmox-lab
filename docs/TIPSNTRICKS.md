@@ -137,6 +137,272 @@ rm -rf /etc/pve/nodes/<NODE_NAME>
 > - **Reusing the Node:** If you want to use the removed hardware as a standalone server or rejoin it as a "new" node, it is strongly recommended to reinstall Proxmox VE from scratch.
 > - **SSH Keys:** You may want to manually remove the old node's keys from /etc/pve/priv/authorized_keys to keep your security configuration clean.
 
+## Proxmox VE cluster — configuration & troubleshooting
+
+Reference: [Proxmox Cluster Manager](https://pve.proxmox.com/pve-docs/chapter-pvecm.html). This lab uses corosync over the management LAN (typically `ring0_addr` on `vmbr0`).
+
+### How do I delete or destroy an entire cluster?
+
+Proxmox has **no single “delete cluster” action**. You remove members until one node remains, then convert that node to **standalone**, or reinstall hosts you no longer need.
+
+**Before you start**
+
+- Migrate or stop all VMs/CTs on nodes being removed.
+- **Ceph:** destroy OSDs, monitors, and managers on each removed node before `pvecm delnode` (see [Remove node from cluster](#remove-node-from-cluster) above).
+- Disable HA groups and remove any QDevice: `pvecm qdevice remove`.
+- Do not let two separate clusters share the same storage (NFS, Ceph pool, EFS, etc.).
+
+**Remove all peer nodes** (from any remaining online member):
+
+```bash
+pvecm nodes
+pvecm delnode <NODE_NAME>
+# If quorum blocks removal (common on 2-node clusters):
+pvecm expected 1
+pvecm delnode <NODE_NAME>
+# Ghost node in GUI:
+rm -rf /etc/pve/nodes/<NODE_NAME>
+```
+
+**Convert the last node to standalone** (official “separate without reinstalling” flow):
+
+```bash
+systemctl stop pve-cluster corosync
+pmxcfs -l
+rm /etc/pve/corosync.conf
+rm -rf /etc/corosync/*
+killall pmxcfs
+systemctl start pve-cluster
+rm -rf /var/lib/corosync/*
+```
+
+Remove **other** nodes’ directories only (never `rm -rf /etc/pve/nodes` without a specific name — that deletes local VM configs):
+
+```bash
+rm -rf /etc/pve/nodes/<OTHER_NODE_NAME>
+```
+
+**Safest path for removed hardware:** reinstall Proxmox before reusing or joining another cluster.
+
+---
+
+### How do I change cluster configuration?
+
+Cluster settings live in several layers:
+
+| Layer                         | Location                  | Typical changes                                  |
+| ----------------------------- | ------------------------- | ------------------------------------------------ |
+| Membership & corosync network | `/etc/pve/corosync.conf`  | Node IPs, links, quorum                          |
+| Shared cluster state          | `/etc/pve/` (pmxcfs)      | Storage, users, firewall, HA                     |
+| Datacenter options            | Web GUI → Datacenter      | Permissions, cluster firewall                    |
+| Per-node network              | `/etc/network/interfaces` | `vmbr0` IP (must stay aligned with `ring0_addr`) |
+
+**Inspect current state**
+
+```bash
+pvecm status
+pvecm nodes
+cat /etc/pve/corosync.conf
+corosync-cfgtool -s
+```
+
+**Membership (add/remove nodes)** — use `pvecm`, not manual edits:
+
+```bash
+# On a fresh standalone node joining an existing cluster:
+pvecm add <EXISTING_MEMBER_IP> --link0 <THIS_NODE_RING0_IP>
+
+# Remove a member (from another node):
+pvecm delnode <NODE_NAME>
+```
+
+**Edit corosync network or links** — always edit a copy, increment `config_version`, then replace:
+
+```bash
+cp /etc/pve/corosync.conf /etc/pve/corosync.conf.bak
+cp /etc/pve/corosync.conf /etc/pve/corosync.conf.new
+nano /etc/pve/corosync.conf.new
+# … edit …
+# In totem { }: increment config_version (required)
+mv /etc/pve/corosync.conf.new /etc/pve/corosync.conf
+systemctl status corosync
+journalctl -u corosync -n 30 --no-pager
+# If needed, one node at a time:
+systemctl restart corosync
+```
+
+For **management IP changes** on `vmbr0`, see [refresh vmbr0 ip address proxmox](#refresh-vmbr0-ip-address-proxmox) below — update both `/etc/network/interfaces` and each node’s `ring0_addr` in corosync.
+
+> [!WARNING]
+> Use `pvecm expected 1` only as a **temporary** recovery aid during maintenance. Do not leave it as a permanent production setting.
+
+---
+
+### Can I merge ring1 into ring0 instead of deleting it?
+
+**No.** In corosync/Proxmox, `ring0` (link 0) and `ring1` (link 1) are **separate redundant paths**, not layers of one link. You cannot combine two subnets into a single ring.
+
+| Goal                                 | What to do                                                               |
+| ------------------------------------ | ------------------------------------------------------------------------ |
+| Cluster traffic on one network only  | Keep `ring0_addr`; remove `ring1_addr` and `interface { linknumber: 1 }` |
+| Use the old ring1 network as primary | Set `ring0_addr` to that IP on every node; remove ring1 entirely         |
+| Redundancy across two networks       | Keep both links (current dual-link setup)                                |
+
+Every node in `nodelist` must be updated consistently, and `config_version` must increase.
+
+---
+
+### How do I remove a corosync link (ring1)?
+
+Remove **three** things on **every** node entry and in `totem`:
+
+1. Each `ring1_addr: …` line in `nodelist`
+2. The entire `interface { linknumber: 1 }` block under `totem`
+3. Bump `config_version`
+
+Example result (single link):
+
+```text
+nodelist {
+  node {
+    name: pvenode-001
+    nodeid: 1
+    quorum_votes: 1
+    ring0_addr: 10.0.0.11
+  }
+}
+
+totem {
+  cluster_name: my-cluster
+  config_version: 4
+  interface {
+    linknumber: 0
+  }
+  …
+}
+```
+
+Verify:
+
+```bash
+grep -E 'ring1|linknumber: 1' /etc/pve/corosync.conf   # must print nothing
+corosync-cfgtool -s                                       # only LINK ID 0
+```
+
+Then **regenerate Join Information** in the GUI (Datacenter → Cluster). Old encoded join blobs still reflect the previous link count.
+
+> [!NOTE]
+> `corosync-cfgtool -s` may show only link 0 active while `/etc/pve/corosync.conf` still declares link 1. Join requests are built from the **config file**, not from active link status alone.
+
+---
+
+### Join wizard still asks for Link 1 after I removed ring1
+
+The cluster config still defines two links. Common causes:
+
+| Cause                                                                    | Fix                                                        |
+| ------------------------------------------------------------------------ | ---------------------------------------------------------- |
+| `interface { linknumber: 1 }` left in `totem`                            | Remove the block; bump `config_version`                    |
+| `ring1_addr` still in `nodelist`                                         | Remove from all nodes                                      |
+| `config_version` not incremented                                         | Increase it in `totem`                                     |
+| Edited `/etc/corosync/corosync.conf` instead of `/etc/pve/corosync.conf` | Edit the cluster file under `/etc/pve/`                    |
+| Stale join information pasted in GUI                                     | Copy fresh join info from an existing member after the fix |
+
+Workaround until fixed: provide **both** link IPs on the joining node (`--link0` and `--link1`) if the cluster still expects two networks.
+
+---
+
+### Join fails: “cannot use IP 'X.X.X.X', not found on local node!”
+
+The **Link 0** dropdown must be an IP **assigned to the joining node**, not the peer.
+
+| Field               | Which host                      | Example     |
+| ------------------- | ------------------------------- | ----------- |
+| Peer address        | Existing cluster member         | `10.0.0.11` |
+| Link 0 (local)      | **This** node (the one joining) | `10.0.0.12` |
+| Peer’s link address | Shown by GUI                    | `10.0.0.11` |
+
+On the **joining** node:
+
+```bash
+ip -4 addr show vmbr0
+ping -c 2 <PEER_RING0_IP>
+pvecm add <PEER_IP> --link0 <THIS_NODE_RING0_IP>
+```
+
+If the local IP is missing, configure it in `/etc/network/interfaces` (or System → Network), apply, then retry join.
+
+---
+
+### How do I verify communication between cluster nodes?
+
+Run on any member (or from your workstation using `./deploy/proxmox.sh`).
+
+**Quorum and membership**
+
+```bash
+pvecm status
+pvecm nodes
+```
+
+Healthy: `Quorate: Yes`; all expected nodes listed.
+
+**Corosync links**
+
+```bash
+corosync-cfgtool -s
+```
+
+Healthy: link 0 shows all node IDs as `connected` (not only `localhost`).
+
+**Layer-3 reachability** (use each node’s `ring0_addr` from corosync):
+
+```bash
+ping -c 4 <PEER_RING0_IP>
+```
+
+**Services and API**
+
+```bash
+systemctl is-active corosync pve-cluster
+pvesh get /cluster/resources --type node --output-format json
+journalctl -u corosync -n 50 --no-pager
+```
+
+**pmxcfs sync** (config replicates via cluster filesystem):
+
+```bash
+# On node A
+touch /etc/pve/test-sync-$(hostname)
+# On node B
+ls /etc/pve/test-sync-*
+rm /etc/pve/test-sync-*
+```
+
+**From this repo’s workstation**
+
+```bash
+./deploy/proxmox.sh cluster-nodes --ip-address <ANY_MEMBER_IP>
+./deploy/proxmox.sh get-temp --ip-address <ANY_MEMBER_IP>
+```
+
+`get-temp` SSHs to each member via `ring0_addr` — useful end-to-end check.
+
+**Quick health one-liner**
+
+```bash
+pvecm status && echo && pvecm nodes && echo && corosync-cfgtool -s
+```
+
+| Symptom                                   | Likely cause                                                                     |
+| ----------------------------------------- | -------------------------------------------------------------------------------- |
+| Not quorate                               | Node down, firewall blocking corosync, wrong `ring0_addr`                        |
+| Link shows only `localhost`               | Peer offline or UDP blocked between ring0 IPs                                    |
+| Quorate but node red in GUI               | `pve-cluster` / `pveproxy` issue on that host                                    |
+| `/etc/pve/corosync.conf` differs per node | Corosync/pmxcfs split — fix links before editing cluster config on one node only |
+
+---
+
 ## refresh vmbr0 ip address proxmox
 
 To refresh or change the vmbr0 IP address in Proxmox, edit /etc/network/interfaces to update the IP, subnet, and gateway, then update /etc/hosts to match. Apply changes by running ifdown vmbr0 && ifup vmbr0, or restart the network service/reboot. The GUI method (System > Network) is generally preferred.
@@ -209,6 +475,160 @@ To refresh or change the vmbr0 IP address in Proxmox, edit /etc/network/interfac
 
 > [!NOTE]
 > Accessing the web interface via `https://< new-IP >:8006`.
+
+## Fedora VM — shared clipboard on Proxmox VE
+
+Copy/paste between your workstation and a Fedora desktop VM requires a **guest agent** inside the VM and the correct **display / clipboard** settings on the Proxmox host. Clipboard sharing only works through a **graphical session** (GNOME, KDE, etc.) — not through the serial / xterm.js console.
+
+There are two practical approaches:
+
+| Approach      | Console                                        | Best for                                                                                  |
+| ------------- | ---------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| **A — noVNC** | Proxmox web UI → Console → noVNC               | Quick access without installing a client; clipboard button appears in the noVNC toolbar   |
+| **B — SPICE** | Proxmox web UI → Console → SPICE → Virt-Viewer | Daily use: smoother video, auto-resize, USB redirection, reliable bidirectional clipboard |
+
+Both paths use the same Fedora guest packages. Pick one clipboard backend on the host — do not mix SPICE clipboard with `clipboard=vnc` unless you intend to replace the default SPICE clipboard ([PVE admin guide — Display](https://pve.proxmox.com/pve-docs/pve-admin-guide.html#qm_display)).
+
+**References:**
+
+- [Proxmox VE — SPICE wiki](https://pve.proxmox.com/wiki/SPICE)
+- [Proxmox VE admin guide — Display / VNC clipboard](https://pve.proxmox.com/pve-docs/pve-admin-guide.html#qm_display)
+- [Fedora — spice-vdagent package](https://packages.fedoraproject.org/pkgs/spice-vdagent/spice-vdagent/)
+- [GNOME Boxes — guest tools (spice-vdagent)](https://help.gnome.org/gnome-boxes/install-guest-tools.html)
+
+### Step 1 — Install guest agents in the Fedora VM
+
+On the **Fedora guest** (Workstation or KDE Spin), install the QEMU guest agent and SPICE vdagent:
+
+```bash
+sudo dnf install -y qemu-guest-agent spice-vdagent
+sudo systemctl enable --now qemu-guest-agent spice-vdagentd
+```
+
+`spice-vdagent` has two parts:
+
+- **`spice-vdagentd`** — system daemon (socket-activated; enable with the command above).
+- **`spice-vdagent`** — per-session agent; starts automatically on GNOME/KDE via `/etc/xdg/autostart/spice-vdagent.desktop` after you log into a graphical desktop.
+
+Verify both are running **after logging in** (not at the GDM login screen):
+
+```bash
+systemctl is-active qemu-guest-agent spice-vdagentd
+pgrep -a spice-vdagent    # expect /usr/bin/spice-vdagent in your user session
+```
+
+Reboot the VM once after the first install:
+
+```bash
+sudo reboot
+```
+
+> [!NOTE]
+> On **Fedora 43+**, `spice-vdagent` ≥ 0.23.0 fixes GNOME autostart issues ([RHBZ#2394505](https://bugzilla.redhat.com/show_bug.cgi?id=2394505)). On older releases, if clipboard still fails under GNOME, update the package or log out and back in after install.
+
+### Step 2A — noVNC clipboard (web console only)
+
+Use this when you want copy/paste from the **built-in Proxmox noVNC panel** without Virt-Viewer.
+
+1. On a **PVE node shell**, enable the VNC clipboard for the VM (replace `101` with your VMID):
+
+   ```bash
+   # Works with default VGA; virtio or qxl are also fine
+   qm set 101 -vga virtio,clipboard=vnc
+   ```
+
+   You can use the default display type instead of `virtio`:
+
+   ```bash
+   qm set 101 -vga std,clipboard=vnc
+   ```
+
+2. **Shut down and cold-start** the VM (or reboot from inside the guest) so QEMU picks up the new `qemu-vdagent` device.
+
+3. Open **VM → Console → noVNC** in the Proxmox web UI.
+
+4. Use the **clipboard icon** in the noVNC toolbar to paste text from your browser session into the VM (and copy out where supported).
+
+> [!WARNING]
+> **Live migration:** VMs with `clipboard=vnc` use the `qemu-vdagent` device. Live migration is only supported when the VM runs **QEMU machine version ≥ 10.1** ([admin guide](https://pve.proxmox.com/pve-docs/pve-admin-guide.html#qm_display)). Check **VM → Options → QEMU version** before migrating.
+
+### Step 2B — SPICE clipboard (Virt-Viewer — recommended)
+
+Use this for the most reliable bidirectional clipboard and better desktop integration.
+
+#### On the Proxmox host (VM hardware)
+
+1. **VM → Hardware → Display → Edit**
+   - **Graphic card:** `SPICE` (QXL) — default recommendation; or `SPICE (virtio-vga)` if QXL misbehaves on your desktop environment.
+   - **Memory:** at least **32 MiB** for high resolutions ([SPICE wiki](https://pve.proxmox.com/wiki/SPICE)).
+2. **Do not** set `clipboard=vnc` if you want the native SPICE clipboard — leave the clipboard option empty so Proxmox adds the SPICE vdagent channel automatically.
+3. Optional: **VM → Hardware → Add → USB Device → SPICE Port** for USB redirection from Virt-Viewer.
+4. Shut down and cold-start the VM.
+
+CLI equivalent:
+
+```bash
+qm set 101 -vga qxl
+# Do NOT add clipboard=vnc for SPICE-native clipboard
+```
+
+#### On your workstation
+
+1. Install **Virt-Viewer** (package `virt-viewer`; provides `remote-viewer`).
+2. In Proxmox: **VM → Console → SPICE** → download the `.vv` file → open with Virt-Viewer.
+3. In Virt-Viewer: **Edit → Preferences** → ensure clipboard sharing is enabled (on by default).
+
+If clipboard is still one-way, launch explicitly:
+
+```bash
+remote-viewer --spice-clipboard=on /path/to/downloaded.vv
+```
+
+### Step 3 — Verify clipboard end-to-end
+
+| Check                  | Command / action                                      | Expected                                      |
+| ---------------------- | ----------------------------------------------------- | --------------------------------------------- |
+| Guest agents installed | `rpm -q qemu-guest-agent spice-vdagent`               | Both packages listed                          |
+| Daemon running         | `systemctl is-active spice-vdagentd qemu-guest-agent` | `active`                                      |
+| Session agent running  | `pgrep -a spice-vdagent`                              | Process owned by your desktop user            |
+| Host → guest           | Copy text on workstation, paste in VM terminal/editor | Text appears                                  |
+| Guest → host           | Copy text in VM, paste on workstation                 | Text appears                                  |
+| noVNC only             | Clipboard toolbar button visible                      | Button present after `clipboard=vnc` + reboot |
+
+Test with a **logged-in desktop session** (e.g. `gedit`, `kate`, or a terminal) — not at the login greeter.
+
+### Wayland vs X11 on Fedora (common pitfall)
+
+`spice-vdagent` integrates with the **X11 clipboard**. Fedora Workstation defaults to **Wayland** (GNOME) or **Wayland** (KDE Plasma 6).
+
+| Guest session                           | Clipboard behaviour                                                        |
+| --------------------------------------- | -------------------------------------------------------------------------- |
+| **X11** (e.g. “GNOME on Xorg” at login) | Generally works with SPICE / noVNC + vdagent                               |
+| **Wayland** (default on current Fedora) | Often **host → guest** works; **guest → host** may fail or be inconsistent |
+
+**Workarounds (try in order):**
+
+1. **Log in to an X11 session** — at GDM/SDDM, choose _GNOME on Xorg_ (or the X11 Plasma session) and retest.
+2. **Update `spice-vdagent`** — Fedora 43+ ships fixes for GNOME autostart; `sudo dnf upgrade spice-vdagent`.
+3. **KDE Klipper** — if using KDE, temporarily disable Klipper; it can intercept clipboard sync ([Proxmox forum — Debian KDE](https://forum.proxmox.com/threads/spice-clipboard-not-working-for-debian-12-kde-vm.163219/)).
+4. **Switch display adapter** — if QXL + SPICE misbehaves, try **virtio-vga** instead of QXL in **VM → Hardware → Display**.
+5. **Wayland bridge (advanced)** — third-party bridges such as [wayland-spice-clipboard-fix](https://github.com/chrisbelson/wayland-spice-clipboard-fix) forward Wayland clipboard → X11 for vdagent; only needed when you must stay on Wayland.
+
+### Quick troubleshooting
+
+| Symptom                                  | Likely cause                               | Fix                                                                     |
+| ---------------------------------------- | ------------------------------------------ | ----------------------------------------------------------------------- |
+| No clipboard button in noVNC             | `clipboard=vnc` not set or VM not rebooted | `qm set <vmid> -vga <type>,clipboard=vnc`; cold-start VM                |
+| Clipboard button present but paste fails | `spice-vdagent` missing or no GUI session  | Install packages (Step 1); log into desktop, not serial console         |
+| SPICE connects but no clipboard          | Session agent not running                  | `pgrep spice-vdagent`; log out/in; on GNOME try Xorg session            |
+| One-way clipboard (in only)              | Wayland guest session                      | Log in with _GNOME on Xorg_ or apply Wayland bridge                     |
+| Guest → host broken on KDE               | Klipper interference                       | Disable Klipper; retry                                                  |
+| Black screen with SPICE                  | Display not set to SPICE or VM off         | **Hardware → Display → SPICE**; boot VM                                 |
+| Resolution does not auto-resize          | vdagent not running or low video memory    | Fix vdagent; increase Display memory (e.g. 32 MiB)                      |
+| Live migrate fails after noVNC clipboard | `qemu-vdagent` on old machine type         | Upgrade QEMU machine version to ≥ 10.1 or remove `clipboard=vnc`        |
+| Mouse offset / no absolute pointer       | USB tablet disabled                        | Ensure **VM → Options → USB Tablet** is enabled (default for SPICE/QXL) |
+
+---
 
 ## [pfSense] When installing pfSense as Firewall and network traffic manager for VMs
 
@@ -377,7 +797,7 @@ Default **Automatic outbound NAT** masquerades LAN traffic to the WAN IP. Usuall
 
 ### Step 9 — Connect pfSense to Tailscale (site-to-site)
 
-This lab uses Tailscale CGNAT space `100.64.0.0/10` on PVE nodes. pfSense joins the same tailnet as a **subnet router**, exposing LAN(s) to remote tailnet devices. PVE nodes can advertise their own routes/tags (see `src/bash/misc/tailscale/`). Site-to-site requires **both** Tailscale ACL grants **and** pfSense/NAT rules.
+This lab uses Tailscale CGNAT space `100.64.0.0/10` on **all** PVE nodes (AWS EFS data plane). pfSense joins the same tailnet as a **subnet router**, advertising **172.16.0.0/16** (gateway **172.16.0.1**). Remote **admin** access uses the **main node** (default **172.16.0.101**) via pfSense subnet route and/or MagicDNS — worker nodes do not advertise routes. Site-to-site requires **both** Tailscale ACL grants **and** pfSense/NAT rules.
 
 **References:**
 
@@ -426,10 +846,11 @@ Tag the pfSense router so ACLs can reference it as a destination (not just by CI
 
 1. **VPN → Tailscale → Settings → Routing**
    - Check **Accept Subnet Routes** (required for site-to-site with PVE/other routers)
-   - **Advertised Routes:** add each LAN CIDR behind pfSense, e.g. `172.16.1.0/24` (this lab's LAN; gateway typically `172.16.1.1`)
+   - **Advertised Routes:** add `172.16.0.0/16` (this lab's LAN; gateway **172.16.0.1**)
    - **Save**
 2. Tailscale admin → pfSense node → **⋯ → Edit route settings** → approve each **Subnet route**
-3. Test from a permitted tailnet device: `ping 172.16.1.101`
+3. Or run `./deploy/tailscale-pfsense-lan.sh approve-routes` / `configure` from the repo root
+4. Test from a permitted tailnet device: `ping 172.16.0.101`
 
 #### 9.5 — Optional: exit node
 
@@ -450,6 +871,8 @@ Open [Access controls → JSON editor](https://login.tailscale.com/admin/acls). 
 ```bash
 export TAILSCALE_API_KEY='tskey-api-...'
 export TAILSCALE_TAILNET='tailf1ad0d.ts.net'
+export LAN_CIDR='172.16.0.0/16'
+export MAIN_PVE_LAN_IP='172.16.0.101'
 ./deploy/tailscale-pfsense-lan.sh configure
 ```
 
@@ -468,18 +891,28 @@ See `./deploy/tailscale-pfsense-lan.sh pfsense-steps` for pfSense WebGUI checkli
   "grants": [
     {
       "src": ["tag:private-node"],
-      "dst": ["172.16.1.0/24"],
+      "dst": ["172.16.0.0/16"],
       "ip": ["*"]
     },
     {
       "src": ["tag:auth-client"],
-      "dst": ["172.16.1.0/24"],
+      "dst": ["172.16.0.0/16"],
       "ip": ["*"]
     },
     {
       "src": ["tag:pfsense-oldtimers-client"],
-      "dst": ["172.16.1.0/24"],
+      "dst": ["172.16.0.0/16"],
       "ip": ["*"]
+    },
+    {
+      "src": ["tag:private-node"],
+      "dst": ["172.16.0.101/32"],
+      "ip": ["tcp:8006", "tcp:22"]
+    },
+    {
+      "src": ["tag:server-node"],
+      "dst": ["172.16.0.101/32"],
+      "ip": ["tcp:443", "tcp:8006", "tcp:22"]
     }
   ]
 }
@@ -487,18 +920,18 @@ See `./deploy/tailscale-pfsense-lan.sh pfsense-steps` for pfSense WebGUI checkli
 
 **Example B — Allow PVE cluster tag ↔ pfSense LAN (bidirectional site-to-site)**
 
-Replace CIDRs with your actual pfSense LAN and PVE management/LAN subnets.
+PVE and pfSense share **172.16.0.0/16** in this lab.
 
 ```json
 {
   "grants": [
     {
       "src": ["tag:pve-oldtimers-cluster"],
-      "dst": ["172.16.50.0/24"],
+      "dst": ["172.16.0.0/16"],
       "ip": ["*"]
     },
     {
-      "src": ["172.16.50.0/24"],
+      "src": ["172.16.0.0/16"],
       "dst": ["tag:pve-oldtimers-cluster"],
       "ip": ["*"]
     }
@@ -513,7 +946,7 @@ Replace CIDRs with your actual pfSense LAN and PVE management/LAN subnets.
   "grants": [
     {
       "src": ["tag:server-node"],
-      "dst": ["172.16.50.0/24"],
+      "dst": ["172.16.0.0/16"],
       "ip": ["tcp:443", "tcp:8006"]
     }
   ]
@@ -528,12 +961,12 @@ Add a **`hosts`** entry for readability, then grant by name:
 {
   "hosts": {
     "admin-laptop": "100.64.17.26",
-    "pfsense-lan": "172.16.50.0/24"
+    "pfsense-lan": "172.16.0.0/16"
   },
   "grants": [
     {
       "src": ["admin-laptop"],
-      "dst": ["172.16.50.0/24"],
+      "dst": ["172.16.0.0/16"],
       "ip": ["*"]
     }
   ]
@@ -554,7 +987,7 @@ Or use the machine's **100.x Tailscale address** directly in `src` without `host
     },
     {
       "src": ["tag:private-node"],
-      "dst": ["172.16.50.0/24"],
+      "dst": ["172.16.0.0/16"],
       "ip": ["*"]
     }
   ]
@@ -570,7 +1003,7 @@ Omit grants entirely or use minimal `acls` to deny by default; add only the gran
 ```json
 "autoApprovers": {
   "routes": {
-    "tag:pfsense-lan-router": ["172.16.50.0/24"],
+    "tag:pfsense-lan-router": ["172.16.0.0/16"],
     "tag:pve-oldtimers-cluster": ["10.0.0.0/24"]
   }
 }
@@ -590,7 +1023,7 @@ Required when LAN hosts must reach tailnet or remote subnets with correct return
 | Field       | Value                                                                   |
 | ----------- | ----------------------------------------------------------------------- |
 | Interface   | Tailscale                                                               |
-| Source      | `172.16.50.0/24` (LAN net or alias)                                     |
+| Source      | `172.16.0.0/16` (LAN net or alias)                                      |
 | Destination | Any                                                                     |
 | Translation | Interface address (or pfSense Tailscale IP `/32` if alias UI is broken) |
 
@@ -598,15 +1031,15 @@ Required when LAN hosts must reach tailnet or remote subnets with correct return
 
 **Firewall → Rules → Tailscale** — add **above** any block rules:
 
-| #   | Action | Protocol | Source            | Destination      | Port | Description                    |
-| --- | ------ | -------- | ----------------- | ---------------- | ---- | ------------------------------ |
-| 1   | Pass   | IPv4 \*  | `100.64.0.0/10`   | `172.16.50.0/24` | \*   | Allow tailnet into pfSense LAN |
-| 2   | Pass   | IPv4 \*  | Tailscale subnets | `LAN net`        | \*   | Alias-based variant            |
+| #   | Action | Protocol | Source            | Destination     | Port | Description                    |
+| --- | ------ | -------- | ----------------- | --------------- | ---- | ------------------------------ |
+| 1   | Pass   | IPv4 \*  | `100.64.0.0/10`   | `172.16.0.0/16` | \*   | Allow tailnet into pfSense LAN |
+| 2   | Pass   | IPv4 \*  | Tailscale subnets | `LAN net`       | \*   | Alias-based variant            |
 
 Create alias **Firewall → Aliases**:
 
 - `TAILNET_ALLOWED` — type **Network(s)**: individual `/32` Tailscale IPs when ACLs allow only specific machines (mirrors ACL `hosts`)
-- `TAILNET_CGNAT` — `100.64.0.0/10` (matches this lab's advertised route in `default.gateways.list`)
+- `TAILNET_CGNAT` — `100.64.0.0/10` (Tailscale CGNAT; not a LAN route to advertise from PVE)
 
 For **tag-scoped access**, pfSense cannot read Tailscale tags — maintain a **`TAILNET_ALLOWED`** alias listing the **100.x addresses** of machines that ACLs permit, and use that alias as **Source** instead of the full `/10`.
 
@@ -623,47 +1056,52 @@ For **tag-scoped access**, pfSense cannot read Tailscale tags — maintain a **`
 
 If a LAN VM must accept traffic **only** from specific tailnet machines (e.g. Proxmox :8006):
 
-| Action | Source            | Destination             | Port     |
-| ------ | ----------------- | ----------------------- | -------- |
-| Pass   | `TAILNET_ALLOWED` | `172.16.50.10` (PVE IP) | TCP 8006 |
-| Block  | `100.64.0.0/10`   | `172.16.50.10`          | TCP 8006 |
+| Action | Source            | Destination               | Port         |
+| ------ | ----------------- | ------------------------- | ------------ |
+| Pass   | `TAILNET_ALLOWED` | `172.16.0.101` (main PVE) | TCP 8006, 22 |
+| Block  | `100.64.0.0/10`   | `<worker PVE LAN IP>`     | TCP 8006     |
 
 Place **Pass** before **Block**. Match ACL grants: if ACL allows only `tag:private-node` machines, list those nodes' 100.x IPs in `TAILNET_ALLOWED`.
 
 ##### Layer 3 — PVE side (this lab)
 
-PVE nodes join with tags/routes from setup (`setup-pve-node.sh`). For site-to-site **to** pfSense LAN:
+Hybrid topology (`setup-pve-node.sh`):
 
-1. PVE advertises its management/LAN subnet (if acting as subnet router)
-2. ACL grant: `tag:pve-oldtimers-cluster` ↔ `172.16.50.0/24` (both directions if needed)
-3. On PVE, Tailscale ACL already controls who can reach `:8006`; pfSense ACL controls who can reach LAN **behind** pfSense
+1. **All nodes:** steps 8–9 — Tailscale client + tags (EFS over tailnet)
+2. **Workers:** answer **n** at 9.0 — no `--advertise-routes` (pfSense advertises `172.16.0.0/16`)
+3. **Main node:** 9.0 **y**, step 10.2 → `/etc/default/pve-main-node`, step 17 Tailscale TLS for `:8006`
+4. Enable step 14 cluster firewall only after confirming Tailscale/management access
+5. Do **not** dual-advertise `172.16.0.0/16` from pfSense and a PVE node
 
 ##### Access matrix (example for this lab)
 
-| Source                        | Destination                 | Enforced by               | pfSense rule (optional mirror)        |
-| ----------------------------- | --------------------------- | ------------------------- | ------------------------------------- |
-| `tag:private-node`            | `172.16.50.0/24`            | Tailscale grant           | Tailscale → LAN pass (100.x in alias) |
-| `tag:pve-oldtimers-cluster`   | `172.16.50.0/24`            | Tailscale grant           | Same                                  |
-| `tag:server-node`             | `172.16.50.0/24:443,8006`   | Tailscale grant (ports)   | LAN rule to specific host ports       |
-| `admin-laptop` (`100.64.x.x`) | `172.16.50.0/24`            | Tailscale grant + `hosts` | Source = `/32` in `TAILNET_ALLOWED`   |
-| `172.16.50.0/24`              | `tag:pve-oldtimers-cluster` | Tailscale grant (return)  | LAN → Tailscale pass + Hybrid NAT     |
-| Any other tailnet member      | `172.16.50.0/24`            | **Denied** (no grant)     | Block or omit pass rule               |
+| Source                        | Destination                 | Enforced by                 | pfSense rule (optional mirror)        |
+| ----------------------------- | --------------------------- | --------------------------- | ------------------------------------- |
+| `tag:private-node`            | `172.16.0.0/16`             | Tailscale grant             | Tailscale → LAN pass (100.x in alias) |
+| `tag:private-node`            | `172.16.0.101:8006,22`      | Tailscale grant             | TAILNET_ALLOWED → main PVE            |
+| `tag:pve-oldtimers-cluster`   | `172.16.0.0/16`             | Tailscale grant             | Same                                  |
+| `tag:server-node`             | `172.16.0.101:443,8006,22`  | Tailscale grant (main only) | LAN rule to main host ports only      |
+| `admin-laptop` (`100.64.x.x`) | `172.16.0.0/16`             | Tailscale grant + `hosts`   | Source = `/32` in `TAILNET_ALLOWED`   |
+| `172.16.0.0/16`               | `tag:pve-oldtimers-cluster` | Tailscale grant (return)    | LAN → Tailscale pass + Hybrid NAT     |
+| Worker 100.x (direct)         | Any                         | **Denied** (no grant)       | N/A — workers not exposed on tailnet  |
+| Any other tailnet member      | `172.16.0.0/16`             | **Denied** (no grant)       | Block or omit pass rule               |
 
 #### 9.7 — Optional: Split DNS for internal hostnames
 
 In [Tailscale admin → DNS](https://login.tailscale.com/admin/dns):
 
-1. **Add nameserver → Custom** → pfSense LAN IP (e.g. `172.16.50.1`)
+1. **Add nameserver → Custom** → pfSense LAN IP (`172.16.0.1`)
 2. **Restrict to domain** (Split DNS) with your internal suffix
 3. Remote clients resolve internal hostnames only if ACLs allow them to reach pfSense DNS (`udp/tcp:53`)
 
 #### 9.8 — Verify ACL + firewall alignment
 
 1. **Tailscale admin → Access controls → Tests** — add test cases for each tag → LAN grant
-2. From a machine in `tag:private-node`: `ping 172.16.50.x` → expect success
+2. From a machine in `tag:private-node`: `ping 172.16.0.101` → expect success
 3. From an **untagged** or **unauthorized** machine: same ping → expect failure
-4. **pfSense → Status → System Logs → Firewall** — confirm pass/block on Tailscale and LAN tabs
-5. **Status → Gateways** — WAN only; no LAN upstream gateway
+4. `./deploy/tailscale-pfsense-lan.sh verify` — ping + HTTPS `:8006` to main node
+5. **pfSense → Status → System Logs → Firewall** — confirm pass/block on Tailscale and LAN tabs
+6. **Status → Gateways** — WAN only; no LAN upstream gateway
 
 ---
 
@@ -671,13 +1109,17 @@ In [Tailscale admin → DNS](https://login.tailscale.com/admin/dns):
 
 | Check                      | Command / location                                     |
 | -------------------------- | ------------------------------------------------------ |
-| LAN clients reach pfSense  | `ping <pfSense-LAN-IP>` from a VM on LAN bridge        |
+| LAN clients reach pfSense  | `ping 172.16.0.1` from a VM on LAN bridge              |
 | LAN clients reach internet | `ping 1.1.1.1` / browse from LAN VM                    |
 | pfSense on tailnet         | Tailscale admin shows pfSense **Connected**            |
-| Subnet route approved      | Admin → Edit route settings → subnet checked           |
-| Remote → LAN host          | `ping <LAN-VM-IP>` from tailnet laptop/phone           |
+| Subnet route approved      | Admin → Edit route settings → `172.16.0.0/16` checked  |
+| Remote → main PVE LAN      | `ping 172.16.0.101` from tailnet laptop                |
+| Remote → Proxmox UI (LAN)  | `https://172.16.0.101:8006` via pfSense subnet route   |
+| Remote → Proxmox UI (TS)   | `https://<main-magicdns>:8006` after step 17 on main   |
 | ACL tag → LAN              | Access controls → Tests; ping from tagged node only    |
 | Unauthorized denied        | Same ping from non-granted machine fails               |
+| EFS from each PVE node     | On each node: `tailscale status`; mount/test EFS NFS   |
+| Toolkit cluster ops        | `./deploy/proxmox.sh -ip 172.16.0.101 get-temp`        |
 | No LAN gateway mistake     | **Status → Gateways** — only WAN gateway; LAN has none |
 | Interface types correct    | **Status → Interfaces** — LAN has no gateway field     |
 
@@ -685,13 +1127,17 @@ In [Tailscale admin → DNS](https://login.tailscale.com/admin/dns):
 
 ### Quick troubleshooting
 
-| Symptom                             | Likely cause                                                         | Fix                                                                                                                                     |
-| ----------------------------------- | -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| LAN clients no internet             | WAN down, DNS, or removed default LAN allow rule                     | Check **Status → Gateways**; restore LAN outbound rule                                                                                  |
-| LAN clients cannot reach pfSense IP | Wrong subnet, bridge, or IP conflict                                 | Verify VM IP/gateway; pfSense LAN IP must be unique on segment                                                                          |
-| `LANGW` gateway down                | Upstream gateway set on LAN                                          | Remove gateway from **Interfaces → LAN**                                                                                                |
-| Tailnet cannot reach LAN VMs        | Subnet route not approved, missing ACL grant, or missing pfSense NAT | Approve routes; add `grants` for src tag → `172.16.1.0/24`; run `./deploy/tailscale-pfsense-lan.sh configure`; Hybrid NAT LAN→Tailscale |
-| Authorized tag still blocked        | ACL grant missing port or wrong CIDR                                 | Check Access controls → Tests; match `172.16.1.0/24` to advertised route (not `172.16.50.0/24`)                                         |
-| Unauthorized machine reaches LAN    | Overly broad ACL or pfSense pass rule for full `100.64.0.0/10`       | Remove broad grant; use tag-scoped grants + `TAILNET_ALLOWED` alias                                                                     |
-| WAN WebGUI unreachable              | Default WAN block (expected)                                         | Access via LAN IP or add controlled WAN allow rule                                                                                      |
-| WAN/LAN same subnet                 | Overlapping ranges                                                   | Re-number LAN to non-overlapping RFC1918 range                                                                                          |
+| Symptom                                         | Likely cause                                                             | Fix                                                                                                                                                                                 |
+| ----------------------------------------------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| LAN clients no internet                         | WAN down, DNS, or removed default LAN allow rule                         | Check **Status → Gateways**; restore LAN outbound rule                                                                                                                              |
+| LAN clients cannot reach pfSense IP             | Wrong subnet, bridge, or IP conflict                                     | Verify VM IP/gateway; pfSense LAN IP must be unique on segment                                                                                                                      |
+| `LANGW` gateway down                            | Upstream gateway set on LAN                                              | Remove gateway from **Interfaces → LAN**                                                                                                                                            |
+| Tailnet cannot reach LAN VMs                    | Subnet route not approved, missing ACL grant, or missing pfSense NAT     | Approve `172.16.0.0/16`; run `./deploy/tailscale-pfsense-lan.sh configure`; Hybrid NAT LAN→Tailscale                                                                                |
+| Authorized tag still blocked                    | ACL grant missing port or wrong CIDR                                     | Check Access controls → Tests; match `172.16.0.0/16` to pfSense advertised route                                                                                                    |
+| Unauthorized machine reaches LAN                | Overly broad ACL or pfSense pass rule for full `100.64.0.0/10`           | Remove broad grant; use tag-scoped grants + `TAILNET_ALLOWED` alias                                                                                                                 |
+| PVE `cluster.fw` parse error `-log n`           | Invalid log token from older setup script                                | Change to `-log nolog`; run `pve-firewall restart`                                                                                                                                  |
+| PVE node lost internet after step 14            | Cluster firewall enabled without `policy_out: ACCEPT` / `OUT ACCEPT`     | Add `policy_out: ACCEPT` under `[OPTIONS]` and `OUT ACCEPT -log nolog` under `[RULES]`, or set `enable: 0` temporarily                                                              |
+| PVE nodes cannot ping on 172.16.x               | Wrong default gateway on dual-homed node (e.g. 192.168.x not 172.16.0.1) | Put `gateway 172.16.0.1` on the 172.16 bridge; verify L2 on same VLAN                                                                                                               |
+| Perl `Setting locale failed` / `LC_CTYPE=UTF-8` | SSH client (macOS/Cursor) sends invalid `LC_CTYPE=UTF-8`                 | Node: `locale-gen en_US.UTF-8`; `update-locale LANG=en_US.UTF-8 LC_CTYPE=en_US.UTF-8`; set sshd `AcceptEnv LANG LANGUAGE` (not `LC_*`); Mac: `SendEnv -LC_CTYPE` in `~/.ssh/config` |
+| WAN WebGUI unreachable                          | Default WAN block (expected)                                             | Access via LAN IP or add controlled WAN allow rule                                                                                                                                  |
+| WAN/LAN same subnet                             | Overlapping ranges                                                       | Re-number LAN to non-overlapping RFC1918 range                                                                                                                                      |

@@ -3,6 +3,7 @@
 GREEN_TEXT='\033[0;32m'
 RED_TEXT='\033[0;31m'
 YELLOW_TEXT='\033[0;33m'
+BLUE_TEXT='\033[0;34m'
 NC_TEXT='\033[0m'
 # No tput: works when TERM is unset (SSH, IDE terminals). SGR bold on/off; does not reset colors.
 BOLD_TEXT='\033[1m'
@@ -18,7 +19,10 @@ log() {
         color="${GREEN_TEXT}"
     elif [[ "${level}" == "WARN" ]]; then
         color="${YELLOW_TEXT}"
+    elif [[ "${level}" == "QUESTION" ]]; then
+        color="${BLUE_TEXT}"
     elif [[ "$level" == "TRACE" ]]; then
+        color="${NC_TEXT}"
         echo -e "$*"
         return
     fi
@@ -38,13 +42,41 @@ _str_trim() {
     printf '%s' "$s"
 }
 
+# Print non-empty, non-comment lines from a list file (# to EOL is a comment).
+# Fails when the file is missing or unreadable.
+list_file_active_lines() {
+    local list_file="$1"
+    if [[ ! -f "$list_file" ]]; then
+        return 1
+    fi
+    sed '/^[[:space:]]*$/d;/^[[:space:]]*#/d' "$list_file"
+}
+
+# Comma-separated active lines (e.g. Tailscale --advertise-routes / --advertise-tags).
+list_file_csv() {
+    list_file_active_lines "$1" | paste -sd, -
+}
+
+# First active line (e.g. a single regex or default value in a .list file).
+list_file_first_line() {
+    list_file_active_lines "$1" | head -n1
+}
+
+# Print prompt in QUESTION color (blue), then read one line into nameref.
+_prompt_read_line() {
+    local prompt_text="$1"
+    local -n _out_var="$2"
+    printf '%b%s%b' "${BLUE_TEXT}" "${prompt_text}" "${NC_TEXT}" >&2
+    read -r _out_var || return 1
+}
+
 # Loop until user enters y or n (case-insensitive). Second arg: name of variable to set.
 prompt_until_yn() {
     local prompt_text="$1"
     local -n _out_yn="$2"
     local line lowered
     while true; do
-        read -r -p "$prompt_text" line || return 1
+        _prompt_read_line "$prompt_text" line || return 1
         line="$(_str_trim "$line")"
         lowered="${line,,}"
         case "$lowered" in
@@ -65,7 +97,7 @@ prompt_until_ynet() {
     local -n _out_ynet="$2"
     local line lowered
     while true; do
-        read -r -p "$prompt_text" line || return 1
+        _prompt_read_line "$prompt_text" line || return 1
         line="$(_str_trim "$line")"
         lowered="${line,,}"
         case "$lowered" in
@@ -90,7 +122,7 @@ prompt_until_ycnet() {
     local -n _out_ycnet="$2"
     local line lowered
     while true; do
-        read -r -p "$prompt_text" line || return 1
+        _prompt_read_line "$prompt_text" line || return 1
         line="$(_str_trim "$line")"
         lowered="${line,,}"
         case "$lowered" in
@@ -115,7 +147,7 @@ prompt_until_yqnet() {
     local -n _out_yqnet="$2"
     local line lowered
     while true; do
-        read -r -p "$prompt_text" line || return 1
+        _prompt_read_line "$prompt_text" line || return 1
         line="$(_str_trim "$line")"
         lowered="${line,,}"
         case "$lowered" in
@@ -142,13 +174,13 @@ prompt_until_yqnet() {
     done
 }
 
-# Initial PVE menu: empty, y, n, or step 1–11.
+# Initial PVE menu: empty, y, n, or step 1–N (N = PVE_SETUP_LAST_STEP in setup-pve-node.sh).
 prompt_pve_start() {
     local -n _out_start="$1"
     local line lowered max_step
     max_step="$2"
     while true; do
-        read -r -p "Input: " line || return 1
+        _prompt_read_line "Input: " line || return 1
         line="$(_str_trim "$line")"
         if [ -z "$line" ]; then
             _out_start=""
@@ -174,14 +206,14 @@ prompt_pve_start() {
 }
 
 # Crontab line: empty -> default; otherwise five time fields (step/user/command added separately by caller).
-# Third argument, if set, is the full read -p prompt string (include trailing space if desired).
+# Third argument, if set, is the full prompt string (include trailing space if desired).
 prompt_crontab_schedule() {
     local -n _out_cron="$1"
     local default_sched="$2"
     local prompt_msg="${3:-1.2. QUESTION: Define upgrade CRONTAB schedule: }"
     local line
     while true; do
-        read -r -p "${prompt_msg}" line || return 1
+        _prompt_read_line "${prompt_msg}" line || return 1
         line="$(_str_trim "$line")"
         if [ -z "$line" ]; then
             _out_cron="$default_sched"
@@ -202,7 +234,7 @@ prompt_existing_wol_interface() {
     local -n _out_if="$1"
     local ifname check_wol
     while true; do
-        read -r -p "3.1. QUESTION: Enter interface name: " ifname || return 1
+        _prompt_read_line "3.1. QUESTION: Enter interface name: " ifname || return 1
         ifname="$(_str_trim "$ifname")"
         if [ -z "$ifname" ]; then
             log WARN "Interface name cannot be empty."
@@ -227,7 +259,7 @@ prompt_locale_field() {
     local prompt_text="$1"
     local -n _out_loc="$2"
     local line
-    read -r -p "$prompt_text" line || return 1
+    _prompt_read_line "$prompt_text" line || return 1
     line="$(_str_trim "$line")"
     _out_loc="$line"
 }
@@ -236,7 +268,7 @@ prompt_locale_field() {
 prompt_line_trimmed() {
     local prompt_text="$1"
     local -n _out_line="$2"
-    read -r -p "$prompt_text" _out_line || return 1
+    _prompt_read_line "$prompt_text" _out_line || return 1
     _out_line="$(_str_trim "$_out_line")"
 }
 

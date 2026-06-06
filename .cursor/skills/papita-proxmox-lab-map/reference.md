@@ -30,14 +30,21 @@ Last aligned to repo tree (~46 tracked files). Gitignored paths listed separatel
 
 ## `deploy/` — Orchestration (run from repo root)
 
-| File                       | Role                                                                                   |
-| -------------------------- | -------------------------------------------------------------------------------------- |
-| `toolkit.sh`               | Main CLI: `build`, `devsync`, `test`, `proxmox`, `terraform`, AWS auth, pre-commit     |
-| `proxmox.sh`               | SSH to PVE: `setup-node`, `get-temp`, `start-cluster`, `stop-cluster`, node discovery  |
-| `terraform.sh`             | Terraform wrapper: init → workspace → plan\|apply\|destroy                             |
-| `utils.sh`                 | Shared helpers: `log`, prompts, `run_command`, `aws_sso_login`, `aws_mfa_login`        |
-| `usage.sh`                 | Help text: `usage_toolkit`, `usage_proxmox`, `usage_terraform`, `usage_setup_pve_node` |
-| `setup-pve-node.usage.txt` | Manual shown via `less` during PVE setup prompts                                       |
+| File                       | Role                                                                                                                                |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `toolkit.sh`               | Main CLI: `build`, `devsync`, `test`, `proxmox`, `terraform`, AWS auth, pre-commit                                                  |
+| `proxmox.sh`               | SSH to PVE: `setup-node` (SCP `src/bash/`, `utils.sh`, `usage.sh`, `data/setup-pve-node.usage.txt`), `get-temp`, cluster start/stop |
+| `terraform.sh`             | Terraform wrapper: init → workspace → plan\|apply\|destroy                                                                          |
+| `utils.sh`                 | Shared helpers: `log`, `prompt_pve_start`, `prompt_until_*`, `prompt_crontab_schedule`, AWS auth, `run_command`                     |
+| `usage.sh`                 | Help text: `usage_toolkit`, `usage_proxmox`, `usage_terraform`, `usage_setup_pve_node`                                              |
+| `tailscale-pfsense-lan.sh` | Workstation helper: Tailscale ACL + pfSense LAN integration                                                                         |
+
+### `deploy/data/`
+
+| File                              | Role                                                 |
+| --------------------------------- | ---------------------------------------------------- |
+| `setup-pve-node.usage.txt`        | Full manual for 17-step PVE setup (shown via `less`) |
+| `tailscale-pfsense-lan.usage.txt` | Usage for `tailscale-pfsense-lan.sh`                 |
 
 ### `toolkit.sh` functions
 
@@ -55,21 +62,56 @@ Last aligned to repo tree (~46 tracked files). Gitignored paths listed separatel
 
 ## `src/bash/` — PVE node scripts (SCP'd to `/root/deploy`)
 
-| File                        | Role                                                                               |
-| --------------------------- | ---------------------------------------------------------------------------------- |
-| `setup-pve-node.sh`         | Interactive 11-step PVE bootstrap (APT, WoL, Tailscale, systemd, UI lockdown, TLS) |
-| `post-startup-proc.sh`      | Boot hook: ceph noout unset, WoL peers from main node                              |
-| `pre-shutdown-proc.sh`      | Shutdown hook: ceph osd set noout                                                  |
-| `post-startup-proc.service` | systemd unit for post-startup hook                                                 |
-| `pre-shutdown-proc.service` | systemd unit for pre-shutdown hook                                                 |
-| `apt-dependencies.list`     | APT packages installed during step 1                                               |
+| File                        | Role                                                                                        |
+| --------------------------- | ------------------------------------------------------------------------------------------- |
+| `setup-pve-node.sh`         | Interactive 17-step PVE bootstrap; `PVE_SETUP_LAST_STEP=17`, `_skip_pve_step`               |
+| `post-startup-proc.sh`      | Boot: quorum wait (`/etc/default/papita-post-startup`), ceph noout unset, WoL               |
+| `pre-shutdown-proc.sh`      | Shutdown: optional `pvesh stopall`, ceph osd set noout (`/etc/default/papita-pre-shutdown`) |
+| `post-startup-proc.service` | systemd unit for post-startup hook                                                          |
+| `pre-shutdown-proc.service` | systemd unit for pre-shutdown hook                                                          |
+| `apt-dependencies.list`     | Step 1 packages: jq, lm-sensors, chrony, smartmontools, postfix, python3, …                 |
+
+### `setup-pve-node.sh` — step index
+
+1 APT · 2 Hibernate · 3 WoL · 4 Locales · 5 lm-sensors · 6 chrony · 7 `/etc/hosts` · 8 Tailscale · 9 `tailscale up` · 10 post-startup · 11 pre-shutdown · 12 email · 13 SMART · 14 firewall enable · 15 subscription nag · 16 vzdump cron · 17 Tailscale TLS
+
+### Node-installed artifacts (when steps enabled)
+
+| Path                                                        | Step     | Role                                 |
+| ----------------------------------------------------------- | -------- | ------------------------------------ |
+| `/usr/local/sbin/papita-smart-scan.sh`                      | 13       | SMART health cron target             |
+| `/usr/local/sbin/papita-vzdump-all.sh`                      | 16       | Backup all VMs/CTs on node           |
+| `/usr/local/sbin/papita-pve-tailscale-cert-renew.sh`        | 17       | Renew UI cert from Tailscale         |
+| `/etc/cron.d/papita-{smart-scan,vzdump-all,tailscale-cert}` | 13/16/17 | Scheduled jobs                       |
+| `/etc/default/papita-post-startup`                          | 10       | `QUORUM_WAIT_SEC`                    |
+| `/etc/default/papita-pre-shutdown`                          | 11       | `ENABLE_STOPALL`, `STOPALL_TIMEOUT`  |
+| `/etc/default/pve-main-node`                                | 10.2     | Main node hostname for WoL           |
+| `/etc/hosts` (marked block)                                 | 7        | `# BEGIN papita-pve-cluster-hosts` … |
 
 ### `src/bash/misc/tailscale/`
 
-| File                    | Role                                               |
-| ----------------------- | -------------------------------------------------- |
-| `default.tags.list`     | Tailscale ACL tags (e.g. `tag:private-node`)       |
-| `default.gateways.list` | Subnet routes advertised (default `100.64.0.0/10`) |
+| File                      | Role                                                           |
+| ------------------------- | -------------------------------------------------------------- |
+| `default.tags.list`       | Tailscale ACL tags (e.g. `tag:private-node`)                   |
+| `default.gateways.list`   | Optional PVE `--advertise-routes` (empty; pfSense handles LAN) |
+| `default.lan.routes.list` | Main-node fallback LAN route (`172.16.0.0/16`)                 |
+
+### `src/python/misc/cluster/`
+
+| File                | Role                                                               |
+| ------------------- | ------------------------------------------------------------------ |
+| `discover_hosts.py` | Step 7 CLI: DNS peer discovery → `/etc/hosts` lines                |
+| `domain_pattern.py` | Wildcard domain suffix keywords (`oldtimers.*`, `*.oldtimers.lan`) |
+
+### `src/python/data/`
+
+| File                           | Role                                                     |
+| ------------------------------ | -------------------------------------------------------- |
+| `default.hosts.list`           | Candidate short hostnames for DNS discovery              |
+| `default.hosts.regex`          | Default FQDN regex (e.g. `^pve(node)?-[0-9]{3}(\..+)?$`) |
+| `default.domain.suffixes.list` | Zone labels expanded for trailing `.*` domain keywords   |
+
+Deployed to `/root/deploy/python/` on PVE nodes (`misc/cluster/` + `data/`).
 
 ---
 
@@ -175,16 +217,19 @@ Active rules live in `.cursor/rules/`.
 
 ## Configuration cross-reference
 
-| Concern                   | Primary file(s)                                               |
-| ------------------------- | ------------------------------------------------------------- |
-| Python lint/format        | `pyproject.toml`, `.pre-commit-config.yaml`                   |
-| Git exclusions            | `.gitignore`                                                  |
-| AWS/Terraform env         | `terraform/environments/config.<env>.tfvars` (local)          |
-| EFS mount path            | `terraform/plans/main.tf` locals → default `/pve`             |
-| Tailscale CIDR for EFS SG | `plan_specific_aws_security_params` → default `100.64.0.0/10` |
-| PVE Tailscale tags/routes | `src/bash/misc/tailscale/default.*.list`                      |
-| SSH to PVE                | `PAPITA_SSH_PASSWORD` env or SSH keys                         |
-| AWS auth in toolkit       | `--aws-sso`, `--aws-mfa`, `--env-file`, `AWS_PROFILE`         |
+| Concern                    | Primary file(s)                                                |
+| -------------------------- | -------------------------------------------------------------- |
+| Python lint/format         | `pyproject.toml`, `.pre-commit-config.yaml`                    |
+| Git exclusions             | `.gitignore`                                                   |
+| AWS/Terraform env          | `terraform/environments/config.<env>.tfvars` (local)           |
+| EFS mount path             | `terraform/plans/main.tf` locals → default `/pve`              |
+| Tailscale CIDR for EFS SG  | `plan_specific_aws_security_params` → default `100.64.0.0/10`  |
+| PVE Tailscale tags/routes  | `src/bash/misc/tailscale/default.*.list`                       |
+| PVE cluster host discovery | `src/python/misc/cluster/` + `src/python/data/default.hosts.*` |
+| PVE setup manual           | `deploy/data/setup-pve-node.usage.txt`                         |
+| PVE step count / skip      | `PVE_SETUP_LAST_STEP`, `_skip_pve_step` in `setup-pve-node.sh` |
+| SSH to PVE                 | `PAPITA_SSH_PASSWORD` env or SSH keys                          |
+| AWS auth in toolkit        | `--aws-sso`, `--aws-mfa`, `--env-file`, `AWS_PROFILE`          |
 
 ---
 

@@ -9,6 +9,10 @@ lm-sensors
 libpve-network-perl
 dnsmasq
 vim
+chrony
+smartmontools
+postfix
+python3
 
 # OPTIONAL DEPS
 build-essential

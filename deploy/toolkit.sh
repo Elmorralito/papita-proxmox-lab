@@ -81,7 +81,15 @@ run_pytest() {
 
 deploy_proxmox() {
   log "INFO" "Starting deployment to Proxmox on environment: ${ENV}..."
-  run_command 1 "${PROJECT_PATH}/deploy/proxmox.sh ${TEMP_PROXMOX_ACTION:-"setup-node"} --ip-address ${TEMP_IP_ADDRESS} --hostname ${TEMP_HOSTNAME} ${RAW_ARGS[*]:1}"
+  local proxmox_cmd=(
+    "${PROJECT_PATH}/deploy/proxmox.sh"
+    "${TEMP_PROXMOX_ACTION:-setup-node}"
+    --ip-address "${TEMP_IP_ADDRESS:-}"
+  )
+  if [[ -n "${TEMP_HOSTNAME:-}" ]]; then
+    proxmox_cmd+=(--hostname "${TEMP_HOSTNAME}")
+  fi
+  run_command 1 "${proxmox_cmd[*]}"
 }
 
 deploy_terraform() {

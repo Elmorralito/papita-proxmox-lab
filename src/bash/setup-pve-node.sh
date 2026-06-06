@@ -28,17 +28,70 @@ else
 fi
 
 APT_DEPENDENCIES_LIST="${SCRIPT_DIR}/apt-dependencies.list"
+
+# Python bundle: proxmox.sh copies src/python/ → <deploy>/python/ (misc/cluster + data).
+_resolve_python_root() {
+    local candidate=""
+    for candidate in \
+        "${SCRIPT_DIR}/python" \
+        "${SCRIPT_DIR}/../python" \
+        "${REPO_ROOT}/src/python"; do
+        if [[ -d "${candidate}/misc/cluster" && -d "${candidate}/data" ]]; then
+            cd "${candidate}" && pwd
+            return 0
+        fi
+    done
+    printf '%s\n' "${SCRIPT_DIR}/python"
+    return 1
+}
+
+PYTHON_ROOT="$(_resolve_python_root)" || PYTHON_ROOT="${SCRIPT_DIR}/python"
+CLUSTER_HOSTS_LIST="${PYTHON_ROOT}/data/default.hosts.list"
+CLUSTER_HOSTS_REGEX_FILE="${PYTHON_ROOT}/data/default.hosts.regex"
+CLUSTER_ZONE_SUFFIXES_FILE="${PYTHON_ROOT}/data/default.domain.suffixes.list"
+DISCOVER_HOSTS_PY="${PYTHON_ROOT}/misc/cluster/discover_hosts.py"
+PAPITA_HOSTS_BLOCK_BEGIN="# BEGIN papita-pve-cluster-hosts"
+PAPITA_HOSTS_BLOCK_END="# END papita-pve-cluster-hosts"
+PVE_SETUP_LAST_STEP=17
 START_FROM_STEP=0
 DEFAULT_CRONTAB_SCHEDULE="0 4 * * 6"
-# Tailscale Proxmox cert renewal cron (step 11.2); five fields only — user/command appended by script.
+# Tailscale Proxmox cert renewal cron (step 17.2); five fields only — user/command appended by script.
 DEFAULT_TAILSCALE_PVE_CERT_CRON_SCHEDULE="0 */12 * * *"
-# paste -sd, avoids a trailing comma from tr '\n' ',' (empty tag after last newline).
-DEFAULT_SUBNET_ROUTES="$(
-    sed '/^[[:space:]]*$/d' "${SCRIPT_DIR}/misc/tailscale/default.gateways.list" | paste -sd, -
-)"
-DEFAULT_TAGS="\"$(
-    sed '/^[[:space:]]*$/d' "${SCRIPT_DIR}/misc/tailscale/default.tags.list" | paste -sd, -
-)\""
+DEFAULT_NTP_SERVERS="pool.ntp.org"
+DEFAULT_SMART_CRON_SCHEDULE="0 3 1 * *"
+DEFAULT_VZDUMP_CRON_SCHEDULE="0 2 * * 0"
+DEFAULT_STOPALL_TIMEOUT="120"
+DEFAULT_QUORUM_WAIT_SEC="120"
+TAILSCALE_GATEWAYS_LIST="${SCRIPT_DIR}/misc/tailscale/default.gateways.list"
+TAILSCALE_LAN_ROUTES_LIST="${SCRIPT_DIR}/misc/tailscale/default.lan.routes.list"
+TAILSCALE_TAGS_LIST="${SCRIPT_DIR}/misc/tailscale/default.tags.list"
+
+_default_subnet_routes() {
+    list_file_csv "$TAILSCALE_GATEWAYS_LIST" 2>/dev/null || true
+}
+
+_default_lan_subnet_routes() {
+    list_file_csv "$TAILSCALE_LAN_ROUTES_LIST" 2>/dev/null || true
+}
+
+_default_tags() {
+    local tags=""
+    tags="$(list_file_csv "$TAILSCALE_TAGS_LIST" 2>/dev/null || true)"
+    if [[ -n "$tags" ]]; then
+        printf '"%s"' "$tags"
+    fi
+}
+
+# Returns 0 when START_FROM_STEP is past step_num (caller should return 0).
+_skip_pve_step() {
+    local step_num=$1
+    local step_label=$2
+    if (( START_FROM_STEP > step_num )); then
+        log INFO "Skipping ${step_label}..."
+        return 0
+    fi
+    return 1
+}
 
 # -----------------------------------------------------------------------------
 # Confirmation: exit script if user declines
@@ -51,18 +104,24 @@ confirm_pve_setup() {
 2. Setup Hibernate
 3. Setup Wake-on-LAN
 4. Setup Locales
-5. Setup Tailscale
-6. Initialize Tailscale
-7. Setup Post-startup procedure
-8. Setup Pre-shutdown procedure
-9. Remove PVE subscription alert
-10. Restrict Proxmox web UI (8006) to Tailscale only
-11. Proxmox Web UI: Tailscale-issued TLS certificate (HTTPS 8006)
+5. Setup lm-sensors (temperature monitoring)
+6. Setup time sync (NTP)
+7. Configure cluster /etc/hosts (DNS discovery, pre-cluster)
+8. Setup Tailscale
+9. Initialize Tailscale
+10. Setup Post-startup procedure
+11. Setup Pre-shutdown procedure
+12. Configure email notifications
+13. Setup SMART disk health monitoring
+14. Enable Proxmox cluster firewall
+15. Remove PVE subscription alert
+16. Configure periodic backup job (vzdump)
+17. Proxmox Web UI: Tailscale-issued TLS certificate (HTTPS 8006)
 
   Usage: at the "Input:" prompt, enter h, help, ?, usage, -h, or --help to open the full manual in less (q to quit), then choose again.
 EOF
     while true; do
-        prompt_pve_start confirm 11
+        prompt_pve_start confirm "${PVE_SETUP_LAST_STEP}"
         if [[ "$confirm" == "__USAGE__" ]]; then
             usage_setup_pve_node || log WARN "Usage manual could not be shown (see message above)."
             continue
@@ -94,15 +153,79 @@ EOF
     fi
 }
 
+_read_default_hosts_regex() {
+    if list_file_first_line "$CLUSTER_HOSTS_REGEX_FILE" 2>/dev/null; then
+        return 0
+    fi
+    echo '^pve.*'
+}
+
+_validate_python_cluster_bundle() {
+    local path missing=0
+    for path in \
+        "$DISCOVER_HOSTS_PY" \
+        "${PYTHON_ROOT}/misc/cluster/domain_pattern.py" \
+        "$CLUSTER_HOSTS_LIST" \
+        "$CLUSTER_HOSTS_REGEX_FILE"; do
+        if [[ ! -f "$path" ]]; then
+            log ERROR "Missing required file: ${path}"
+            missing=1
+        fi
+    done
+    if [[ ! -f "$CLUSTER_ZONE_SUFFIXES_FILE" ]]; then
+        log WARN "Zone suffixes file not found (${CLUSTER_ZONE_SUFFIXES_FILE}); built-in defaults will be used."
+    fi
+    if ! command -v python3 >/dev/null 2>&1; then
+        log ERROR "python3 is required for step 7 host discovery."
+        missing=1
+    fi
+    return "$missing"
+}
+
+_papita_merge_hosts_block() {
+    local block_file="$1"
+    local hosts_path="/etc/hosts"
+    local tmp="${hosts_path}.papita.tmp"
+    if [[ -f "$hosts_path" ]]; then
+        awk -v b="$PAPITA_HOSTS_BLOCK_BEGIN" -v e="$PAPITA_HOSTS_BLOCK_END" '
+            $0 == b { skip=1; next }
+            $0 == e { skip=0; next }
+            !skip { print }
+        ' "$hosts_path" >"$tmp"
+    else
+        : >"$tmp"
+    fi
+    {
+        cat "$tmp"
+        echo "$PAPITA_HOSTS_BLOCK_BEGIN"
+        cat "$block_file"
+        echo "$PAPITA_HOSTS_BLOCK_END"
+    } >"${hosts_path}.new"
+    mv "${hosts_path}.new" "$hosts_path"
+    rm -f "$tmp"
+}
+
+_install_cpu_microcode() {
+    local pkg=""
+    if grep -qiE 'vendor_id[[:space:]]+:[[:space:]]+GenuineIntel' /proc/cpuinfo 2>/dev/null; then
+        pkg="intel-microcode"
+    elif grep -qiE 'vendor_id[[:space:]]+:[[:space:]]+AuthenticAMD' /proc/cpuinfo 2>/dev/null; then
+        pkg="amd64-microcode"
+    else
+        log WARN "Could not detect Intel/AMD CPU; skipping microcode package."
+        return 0
+    fi
+    log INFO "Installing CPU microcode package: ${pkg}"
+    apt-get install -y "$pkg"
+    return 0
+}
+
 # -----------------------------------------------------------------------------
 # APT: sources and upgrades. On failure we exit (do not return to main).
 # -----------------------------------------------------------------------------
 setup_apt_config() {
 
-    if [ "$START_FROM_STEP" -gt 1 ]; then
-        log INFO "Skipping APT configuration..."
-        return 0
-    fi
+    _skip_pve_step 1 "APT configuration" && return 0
 
     prompt_until_ynet "1. QUESTION: Setup APT configuration? (y/n, e or t to exit setup): " confirm
 
@@ -158,7 +281,7 @@ EOF
         log ERROR "${APT_DEPENDENCIES_LIST} not found. Exiting..."
         exit 1
     fi
-    apt_deps=$(grep -vE '^(\s*#|\s*$)' "${APT_DEPENDENCIES_LIST}" | tr '\n' ' ')
+    apt_deps=$(list_file_active_lines "${APT_DEPENDENCIES_LIST}" | tr '\n' ' ')
     log WARN "Installing dependencies: ${apt_deps}"
     log WARN "To modify the dependencies list, edit file: ${APT_DEPENDENCIES_LIST}"
     prompt_until_yn "1.1. QUESTION: Continue to install dependencies? (y/n): " confirm
@@ -186,6 +309,11 @@ EOF
     awk -v cmd="$cron_command" 'index($0, cmd)==0' /etc/crontab > /etc/crontab.tmp && mv /etc/crontab.tmp /etc/crontab
     echo "${crontab_schedule} $cron_command" | tee -a /etc/crontab
 
+    prompt_until_yn "1.3. QUESTION: Install CPU microcode updates (intel-microcode / amd64-microcode)? (y/n): " confirm
+    if [ "$confirm" == "y" ]; then
+        _install_cpu_microcode || log WARN "Microcode package install failed; continuing."
+    fi
+
     log INFO "APT Configuration and auto-upgrades set up. Done."
 }
 
@@ -194,10 +322,7 @@ EOF
 # sleep targets—masks can stall or confuse shutdown, blocking clean S5 needed for WoL).
 # -----------------------------------------------------------------------------
 setup_hibernate() {
-    if [ "$START_FROM_STEP" -gt 2 ]; then
-        log INFO "Skipping Hibernate setup..."
-        return 0
-    fi
+    _skip_pve_step 2 "Hibernate setup" && return 0
 
     prompt_until_ynet "2. QUESTION: Set hibernate off? (y/n, e or t to exit setup): " confirm
 
@@ -251,10 +376,7 @@ EOF
 # -----------------------------------------------------------------------------
 setup_wake_on_lan() {
 
-    if [ "$START_FROM_STEP" -gt 3 ]; then
-        log INFO "Skipping Wake-on-LAN setup..."
-        return 0
-    fi
+    _skip_pve_step 3 "Wake-on-LAN setup" && return 0
 
     prompt_until_ynet "3. QUESTION: Setup Wake-on-LAN? (y/n, e or t to exit setup): " confirm
 
@@ -313,10 +435,7 @@ EOF
 # -----------------------------------------------------------------------------
 setup_locales() {
 
-    if [ "$START_FROM_STEP" -gt 4 ]; then
-        log INFO "Skipping locales setup..."
-        return 0
-    fi
+    _skip_pve_step 4 "locales setup" && return 0
 
     prompt_until_ynet "4. QUESTION: Setup locales? (y/n, e or t to exit setup): " confirm
 
@@ -336,14 +455,203 @@ setup_locales() {
         charset="UTF-8"
     fi
     log INFO "Setting up locale to: ${locale}.${charset}"
-    log INFO "Generating locales: ${locale}.${charset}..."
-    if ! locale-gen "${locale}.${charset}"; then
+    local full_locale="${locale}.${charset}"
+    if [ -f /etc/locale.gen ] && ! grep -qE "^${full_locale}[[:space:]]" /etc/locale.gen; then
+        if grep -qE "^#.*${full_locale}" /etc/locale.gen; then
+            sed -i "s/^#[[:space:]]*${full_locale}/${full_locale}/" /etc/locale.gen
+            log INFO "Enabled ${full_locale} in /etc/locale.gen."
+        fi
+    fi
+    log INFO "Generating locales: ${full_locale}..."
+    if ! locale-gen "${full_locale}"; then
         log ERROR "Failed to generate locale."
         return 1
     fi
-    log INFO "Updating locale: ${locale}.${charset}..."
-    update-locale LANG="${locale}.${charset}"
+    log INFO "Updating locale: ${full_locale}..."
+    # LANG + LC_CTYPE avoids Perl warnings when SSH sends LC_CTYPE=UTF-8 (invalid on Debian).
+    update-locale LANG="${full_locale}" LC_CTYPE="${full_locale}"
+    _papita_install_locale_profile_fix "${full_locale}"
+    _papita_fix_sshd_accept_env_locales
     log INFO "Locales are set up. Done."
+    return 0
+}
+
+# macOS/Cursor SSH often sends LC_CTYPE=UTF-8 (invalid on Debian). profile.d runs after bash
+# warns; rejecting LC_* in sshd AcceptEnv stops the bad value reaching login shells.
+_papita_install_locale_profile_fix() {
+    local full_locale="$1"
+    local dropin="/etc/profile.d/papita-locale-fix.sh"
+    cat <<EOF >"${dropin}"
+# Papita: override invalid LC_CTYPE from some SSH clients (e.g. macOS sends UTF-8).
+case "\${LC_CTYPE:-}" in
+    UTF-8|C.UTF-8|'') export LC_CTYPE=${full_locale} ;;
+esac
+export LANG="\${LANG:-${full_locale}}"
+EOF
+    chmod 0644 "${dropin}"
+    log INFO "Installed ${dropin} (child shells and tools after login)."
+}
+
+_papita_fix_sshd_accept_env_locales() {
+    local sshd_config="/etc/ssh/sshd_config"
+    if [[ ! -f "${sshd_config}" ]]; then
+        return 0
+    fi
+    if grep -qE '^AcceptEnv[[:space:]]+.*LC_\*' "${sshd_config}"; then
+        sed -i -E '/^AcceptEnv[[:space:]]+.*LC_\*/c AcceptEnv LANG LANGUAGE' "${sshd_config}"
+        if systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null; then
+            log INFO "sshd: AcceptEnv LANG LANGUAGE only (ignores client LC_CTYPE=UTF-8)."
+        else
+            log WARN "Could not reload sshd; run: systemctl reload ssh"
+        fi
+    fi
+    return 0
+}
+
+# -----------------------------------------------------------------------------
+# lm-sensors: detect chips and enable monitoring (used by proxmox.sh get-temp).
+# -----------------------------------------------------------------------------
+setup_lm_sensors() {
+    _skip_pve_step 5 "lm-sensors setup" && return 0
+
+    prompt_until_ynet "5. QUESTION: Configure lm-sensors for hardware temperature monitoring? (y/n, e or t to exit setup): " confirm
+    if [ "$confirm" != "y" ]; then
+        return 0
+    fi
+
+    if ! command -v sensors-detect &>/dev/null; then
+        log ERROR "sensors-detect not found. Install lm-sensors via step 1."
+        return 1
+    fi
+
+    log INFO "Running sensors-detect (non-interactive)..."
+    sensors-detect --auto >/var/log/papita-sensors-detect.log 2>&1 || log WARN "sensors-detect returned non-zero; see /var/log/papita-sensors-detect.log."
+
+    if systemctl list-unit-files lm-sensors.service &>/dev/null; then
+        systemctl enable lm-sensors.service
+        systemctl restart lm-sensors.service || systemctl start lm-sensors.service || true
+    fi
+
+    if command -v sensors &>/dev/null && sensors &>/dev/null; then
+        log INFO "lm-sensors is responding. Sample output:"
+        sensors | head -n 20 || true
+    else
+        log WARN "sensors command did not return data yet; a reboot may be required for some modules."
+    fi
+
+    log INFO "lm-sensors setup done."
+    return 0
+}
+
+# -----------------------------------------------------------------------------
+# Time sync: chrony (configurable NTP servers).
+# -----------------------------------------------------------------------------
+setup_time_sync() {
+    _skip_pve_step 6 "time sync setup" && return 0
+
+    prompt_until_ynet "6. QUESTION: Configure time synchronization (chrony)? (y/n, e or t to exit setup): " confirm
+    if [ "$confirm" != "y" ]; then
+        return 0
+    fi
+
+    apt-get install -y chrony
+
+    local ntp_servers=""
+    prompt_line_trimmed "6.1. QUESTION: NTP servers (space-separated; empty = ${DEFAULT_NTP_SERVERS}): " ntp_servers
+    if [ -z "$ntp_servers" ]; then
+        ntp_servers="$DEFAULT_NTP_SERVERS"
+    fi
+
+    install -d -m 0755 /etc/chrony/chrony.conf.d
+    local conf_drop="/etc/chrony/chrony.conf.d/99-papita-ntp.conf"
+    {
+        echo "# Papita PVE setup (step 6)"
+        for srv in $ntp_servers; do
+            echo "pool ${srv} iburst"
+        done
+        echo "makestep 1.0 3"
+        echo "rtcsync"
+    } >"$conf_drop"
+
+    systemctl enable chrony.service
+    systemctl restart chrony.service
+    if command -v chronyc &>/dev/null; then
+        log INFO "chrony tracking:"
+        chronyc tracking 2>/dev/null | head -n 8 || true
+    fi
+    log INFO "Time sync configured (chrony). Servers: ${ntp_servers}"
+    return 0
+}
+
+# -----------------------------------------------------------------------------
+# /etc/hosts: discover cluster peers via DNS before joining a Proxmox cluster.
+# -----------------------------------------------------------------------------
+setup_cluster_hosts() {
+    _skip_pve_step 7 "cluster /etc/hosts setup" && return 0
+
+    prompt_until_ynet "7. QUESTION: Configure /etc/hosts for cluster peers (DNS discovery)? (y/n, e or t to exit setup): " confirm
+    if [ "$confirm" != "y" ]; then
+        return 0
+    fi
+
+    local domain regex discover_out block_file confirm_merge=""
+    domain=""
+    prompt_line_trimmed "7.1. QUESTION: Cluster DNS domain suffix (literal e.g. cluster.home.arpa, or keyword oldtimers.* / *.oldtimers.lan): " domain
+    if [ -z "$domain" ]; then
+        log ERROR "Domain suffix is required for host discovery."
+        return 1
+    fi
+
+    regex="$(_read_default_hosts_regex)"
+    prompt_line_trimmed "7.2. QUESTION: Hostname regex for FQDNs (empty = ${regex}): " regex_input
+    if [ -n "${regex_input:-}" ]; then
+        regex="$regex_input"
+    fi
+
+    if ! _validate_python_cluster_bundle; then
+        log ERROR "Python cluster bundle incomplete (expected ${PYTHON_ROOT}/misc/cluster/ and ${PYTHON_ROOT}/data/)."
+        return 1
+    fi
+
+    block_file="$(mktemp)"
+    local -a discover_zone_args=()
+    if [[ -f "$CLUSTER_ZONE_SUFFIXES_FILE" ]]; then
+        discover_zone_args=(--zone-suffixes-file "$CLUSTER_ZONE_SUFFIXES_FILE")
+    fi
+    if ! discover_out="$(python3 "$DISCOVER_HOSTS_PY" --domain "$domain" --pattern "$regex" \
+        --candidates-file "$CLUSTER_HOSTS_LIST" \
+        "${discover_zone_args[@]}" \
+        --include-self 2>/var/log/papita-discover-hosts.err)"; then
+        log ERROR "Host discovery failed (see /var/log/papita-discover-hosts.err)."
+        if [[ -f /var/log/papita-discover-hosts.err ]]; then
+            cat /var/log/papita-discover-hosts.err >&2
+        fi
+        rm -f "$block_file"
+        return 1
+    fi
+    if [ -z "$discover_out" ]; then
+        log ERROR "Host discovery returned no entries."
+        rm -f "$block_file"
+        return 1
+    fi
+
+    log INFO "Discovered hosts:"
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        log INFO "  ${line}"
+        echo "$line" >>"$block_file"
+    done <<<"$discover_out"
+
+    prompt_until_yn "7.3. QUESTION: Merge these entries into /etc/hosts? (y/n): " confirm_merge
+    if [ "$confirm_merge" != "y" ]; then
+        rm -f "$block_file"
+        log INFO "Skipping /etc/hosts merge."
+        return 0
+    fi
+
+    _papita_merge_hosts_block "$block_file"
+    rm -f "$block_file"
+    log INFO "Cluster hosts block updated in /etc/hosts."
     return 0
 }
 
@@ -352,12 +660,9 @@ setup_locales() {
 # -----------------------------------------------------------------------------
 setup_tailscale() {
 
-    if [ "$START_FROM_STEP" -gt 5 ]; then
-        log INFO "Skipping Tailscale setup..."
-        return 0
-    fi
+    _skip_pve_step 8 "Tailscale setup" && return 0
 
-    prompt_until_ycnet "5. QUESTION: Setup Tailscale? (y/c/n, e or t to exit setup): " confirm
+    prompt_until_ycnet "8. QUESTION: Setup Tailscale? (y/c/n, e or t to exit setup): " confirm
 
     if [ "$confirm" != "y" ] && [ "$confirm" != "c" ]; then
         log INFO "Skipping Tailscale setup..."
@@ -379,14 +684,14 @@ net.ipv6.conf.all.forwarding = 1
 EOF
     sysctl -p /etc/sysctl.d/99-tailscale.conf
 
-    prompt_until_yn "5.1. QUESTION: Allow Tailscale (100.64.0.0/10) in Proxmox firewall? (y/n): " confirm
+    prompt_until_yn "8.1. QUESTION: Allow Tailscale (100.64.0.0/10) in Proxmox firewall? (y/n): " confirm
 
     if [ "$confirm" == "y" ]; then
         setup_proxmox_firewall_tailscale || log WARN "Proxmox firewall rule for Tailscale failed; continuing."
     fi
 
 
-    prompt_until_yn "5.2. QUESTION: Masquerade firewall due to known issue with Tailscale? (y/n): " confirm
+    prompt_until_yn "8.2. QUESTION: Masquerade firewall due to known issue with Tailscale? (y/n): " confirm
 
     if [ "$confirm" != "y" ]; then
         return 0
@@ -408,52 +713,96 @@ EOF
 # Proxmox firewall: allow incoming traffic from Tailscale (100.64.0.0/10).
 setup_proxmox_firewall_tailscale() {
     local tailscale_cidr="100.64.0.0/10"
+    local cluster_lan_cidr="172.16.0.0/16"
     local cluster_fw="/etc/pve/firewall/cluster.fw"
-    local rule_line="IN ACCEPT -source ${tailscale_cidr} -log n"
+    local ts_rule="IN ACCEPT -source ${tailscale_cidr} -log nolog"
+    local lan_rule="IN ACCEPT -source ${cluster_lan_cidr} -log nolog"
+    local out_rule="OUT ACCEPT -log nolog"
 
     if [ ! -d "$(dirname "${cluster_fw}")" ]; then
         log WARN "Proxmox firewall directory not found; skipping Tailscale firewall rule."
         return 1
     fi
 
+    # Repair legacy invalid rule from earlier script versions (-log n is not valid PVE syntax).
+    if [ -f "${cluster_fw}" ] && grep -qF '-log n' "${cluster_fw}"; then
+        sed -i 's/-log n$/-log nolog/g' "${cluster_fw}"
+        log INFO "Fixed invalid -log n in ${cluster_fw} (use -log nolog)."
+    fi
+
     if [ -f "${cluster_fw}" ]; then
         if grep -qF "${tailscale_cidr}" "${cluster_fw}"; then
             log INFO "Proxmox firewall already has a rule for ${tailscale_cidr}."
-            return 0
+        else
+            if ! awk -v rule="${ts_rule}" '/^\[RULES\]$/ { print; print rule; next } 1' "${cluster_fw}" > "${cluster_fw}.tmp" && mv "${cluster_fw}.tmp" "${cluster_fw}"; then
+                log ERROR "Failed to add Tailscale rule to ${cluster_fw}."
+                return 1
+            fi
+            log INFO "Added Proxmox firewall rule: accept IN from ${tailscale_cidr}."
         fi
-        if ! awk -v rule="${rule_line}" '/^\[RULES\]$/ { print; print rule; next } 1' "${cluster_fw}" > "${cluster_fw}.tmp" && mv "${cluster_fw}.tmp" "${cluster_fw}"; then
-            log ERROR "Failed to add Tailscale rule to ${cluster_fw}."
-            return 1
+        if ! grep -qF "${cluster_lan_cidr}" "${cluster_fw}"; then
+            awk -v rule="${lan_rule}" '/^\[RULES\]$/ { print; print rule; next } 1' "${cluster_fw}" > "${cluster_fw}.tmp" && mv "${cluster_fw}.tmp" "${cluster_fw}"
+            log INFO "Added Proxmox firewall rule: accept IN from ${cluster_lan_cidr} (cluster LAN)."
         fi
-        log INFO "Added Proxmox firewall rule: accept IN from ${tailscale_cidr}."
+        if ! grep -qE '^[[:space:]]*OUT ACCEPT' "${cluster_fw}"; then
+            awk -v rule="${out_rule}" '/^\[RULES\]$/ { print; print rule; next } 1' "${cluster_fw}" > "${cluster_fw}.tmp" && mv "${cluster_fw}.tmp" "${cluster_fw}"
+            log INFO "Added Proxmox firewall rule: OUT ACCEPT (preserves internet/cluster egress)."
+        fi
+        if ! grep -qE '^[[:space:]]*policy_out:' "${cluster_fw}"; then
+            if grep -qE '^\[OPTIONS\]' "${cluster_fw}"; then
+                awk '/^\[OPTIONS\]$/ { print; print "policy_out: ACCEPT"; next } 1' "${cluster_fw}" > "${cluster_fw}.tmp" && mv "${cluster_fw}.tmp" "${cluster_fw}"
+                log INFO "Set policy_out: ACCEPT in ${cluster_fw}."
+            fi
+        fi
     else
         cat <<EOF > "${cluster_fw}"
 [OPTIONS]
 enable: 0
+policy_out: ACCEPT
 
 [RULES]
-${rule_line}
+${lan_rule}
+${ts_rule}
+${out_rule}
 EOF
-        log INFO "Created ${cluster_fw} with rule: accept IN from ${tailscale_cidr} (firewall left disabled; set enable: 1 to use)."
+        log INFO "Created ${cluster_fw} with Tailscale + cluster LAN rules (firewall left disabled; set enable: 1 to use)."
     fi
+    return 0
+}
+
+tailscale_post_init_sanity_check() {
+    if ! command -v tailscale &>/dev/null || ! command -v jq &>/dev/null; then
+        log WARN "tailscale or jq missing; skipping sanity check."
+        return 0
+    fi
+    log INFO "--- Tailscale sanity check (step 9.4) ---"
+    tailscale status 2>/dev/null || log WARN "tailscale status failed."
+    local ts_ip ts_dns
+    ts_ip="$(tailscale ip -4 2>/dev/null || true)"
+    ts_dns="$(tailscale status --json 2>/dev/null | jq -r '.Self.DNSName // empty' || true)"
+    log INFO "Tailscale IPv4: ${ts_ip:-<none>}"
+    log INFO "MagicDNS name: ${ts_dns:-<none>}"
+    log INFO "Advertised routes/tags: approve in https://login.tailscale.com/admin/machines if pending."
+    log INFO "Verify SSH: tailscale ssh ${ts_dns%%.} (or use the Tailscale IP)."
     return 0
 }
 
 init_tailscale() {
 
-    if [ "$START_FROM_STEP" -gt 6 ]; then
-        log INFO "Skipping Tailscale initialization..."
-        return 0
-    fi
+    _skip_pve_step 9 "Tailscale initialization" && return 0
 
-    prompt_until_ynet "6. QUESTION: Initialize Tailscale? (y/n, e or t to exit setup): " confirm
+    prompt_until_ynet "9. QUESTION: Initialize Tailscale? (y/n, e or t to exit setup): " confirm
 
     if [ "$confirm" != "y" ]; then
         return 0
     fi
     log INFO "Initializing Tailscale..."
+    log INFO "Topology: all nodes join Tailscale for AWS EFS; remote admin uses the main node + pfSense LAN route."
+    local is_main_node="n"
+    prompt_until_yn "9.0. QUESTION: Is this the designated main Proxmox cluster node (admin hub; step 17 TLS only here)? (y/n): " is_main_node
+
     local ts_host_input=""
-    prompt_line_trimmed "6.1. QUESTION: Specify Tailscale hostname (empty = this node's FQDN): " ts_host_input
+    prompt_line_trimmed "9.1. QUESTION: Specify Tailscale hostname (empty = this node's FQDN): " ts_host_input
 
     if [ -z "$ts_host_input" ]; then
         ts_host_input="$(hostname -f 2>/dev/null || true)"
@@ -467,41 +816,62 @@ init_tailscale() {
         fi
     fi
 
-    hostname=""
+    local ts_hostname_arg=""
     if [ -n "$ts_host_input" ]; then
-        hostname=" --hostname=${ts_host_input}"
+        ts_hostname_arg=" --hostname=${ts_host_input}"
     fi
 
-    prompt_line_trimmed "6.2. QUESTION: Advertise which routes to Tailscale? (e.g. 10.0.0.0/8) or leave empty for default: " subnet_routes
-
-    if [ -n "$subnet_routes" ]; then
-        subnet_routes=" --advertise-routes=${subnet_routes}"
+    subnet_routes=""
+    if [ "$is_main_node" != "y" ]; then
+        log INFO "Worker node: skipping --advertise-routes (pfSense advertises LAN; dual routers cause conflicts)."
     else
-        prompt_until_yn "6.2.1. QUESTION: Use default subnet routes? (y/n): " confirm
-        if [ "$confirm" == "y" ]; then
-            subnet_routes=" --advertise-routes=${DEFAULT_SUBNET_ROUTES}"
+        log INFO "Main node: pfSense should advertise 172.16.0.0/16 — PVE route advertisement is usually unnecessary."
+        prompt_line_trimmed "9.2. QUESTION: Advertise subnet routes on this node? (empty = none; recommended) or CIDR list: " subnet_routes
+        if [ -n "$subnet_routes" ]; then
+            subnet_routes=" --advertise-routes=${subnet_routes}"
+        elif default_routes="$(_default_subnet_routes)" && [ -n "$default_routes" ]; then
+            prompt_until_yn "9.2.1. QUESTION: Use routes from default.gateways.list? (y/n): " confirm
+            if [ "$confirm" == "y" ]; then
+                subnet_routes=" --advertise-routes=${default_routes}"
+            fi
+        else
+            prompt_until_yn "9.2.1. QUESTION: Advertise LAN fallback routes from default.lan.routes.list (main-node backup if pfSense is down)? (y/n): " confirm
+            if [ "$confirm" == "y" ] && lan_routes="$(_default_lan_subnet_routes)" && [ -n "$lan_routes" ]; then
+                subnet_routes=" --advertise-routes=${lan_routes}"
+                log WARN "Only one device should advertise 172.16.0.0/16 — disable pfSense route first if using PVE fallback."
+            fi
         fi
     fi
 
-    prompt_line_trimmed "6.3. QUESTION: Specify tag names to advertise? (e.g. tag:pve-node,tag:...) or leave empty for default: " tag_names
+    prompt_line_trimmed "9.3. QUESTION: Specify tag names to advertise? (e.g. tag:pve-node,tag:...) or leave empty for default: " tag_names
     if [ -n "$tag_names" ]; then
         tag_names="$(_str_trim "$tag_names")"
         while [[ "$tag_names" == *, ]]; do tag_names="${tag_names%,}"; done
         tag_names=" --advertise-tags=${tag_names}"
     else
-        prompt_until_yn "6.3.1. QUESTION: Use default tag names? (y/n): " confirm
-        if [ "$confirm" == "y" ]; then
-            tag_names=" --advertise-tags=${DEFAULT_TAGS}"
+        prompt_until_yn "9.3.1. QUESTION: Use default tag names? (y/n): " confirm
+        if [ "$confirm" == "y" ] && default_tags="$(_default_tags)" && [ -n "$default_tags" ]; then
+            tag_names=" --advertise-tags=${default_tags}"
+        elif [ "$confirm" == "y" ]; then
+            log WARN "Default tags list not found or empty (${TAILSCALE_TAGS_LIST})."
         fi
     fi
 
-    COMMAND="tailscale up --accept-dns --ssh --reset${hostname}${subnet_routes}${tag_names}"
-    log INFO "Running command: ${COMMAND}"
-    bash -c "${COMMAND}" || {
+    local ts_up_command="tailscale up --accept-dns --ssh --reset${ts_hostname_arg}${subnet_routes}${tag_names}"
+    log INFO "Running command: ${ts_up_command}"
+    bash -c "${ts_up_command}" || {
         log ERROR "Failed to initialize Tailscale."
         return 1
     }
-    log INFO "Tailscale initialized. Done."
+    log INFO "Tailscale initialized."
+
+    local confirm_sanity=""
+    prompt_until_yn "9.4. QUESTION: Run Tailscale post-init sanity check (status, IP, DNS name)? (y/n): " confirm_sanity
+    if [ "$confirm_sanity" == "y" ]; then
+        tailscale_post_init_sanity_check || log WARN "Tailscale sanity check had warnings."
+    fi
+
+    log INFO "Tailscale initialization done."
     return 0
 }
 
@@ -510,12 +880,9 @@ init_tailscale() {
 # -----------------------------------------------------------------------------
 setup_post_startup_procedure() {
 
-    if [ "$START_FROM_STEP" -gt 7 ]; then
-        log INFO "Skipping post-startup procedure setup..."
-        return 0
-    fi
+    _skip_pve_step 10 "post-startup procedure setup" && return 0
 
-    prompt_until_yqnet "7. QUESTION: Setup post-startup procedure? (y/?/n, e or t to exit setup steps): " confirm
+    prompt_until_yqnet "10. QUESTION: Setup post-startup procedure? (y/?/n, e or t to exit setup steps): " confirm
     if [ "$confirm" != "y" ] && [ "$confirm" != "?" ]; then
         return 0
     fi
@@ -527,7 +894,7 @@ setup_post_startup_procedure() {
         less "${SCRIPT_DIR}/post-startup-proc.sh"
 
         confirm_continue=
-        prompt_until_yn "7.1. QUESTION: Continue to set up post-startup procedure now? (y/n): " confirm_continue
+        prompt_until_yn "10.1. QUESTION: Continue to set up post-startup procedure now? (y/n): " confirm_continue
         if [ "$confirm_continue" != "y" ]; then
             log INFO "Skipping post-startup procedure setup."
             return 0
@@ -542,14 +909,25 @@ setup_post_startup_procedure() {
     systemctl daemon-reload
     systemctl enable post-startup-proc.service
     systemctl start post-startup-proc.service
-    prompt_until_yn "7.2. QUESTION: Is this node $HOSTNAME the main node? (y/n): " confirm
+    prompt_until_yn "10.2. QUESTION: Is this node $HOSTNAME the main node? (y/n): " confirm
     if [ "$confirm" == "y" ]; then
         log INFO "Setting up /etc/default/pve-main-node..."
         echo "$HOSTNAME" > /etc/default/pve-main-node
         log INFO "/etc/default/pve-main-node set to $HOSTNAME"
+        local quorum_wait=""
+        prompt_line_trimmed "10.3. QUESTION: Seconds to wait for cluster quorum at boot (empty = ${DEFAULT_QUORUM_WAIT_SEC}): " quorum_wait
+        if [ -z "$quorum_wait" ]; then
+            quorum_wait="$DEFAULT_QUORUM_WAIT_SEC"
+        fi
+        cat <<EOF >/etc/default/papita-post-startup
+# Papita post-startup (step 10)
+QUORUM_WAIT_SEC=${quorum_wait}
+EOF
+        log INFO "Wrote /etc/default/papita-post-startup (QUORUM_WAIT_SEC=${quorum_wait})."
     else
         log INFO "Skipping /etc/default/pve-main-node setup."
     fi
+
     log INFO "Post-startup procedure is set up. Done."
     return 0
 }
@@ -559,12 +937,9 @@ setup_post_startup_procedure() {
 # -----------------------------------------------------------------------------
 setup_pre_shutdown_procedure() {
 
-    if [ "$START_FROM_STEP" -gt 8 ]; then
-        log INFO "Skipping pre-shutdown procedure setup..."
-        return 0
-    fi
+    _skip_pve_step 11 "pre-shutdown procedure setup" && return 0
 
-    prompt_until_yqnet "8. QUESTION: Setup pre-shutdown procedure? (y/?/n, e or t to exit setup steps): " confirm
+    prompt_until_yqnet "11. QUESTION: Setup pre-shutdown procedure? (y/?/n, e or t to exit setup steps): " confirm
     if [ "$confirm" != "y" ] && [ "$confirm" != "?" ]; then
         return 0
     fi
@@ -575,7 +950,7 @@ setup_pre_shutdown_procedure() {
         log INFO "Below is the content of 'pre-shutdown-proc.sh' that will be installed and run at shutdown:"
         less "${SCRIPT_DIR}/pre-shutdown-proc.sh"
 
-        prompt_until_yn "8.1. QUESTION: Continue to set up pre-shutdown procedure now? (y/n): " confirm_continue
+        prompt_until_yn "11.1. QUESTION: Continue to set up pre-shutdown procedure now? (y/n): " confirm_continue
         if [ "$confirm_continue" != "y" ]; then
             log INFO "Skipping pre-shutdown procedure setup."
             return 0
@@ -591,17 +966,165 @@ setup_pre_shutdown_procedure() {
     systemctl daemon-reload
     systemctl enable pre-shutdown-proc.service
     systemctl start pre-shutdown-proc.service
+
+    local confirm_stopall=""
+    prompt_until_yn "11.2. QUESTION: Run pvesh stopall before shutdown/reboot? (y/n): " confirm_stopall
+    local enable_stopall=0
+    if [ "$confirm_stopall" == "y" ]; then
+        enable_stopall=1
+    fi
+    local stopall_timeout=""
+    prompt_line_trimmed "11.3. QUESTION: stopall timeout in seconds (empty = ${DEFAULT_STOPALL_TIMEOUT}): " stopall_timeout
+    if [ -z "$stopall_timeout" ]; then
+        stopall_timeout="$DEFAULT_STOPALL_TIMEOUT"
+    fi
+    cat <<EOF >/etc/default/papita-pre-shutdown
+# Papita pre-shutdown (step 11)
+ENABLE_STOPALL=${enable_stopall}
+STOPALL_TIMEOUT=${stopall_timeout}
+EOF
+    log INFO "Wrote /etc/default/papita-pre-shutdown."
+
     log INFO "Pre-shutdown procedure is set up. Done."
     return 0
 }
 
-remove_pve_subscription_alert() {
-    if [ "$START_FROM_STEP" -gt 9 ]; then
-        log INFO "Skipping PVE subscription alert removal..."
+# -----------------------------------------------------------------------------
+# Email notifications: postfix relay + Proxmox cluster mailto/mailfrom.
+# -----------------------------------------------------------------------------
+setup_email_notifications() {
+    _skip_pve_step 12 "email notification setup" && return 0
+
+    prompt_until_ynet "12. QUESTION: Configure email notifications (postfix + Proxmox mailto)? (y/n, e or t to exit setup): " confirm
+    if [ "$confirm" != "y" ]; then
         return 0
     fi
 
-    prompt_until_ynet "9. QUESTION: Remove PVE subscription alert? (y/n, e or t to exit setup steps): " confirm
+    local mailto mailfrom relay
+    prompt_line_trimmed "12.1. QUESTION: Alert recipient (mailto, e.g. admin@example.com): " mailto
+    if [ -z "$mailto" ]; then
+        log ERROR "mailto address is required."
+        return 1
+    fi
+    prompt_line_trimmed "12.2. QUESTION: mailfrom address (empty = root@pam): " mailfrom
+    if [ -z "$mailfrom" ]; then
+        mailfrom="root@pam"
+    fi
+    prompt_line_trimmed "12.3. QUESTION: SMTP relay [host]:port (empty = local postfix only): " relay
+
+    export DEBIAN_FRONTEND=noninteractive
+    echo "postfix postfix/main_mailer_type select Satellite system" | debconf-set-selections
+    if [ -n "$relay" ]; then
+        echo "postfix postfix/relayhost string ${relay}" | debconf-set-selections
+    else
+        echo "postfix postfix/relayhost string " | debconf-set-selections
+    fi
+    apt-get install -y postfix
+
+    if command -v pvesh &>/dev/null; then
+        pvesh set /cluster/options --mailto "$mailto" --mailfrom "$mailfrom" || log WARN "pvesh set mail options failed."
+    else
+        log WARN "pvesh not found; configure mailto in the Proxmox UI later."
+    fi
+
+    systemctl enable postfix.service
+    systemctl restart postfix.service
+    log INFO "Email notifications configured (mailto=${mailto}, mailfrom=${mailfrom})."
+    return 0
+}
+
+# -----------------------------------------------------------------------------
+# SMART disk health: periodic smartctl scan (all disks; useful with NAS/external storage).
+# -----------------------------------------------------------------------------
+setup_smart_monitoring() {
+    _skip_pve_step 13 "SMART monitoring setup" && return 0
+
+    prompt_until_ynet "13. QUESTION: Setup SMART disk health monitoring (smartmontools cron)? (y/n, e or t to exit setup): " confirm
+    if [ "$confirm" != "y" ]; then
+        return 0
+    fi
+
+    apt-get install -y smartmontools
+
+    local smart_schedule=""
+    prompt_crontab_schedule smart_schedule "${DEFAULT_SMART_CRON_SCHEDULE}" \
+        "13.1. QUESTION: SMART scan cron schedule (five time fields; empty = default ${DEFAULT_SMART_CRON_SCHEDULE}): "
+
+    local scan_script="/usr/local/sbin/papita-smart-scan.sh"
+    cat <<'SMART_EOF' >"${scan_script}.tmp"
+#!/bin/bash
+# Papita: SMART health summary for all detected devices.
+set -euo pipefail
+if ! command -v smartctl >/dev/null 2>&1; then
+    echo "[papita-smart-scan] smartctl not installed." >&2
+    exit 1
+fi
+mapfile -t devs < <(smartctl --scan-open 2>/dev/null | awk '{print $1}' || true)
+if [[ ${#devs[@]} -eq 0 ]]; then
+    echo "[papita-smart-scan] no devices from smartctl --scan-open."
+    exit 0
+fi
+for dev in "${devs[@]}"; do
+    echo "=== ${dev} ==="
+    smartctl -H "$dev" 2>/dev/null || echo "WARN: smartctl -H failed for ${dev}"
+done
+SMART_EOF
+    mv -f "${scan_script}.tmp" "$scan_script"
+    chmod 0755 "$scan_script"
+
+    local cron_file="/etc/cron.d/papita-smart-scan"
+    cat <<EOF >"$cron_file"
+# Papita: SMART health scan (step 13).
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+${smart_schedule} root ${scan_script} >>/var/log/papita-smart-scan.log 2>&1
+EOF
+    chmod 0644 "$cron_file"
+    touch /var/log/papita-smart-scan.log
+    log INFO "SMART monitoring cron installed (${cron_file}, schedule: ${smart_schedule})."
+    return 0
+}
+
+# -----------------------------------------------------------------------------
+# Enable Proxmox cluster firewall (after Tailscale rule exists from step 8.1).
+# -----------------------------------------------------------------------------
+enable_proxmox_cluster_firewall() {
+    _skip_pve_step 14 "Proxmox cluster firewall enable" && return 0
+
+    local cluster_fw="/etc/pve/firewall/cluster.fw" confirm_create=""
+    if [ ! -f "$cluster_fw" ]; then
+        log WARN "No ${cluster_fw}; run step 8.1 first or create rules manually."
+        prompt_until_ynet "14. QUESTION: Enable cluster firewall anyway (creates minimal cluster.fw)? (y/n, e or t to exit setup): " confirm_create
+        if [ "$confirm_create" != "y" ]; then
+            return 0
+        fi
+        setup_proxmox_firewall_tailscale || true
+    fi
+
+    if grep -qE '^[[:space:]]*enable:[[:space:]]*1' "$cluster_fw" 2>/dev/null; then
+        log INFO "Proxmox cluster firewall already enabled."
+        return 0
+    fi
+
+    log WARN "Enabling the cluster firewall affects ALL nodes. Ensure Tailscale/management access works first."
+    prompt_until_ynet "14. QUESTION: Set enable: 1 in ${cluster_fw}? (y/n, e or t to exit setup): " confirm
+    if [ "$confirm" != "y" ]; then
+        return 0
+    fi
+
+    if grep -qE '^[[:space:]]*enable:' "$cluster_fw"; then
+        sed -i 's/^[[:space:]]*enable:.*/enable: 1/' "$cluster_fw"
+    else
+        sed -i '/^\[OPTIONS\]/a enable: 1' "$cluster_fw"
+    fi
+    log INFO "Proxmox cluster firewall enabled (enable: 1)."
+    return 0
+}
+
+remove_pve_subscription_alert() {
+    _skip_pve_step 15 "PVE subscription alert removal" && return 0
+
+    prompt_until_ynet "15. QUESTION: Remove PVE subscription alert? (y/n, e or t to exit setup steps): " confirm
     if [ "$confirm" != "y" ]; then
         log INFO "Skipping PVE subscription alert removal..."
         return 0
@@ -623,78 +1146,100 @@ remove_pve_subscription_alert() {
 }
 
 # -----------------------------------------------------------------------------
-# Step 10: allow Proxmox HTTPS UI (8006) only from Tailscale CGNAT (iptables).
-# See operational notes: run only when all cluster nodes are on Tailscale and reachable.
+# Periodic vzdump backup job (configurable schedule).
 # -----------------------------------------------------------------------------
-setup_pve_webui_tailscale_only() {
-    if [ "$START_FROM_STEP" -gt 10 ]; then
-        log INFO "Skipping Proxmox web UI Tailscale-only restriction..."
-        return 0
-    fi
+setup_backup_job() {
+    _skip_pve_step 16 "backup job setup" && return 0
 
-    log WARN "Step 10 adds iptables rules so TCP port 8006 (Proxmox web UI) accepts traffic only from Tailscale (100.64.0.0/10)."
-    log WARN "Do NOT enable this until every planned cluster node is connected on Tailscale (and you can reach the UI via Tailscale)."
-    log WARN "Otherwise you can lock out non-Tailscale access before the cluster is fully reachable and complicate recovery."
-    prompt_until_ynet "10. QUESTION: Apply Tailscale-only restriction for port 8006? (y/n, e or t to exit setup steps): " confirm
+    prompt_until_ynet "16. QUESTION: Configure a periodic vzdump backup job (cron)? (y/n, e or t to exit setup): " confirm
     if [ "$confirm" != "y" ]; then
-        log INFO "Skipping Proxmox web UI Tailscale-only restriction..."
         return 0
     fi
 
-    if [[ -f /etc/default/pve-main-node ]]; then
-        local _pve_main_designate
-        _pve_main_designate="$(sed 's/^[[:space:]]*//;s/[[:space:]]*$//' /etc/default/pve-main-node)"
-        if [[ -n "$_pve_main_designate" && "$_pve_main_designate" == "$HOSTNAME" ]]; then
-            log INFO "This host is the cluster main node (/etc/default/pve-main-node from step 7.2). Skipping iptables configuration for step 10."
-            return 0
-        fi
+    local storage mode compress backup_schedule
+    prompt_line_trimmed "16.1. QUESTION: Proxmox storage ID for backups (empty = local): " storage
+    if [ -z "$storage" ]; then
+        storage="local"
     fi
-
-    if iptables-save -t filter 2>/dev/null | grep -qF "papita-allow-ts-8006"; then
-        log INFO "iptables rules for papita-allow-ts-8006 / papita-drop-8006 already present; skipping insert."
-    else
-        log INFO "Inserting iptables rules (ACCEPT from Tailscale before DROP on 8006)..."
-        iptables -I INPUT 1 -p tcp --dport 8006 -m comment --comment "papita-drop-8006" -j DROP
-        iptables -I INPUT 1 -p tcp -s 100.64.0.0/10 --dport 8006 -m comment --comment "papita-allow-ts-8006" -j ACCEPT
+    prompt_line_trimmed "16.2. QUESTION: Backup mode snapshot|suspend|stop (empty = snapshot): " mode
+    if [ -z "$mode" ]; then
+        mode="snapshot"
     fi
+    prompt_line_trimmed "16.3. QUESTION: Compression zstd|gzip|0 (empty = zstd): " compress
+    if [ -z "$compress" ]; then
+        compress="zstd"
+    fi
+    prompt_crontab_schedule backup_schedule "${DEFAULT_VZDUMP_CRON_SCHEDULE}" \
+        "16.4. QUESTION: Backup cron schedule (five time fields; empty = default ${DEFAULT_VZDUMP_CRON_SCHEDULE}): "
 
-    log INFO "Ensuring iptables rules persist across reboots..."
-    apt-get install -y iptables-persistent
-    netfilter-persistent save
+    local dump_script="/usr/local/sbin/papita-vzdump-all.sh"
+    cat <<DUMP_EOF >"${dump_script}.tmp"
+#!/bin/bash
+# Papita: backup all VMs and CTs on this node (step 16).
+set -euo pipefail
+STORAGE="${storage}"
+MODE="${mode}"
+COMPRESS="${compress}"
+MAILTO="root@pam"
+vzdump_one() {
+    local id="\$1"
+    vzdump "\$id" --storage "\$STORAGE" --mode "\$MODE" --compress "\$COMPRESS" --mailto "\$MAILTO"
+}
+if command -v qm >/dev/null 2>&1; then
+    while read -r vmid; do
+        [[ -z "\$vmid" ]] && continue
+        vzdump_one "\$vmid"
+    done < <(qm list 2>/dev/null | awk 'NR>1 {print \$1}')
+fi
+if command -v pct >/dev/null 2>&1; then
+    while read -r ctid; do
+        [[ -z "\$ctid" ]] && continue
+        vzdump_one "\$ctid"
+    done < <(pct list 2>/dev/null | awk 'NR>1 {print \$1}')
+fi
+DUMP_EOF
+    mv -f "${dump_script}.tmp" "$dump_script"
+    chmod 0755 "$dump_script"
 
-    log INFO "Step 10 done. Verify: UI via Tailscale https://<tailscale-ip>:8006 ; from public IP it should not connect."
-    log WARN "Optional: Datacenter/Node firewall in Proxmox UI can complement this; order ACCEPT before DROP if you mirror rules there."
+    local cron_file="/etc/cron.d/papita-vzdump-all"
+    cat <<EOF >"$cron_file"
+# Papita: cluster-wide vzdump (step 16). Review storage ${storage} before first run.
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+${backup_schedule} root ${dump_script} >>/var/log/papita-vzdump-all.log 2>&1
+EOF
+    chmod 0644 "$cron_file"
+    touch /var/log/papita-vzdump-all.log
+    log INFO "Backup cron installed (${cron_file}, schedule: ${backup_schedule})."
+    log WARN "Verify storage '${storage}' exists and has enough space before the first scheduled run."
     return 0
 }
 
 # -----------------------------------------------------------------------------
-# Step 11: Tailscale-issued TLS certificate for Proxmox Web UI (port 8006).
+# Step 17: Tailscale-issued TLS certificate for Proxmox Web UI (port 8006).
 # Walkthrough: https://tailscale.com/docs/integrations/proxmox
 # Only runs when the operator confirms this is the main node (single designated place).
 # -----------------------------------------------------------------------------
 setup_pve_tailscale_ui_certificate() {
-    if [ "$START_FROM_STEP" -gt 11 ]; then
-        log INFO "Skipping Proxmox HTTPS certificate via Tailscale..."
-        return 0
-    fi
+    _skip_pve_step 17 "Proxmox HTTPS certificate via Tailscale" && return 0
 
-    log INFO "Step 11 replaces the default self-signed Proxmox UI certificate with one issued via Tailscale (trusted in browsers on your tailnet)."
+    log INFO "Step 17 replaces the default self-signed Proxmox UI certificate with one issued via Tailscale (trusted in browsers on your tailnet)."
     log INFO "Upstream guide: https://tailscale.com/docs/integrations/proxmox"
 
-    prompt_until_ynet "11. QUESTION: Is this the main Proxmox cluster node (enable step 11 certificate setup only here)? (y/n, e or t to exit setup steps): " confirm_main
+    prompt_until_ynet "17. QUESTION: Is this the main Proxmox cluster node (enable step 17 certificate setup only here)? (y/n, e or t to exit setup steps): " confirm_main
     if [ "${confirm_main:-}" != "y" ]; then
-        log INFO "Skipping step 11 — run it on the main node when you want Tailscale-managed TLS for that host's UI."
+        log INFO "Skipping step 17 — run it on the main node when you want Tailscale-managed TLS for that host's UI."
         return 0
     fi
 
-    prompt_until_yn "11.1. QUESTION: Fetch Tailscale certificate and install it with pvenode cert set (restarts API proxy)? (y/n): " confirm
+    prompt_until_yn "17.1. QUESTION: Fetch Tailscale certificate and install it with pvenode cert set (restarts API proxy)? (y/n): " confirm
     if [ "$confirm" != "y" ]; then
         log INFO "Skipping Proxmox HTTPS certificate via Tailscale..."
         return 0
     fi
 
     if ! command -v tailscale &>/dev/null; then
-        log ERROR "tailscale not found. Complete steps 5–6 first."
+        log ERROR "tailscale not found. Complete steps 8–9 first."
         return 1
     fi
     if ! command -v jq &>/dev/null; then
@@ -730,17 +1275,17 @@ setup_pve_tailscale_ui_certificate() {
         return 1
     }
 
-    log INFO "Step 11 certificate installed. Open the UI with https://${ts_name}:8006 (or your tailnet MagicDNS name) without the old self-signed warning."
+    log INFO "Step 17 certificate installed. Open the UI with https://${ts_name}:8006 (or your tailnet MagicDNS name) without the old self-signed warning."
 
-    prompt_until_yn "11.2. QUESTION: Install renewal helper + /etc/cron.d entry (Tailscale-style periodic renew)? (y/n): " confirm_cron
+    prompt_until_yn "17.2. QUESTION: Install renewal helper + /etc/cron.d entry (Tailscale-style periodic renew)? (y/n): " confirm_cron
     if [ "${confirm_cron:-}" != "y" ]; then
-        log INFO "Skipping renewal cron; re-run step 11 or renew manually before certificate expiry."
+        log INFO "Skipping renewal cron; re-run step 17 or renew manually before certificate expiry."
         return 0
     fi
 
     local cert_renew_schedule=""
     prompt_crontab_schedule cert_renew_schedule "${DEFAULT_TAILSCALE_PVE_CERT_CRON_SCHEDULE}" \
-        "11.2.1. QUESTION: Renewal cron schedule (five time fields; empty = default ${DEFAULT_TAILSCALE_PVE_CERT_CRON_SCHEDULE}): "
+        "17.2.1. QUESTION: Renewal cron schedule (five time fields; empty = default ${DEFAULT_TAILSCALE_PVE_CERT_CRON_SCHEDULE}): "
 
     local renew_script="/usr/local/sbin/papita-pve-tailscale-cert-renew.sh"
     cat <<'RENEW_EOF' >"${renew_script}.tmp"
@@ -765,7 +1310,7 @@ RENEW_EOF
         log INFO "Cron entry already present in ${cron_file}; not duplicating."
     else
         cat <<EOF >"$cron_file"
-# Papita: renew Proxmox UI cert from Tailscale (step 11).
+# Papita: renew Proxmox UI cert from Tailscale (step 17).
 SHELL=/bin/sh
 PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 ${cert_renew_schedule} root ${renew_script}
@@ -774,7 +1319,7 @@ EOF
         log INFO "Installed ${cron_file} (schedule: ${cert_renew_schedule})."
     fi
 
-    log INFO "Step 11 done."
+    log INFO "Step 17 done."
     return 0
 }
 
@@ -803,19 +1348,25 @@ main() {
 
     setup_locales || log WARN "Locales setup failed; continuing."
 
+    setup_lm_sensors || log WARN "lm-sensors setup failed; continuing."
+    setup_time_sync || log WARN "Time sync setup failed; continuing."
+    setup_cluster_hosts || log WARN "Cluster /etc/hosts setup failed; continuing."
+
     setup_tailscale || log WARN "Tailscale setup failed; continuing."
     init_tailscale || log WARN "Tailscale initialization failed; continuing."
 
     setup_post_startup_procedure || log WARN "Post-startup procedure setup failed; continuing."
     setup_pre_shutdown_procedure || log WARN "Pre-shutdown procedure setup failed; continuing."
 
+    setup_email_notifications || log WARN "Email notification setup failed; continuing."
+    setup_smart_monitoring || log WARN "SMART monitoring setup failed; continuing."
+    enable_proxmox_cluster_firewall || log WARN "Proxmox cluster firewall enable failed; continuing."
+
     remove_pve_subscription_alert || log WARN "PVE subscription alert removal failed; continuing."
 
-    setup_pve_webui_tailscale_only || log WARN "Proxmox web UI Tailscale-only restriction failed; continuing."
-
+    setup_backup_job || log WARN "Backup job setup failed; continuing."
     setup_pve_tailscale_ui_certificate || log WARN "Proxmox Tailscale UI certificate step failed; continuing."
 
-    log WARN "Remember to setup the other PVE nodes in /etc/hosts after setup is complete."
     log INFO "Done."
 }
 

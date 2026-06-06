@@ -42,3 +42,12 @@ node_modules/
 *.drawio.bkp
 
 poetry.lock
+
+__pycache__/
+*.pyc
+*.pyi
+.pytest_cache/
+.mypy_cache/
+.pre-commit-cache/
+.black_cache/
+.ruff_cache/

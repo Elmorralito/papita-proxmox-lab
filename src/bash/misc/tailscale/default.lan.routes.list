@@ -1,0 +1,3 @@
+# Main-node fallback LAN routes for --advertise-routes (if pfSense subnet router is down).
+# Only one device should advertise 172.16.0.0/16 — disable pfSense route first if using PVE fallback.
+172.16.0.0/16

@@ -1,1 +1,4 @@
-100.64.0.0/10
+# Subnet routes for --advertise-routes (optional; main node only).
+# Leave this file empty in normal operation — pfSense advertises 172.16.0.0/16.
+# Do NOT list 100.64.0.0/10 here (that is the tailnet CGNAT range, not a LAN route).
+# Main-node fallback only (if pfSense is down): 172.16.0.0/16

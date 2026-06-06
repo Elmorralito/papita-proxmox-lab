@@ -8,6 +8,9 @@ What it is
   (advertised routes, NAT, firewall). Run from your workstation with network
   access to the Tailscale API.
 
+  Topology: all PVE nodes join Tailscale for AWS EFS; pfSense advertises
+  172.16.0.0/16; remote Proxmox admin uses main node (172.16.0.101) only.
+
 How to run
   From the repository root (requires deploy/utils.sh and deploy/usage.sh):
     ./deploy/tailscale-pfsense-lan.sh ACTION [OPTIONS]
@@ -28,7 +31,7 @@ ACTION (required, position 1)
   patch-acl       Merge grants and autoApprovers.routes into the tailnet ACL
                   JSON via API. Idempotent (skips duplicate grant tuples).
   verify          Local checks only (no API): route lookup, tailscale ping, ICMP
-                  ping to LAN_TEST_IP. Safe without TAILSCALE_API_KEY.
+                  ping to LAN_TEST_IP, HTTPS :8006 probe. Safe without API key.
   pfsense-steps   Print pfSense WebGUI checklist (no API). Run before configure
                   if routes are not advertised yet.
 
@@ -42,8 +45,10 @@ Environment (API actions: configure, approve-routes, patch-acl)
   TAILSCALE_TAILNET      Tailnet DNS name (default: tailf1ad0d.ts.net)
 
 Optional overrides (environment variables)
-  LAN_CIDR               Subnet behind pfSense (default: 172.16.1.0/24)
-  LAN_TEST_IP            Host on LAN for verify ping (default: 172.16.1.101)
+  LAN_CIDR               Subnet behind pfSense (default: 172.16.0.0/16)
+  LAN_TEST_IP            Main PVE LAN IP for verify (default: 172.16.0.101)
+  MAIN_PVE_LAN_IP        Main node LAN IP for admin ACL grants (default: 172.16.0.101)
+  MAIN_PVE_TAILSCALE_NAME  Optional MagicDNS name for direct tailnet UI verify
   PFSENSE_NAME           Substring match for pfSense device name/hostname in
                          admin device list (default: pfsense-fw001)
 
@@ -67,34 +72,40 @@ Prerequisites
   Same device lookup and route approval as configure; no ACL patch, no verify.
 
 --- Action: patch-acl ---
-  Merged grants (src → dst, ip) — only appended if not already present:
+  Merged grants (src → dst, ip) — only appended if not already present.
+  Replaces superseded tag:server-node → whole LAN :8006 grant with main-only rule.
+
     tag:auth-client              → LAN_CIDR                    *
     tag:pfsense-oldtimers-client → LAN_CIDR                    *
     tag:private-node             → LAN_CIDR                    *
+    tag:private-node             → MAIN_PVE_LAN_IP/32          tcp:8006, tcp:22
     tag:pve-oldtimers-cluster    → LAN_CIDR                    *
-    tag:server-node              → LAN_CIDR                    tcp:443, tcp:8006, tcp:22
+    tag:server-node              → MAIN_PVE_LAN_IP/32          tcp:443, tcp:8006, tcp:22
     LAN_CIDR                     → tag:pve-oldtimers-cluster   *
     LAN_CIDR                     → tag:private-node            *
+    tag:private-node             → MAIN_PVE_TAILSCALE_NAME     tcp:8006, tcp:22  (if set)
 
   tagOwners ensured for: tag:auth-client, tag:pfsense-oldtimers-client,
   tag:pfsense-lan-router, tag:private-node, tag:pve-oldtimers-cluster,
   tag:server-node (each default owner: autogroup:admin if missing).
 
-  autoApprovers.routes: LAN_CIDR appended for tag:pfsense-lan-router,
-  tag:pve-oldtimers-cluster, tag:server-node if not already listed.
+  autoApprovers.routes: LAN_CIDR appended for tag:pfsense-lan-router only
+  (PVE workers do not advertise routes; avoid dual routers).
 
 --- Action: verify ---
   route -n get LAN_TEST_IP (best effort)
   tailscale ping -c 2 LAN_TEST_IP (if tailscale in PATH)
   ping -c 2 -W 3 LAN_TEST_IP (ICMP may fail if host blocks ping)
+  curl -fsSk https://LAN_TEST_IP:8006/ (Proxmox UI via pfSense subnet route)
+  curl -fsSk https://MAIN_PVE_TAILSCALE_NAME:8006/ (if MAIN_PVE_TAILSCALE_NAME set)
 
 --- Action: pfsense-steps ---
-  pfSense WebGUI (example Tailscale URL: https://100.91.3.47):
+  pfSense WebGUI (LAN 172.16.0.0/16; gateway 172.16.0.1):
 
   1. VPN → Tailscale → Settings → Routing
-     - Advertised Routes: LAN_CIDR
+     - Advertised Routes: LAN_CIDR (172.16.0.0/16)
      - Accept Subnet Routes: enabled (site-to-site)
-     - Save
+     - Save; approve in Tailscale admin
 
   2. Firewall → NAT → Outbound → Hybrid outbound NAT
      - Add: Interface Tailscale, Source LAN_CIDR, Destination any,
@@ -103,9 +114,13 @@ Prerequisites
   3. Firewall → Rules → LAN (above block rules)
      - Pass LAN net → 100.64.0.0/10
 
-  4. Optional: Firewall → Rules → Tailscale
-     - Pass 100.64.0.0/10 → LAN_CIDR (defense in depth; subnet routes may
-       bypass Tailscale-tab rules)
+  4. Optional — restrict Proxmox UI to main node:
+     - Alias TAILNET_ALLOWED = admin 100.x /32 addresses
+     - Pass TAILNET_ALLOWED → MAIN_PVE_LAN_IP TCP 8006, 22
+     - Block 100.64.0.0/10 → worker PVE LAN IPs TCP 8006
+
+  5. Optional: Firewall → Rules → Tailscale
+     - Pass 100.64.0.0/10 → LAN_CIDR (subnet routes may bypass this tab)
 
   Then run: ./deploy/tailscale-pfsense-lan.sh configure
 
@@ -123,10 +138,11 @@ Examples
   export TAILSCALE_TAILNET='tailf1ad0d.ts.net'
   ./deploy/tailscale-pfsense-lan.sh configure
 
-  LAN_CIDR=172.16.50.0/24 LAN_TEST_IP=172.16.50.10 \
+  MAIN_PVE_TAILSCALE_NAME=pvenode-001.tailf1ad0d.ts.net \
     ./deploy/tailscale-pfsense-lan.sh --env-file .env verify
 
   ./deploy/tailscale-pfsense-lan.sh pfsense-steps
 
 See also
-  docs/TIPSNTRICKS.md — §9 Tailscale / pfSense LAN, ACL examples, troubleshooting.
+  docs/TIPSNTRICKS.md — §9 Tailscale / pfSense LAN, ACL examples, EFS/admin verify.
+  deploy/data/setup-pve-node.usage.txt — PVE main vs worker Tailscale steps.

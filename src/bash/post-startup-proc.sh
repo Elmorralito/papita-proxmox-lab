@@ -2,8 +2,8 @@
 
 set -euo pipefail
 
-# Post-startup hook (systemd oneshot): clear Ceph maintenance from pre-shutdown, and on
-# the designated main node optionally wake peer Proxmox nodes via WoL.
+PAPITA_POST_STARTUP_DEFAULTS="/etc/default/papita-post-startup"
+QUORUM_WAIT_SEC=120
 
 # -----------------------------------------------------------------------------
 # Ceph: clear noout (paired with pre-shutdown-proc.sh "ceph osd set noout")
@@ -23,7 +23,34 @@ set_noout_flag() {
 }
 
 # -----------------------------------------------------------------------------
-# Wake-on-LAN: only on the node named in /etc/default/pve-main-node (step 7.2)
+# Wait for Proxmox cluster quorum before Ceph maintenance changes (optional)
+# -----------------------------------------------------------------------------
+wait_for_pve_quorum() {
+    if [[ -f "$PAPITA_POST_STARTUP_DEFAULTS" ]]; then
+        # shellcheck disable=SC1090
+        source "$PAPITA_POST_STARTUP_DEFAULTS"
+    fi
+    if ! command -v pvecm >/dev/null 2>&1; then
+        echo "INFO: pvecm not found; skipping quorum wait."
+        return 0
+    fi
+    local elapsed=0
+    local interval=5
+    echo "INFO: Waiting up to ${QUORUM_WAIT_SEC}s for Proxmox cluster quorum..."
+    while ((elapsed < QUORUM_WAIT_SEC)); do
+        if pvecm status 2>/dev/null | grep -qE 'Quorate:[[:space:]]+Yes'; then
+            echo "INFO: Cluster is quorate."
+            return 0
+        fi
+        sleep "$interval"
+        elapsed=$((elapsed + interval))
+    done
+    echo "WARN: Timed out waiting for quorum after ${QUORUM_WAIT_SEC}s; continuing."
+    return 0
+}
+
+# -----------------------------------------------------------------------------
+# Wake-on-LAN: only on the node named in /etc/default/pve-main-node (step 10.2)
 # -----------------------------------------------------------------------------
 _current_host_matches_label() {
     local label=$1
@@ -84,6 +111,7 @@ wake_on_lan_nodes() {
 # Main
 # -----------------------------------------------------------------------------
 main() {
+    wait_for_pve_quorum
     set_noout_flag
     wake_on_lan_nodes
     return 0

@@ -3,24 +3,26 @@ setup-pve-node.sh — reference manual
 
 What it is
   Guided, interactive setup for a Proxmox VE node: APT/repos, power and network
-  helpers, Tailscale, optional Ceph-related boot/shutdown hooks, and UI tweaks.
+  helpers, sensors/NTP/hosts, Tailscale, boot/shutdown hooks, notifications,
+  SMART monitoring, firewall, backups, and UI tweaks.
   Run as root on the node. Prompts are validated (y/n, y/c/n, y/?/n, cron lines,
   WoL-capable interfaces, etc.) via deploy/utils.sh.
 
 How to run
-  Local (repository checkout; deploy/utils.sh, deploy/usage.sh, and this file must resolve):
+  Local (repository checkout; deploy/utils.sh, deploy/usage.sh, src/python/, and this file):
     bash src/bash/setup-pve-node.sh
     bash src/bash/setup-pve-node.sh --help    # this manual in a pager, then exit
+    Step 7 resolves src/python/ via ../python (misc/cluster + data).
 
-  Remote (deploy/proxmox.sh copies src/bash/, deploy/utils.sh, and deploy/usage.sh into
-  <target-path>/deploy/, plus deploy/docs/setup-pve-node.usage.txt into .../deploy/docs/,
+  Remote (deploy/proxmox.sh copies src/bash/ → <target-path>/deploy/, src/python/ →
+  .../deploy/python/, plus utils.sh, usage.sh, and deploy/data/setup-pve-node.usage.txt,
   then runs setup-pve-node.sh over SSH):
     ./deploy/proxmox.sh -ip <host> ...
 
 First prompt (after the on-screen step list)
   y              Start from step 1 (full run)
   n              Exit immediately; no further steps
-  1-11           Skip all steps before this number; begin at that step
+  1-17           Skip all steps before this number; begin at that step
   (empty)        Same as starting from the beginning (step 1)
   h, help, ?, usage, -h, --help
                  Show this manual again in the pager, then ask again (CLI --help as above)
@@ -28,102 +30,82 @@ First prompt (after the on-screen step list)
 Failure behavior
   Step 1 (APT) can exit the whole script on error (missing apt-dependencies.list,
   failed apt install, or jq / vim / unattended-upgrades missing after install).
-  Steps 2-11: errors are usually logged and the script continues with the next step.
+  Steps 2-17: errors are usually logged and the script continues with the next step.
 
 --- Step 1 — APT configuration ---
   Gate: answer "n" at 1. QUESTION to skip the entire step.
-  Repositories:
-    • If /etc/apt/sources.list.d/ does not exist: writes /etc/apt/sources.list with
-      embedded stretch-era Debian + PVE URLs (legacy path—verify for your PVE release).
-    • If it exists: writes .sources files for pve-no-subscription (trixie),
-      pve-enterprise (trixie), ceph-squid (trixie, enterprise), using the Proxmox archive keyring.
-  Then: apt update && apt dist-upgrade -y && apt autoremove -y && clean && autoclean.
-  Dependencies:
-    • Packages from apt-dependencies.list beside the script (comment and blank lines
-      skipped). Confirms at 1.1 before apt install -y.
-    • Exits if unattended-upgrades, jq, or vim are not available after install.
-  Enables: systemctl enable --now unattended-upgrades.
-  Crontab:
-    • Prompts for a schedule (validated); empty input uses default 0 4 * * 6.
-    • Removes any /etc/crontab line containing the same upgrade shell command, then
-      appends: <schedule> apt-get update && dist-upgrade -y && autoremove -y && clean && autoclean.
+  Repositories: Debian bookworm base + PVE trixie .sources (no-subscription, enterprise, ceph-squid).
+  Then: apt update && dist-upgrade && autoremove && clean.
+  Dependencies from apt-dependencies.list (1.1 confirm before install).
+  Enables unattended-upgrades; upgrade cron (default 0 4 * * 6).
+  Optional 1.3: install intel-microcode or amd64-microcode based on CPU vendor.
 
 --- Step 2 — Hibernate / sleep off ---
-  Gate: "n" skips. If "y": vm.swappiness=0 in /etc/sysctl.d/99-hibernate.conf (reduces
-  swap use); /etc/systemd/sleep.conf.d/99-papita-no-sleep.conf sets AllowSuspend/Hibernation/
-  HybridSleep/SuspendThenHibernate to no (preferred over masking sleep units, which can
-  interfere with clean poweroff). logind drop-in 99-papita-logind-sleep.conf: lid/suspend
-  keys ignored, IdleAction=ignore, HandlePowerKey=poweroff, HandleRebootKey=reboot for
-  reliable S5 (Wake-on-LAN). Unmasks legacy sleep.target/suspend/hibernate/hybrid-sleep if
-  a previous run masked them; daemon-reload; restart systemd-logind.
+  vm.swappiness=0; systemd sleep.conf + logind drop-ins; unmask sleep targets if needed.
 
 --- Step 3 — Wake-on-LAN ---
-  Gate: "n" skips. If "y": prompts until an interface exists and ethtool shows Wake-on
-  (EOF on that prompt aborts the step). ethtool -s <if> wol pg; writes
-  /etc/systemd/system/wol.service (After/Wants network-online.target) to re-apply on boot;
-  enable/start wol.service; MAC from /sys/class/net/<if>/address; pvenode config set
-  --wakeonlan <mac> (fails the step if MAC cannot be read).
+  ethtool wol pg, wol.service, pvenode config set --wakeonlan <mac>.
 
 --- Step 4 — Locales ---
-  Gate: "n" skips. If "y": prompts for locale (default en_US) and charset (default UTF-8);
-  locale-gen and update-locale LANG=locale.charset.
+  locale-gen + update-locale (defaults en_US.UTF-8).
 
---- Step 5 — Tailscale (install + forwarding + firewall + optional NAT) ---
-  y = run curl -fsSL https://tailscale.com/install.sh | sh, then sysctl/firewall prompts.
-  c = skip install, still configure sysctl and ask firewall/NAT questions (Tailscale already installed).
-  n = skip the whole step.
-  Writes /etc/sysctl.d/99-tailscale.conf (idempotent) for IPv4/IPv6 forwarding, then sysctl -p.
-  5.1: optional rule in /etc/pve/firewall/cluster.fw to ACCEPT from Tailscale 100.64.0.0/10
-  (skips if rule present; new file has enable: 0 until you enable the cluster firewall).
-  5.2: optional MASQUERADE on vmbr0 with comment papita-tailscale-masq-vmbr0 (skips if present);
-  apt-get install iptables-persistent; netfilter-persistent save; restart tailscaled—only if you
-  need the documented Tailscale/Proxmox workaround (bridge may not be vmbr0 on every node).
+--- Step 5 — lm-sensors ---
+  sensors-detect --auto; enable lm-sensors.service. Supports deploy/proxmox.sh get-temp.
 
---- Step 6 — tailscale up ---
-  Gate: "n" skips. If "y": Tailscale hostname prompt—empty input uses this node's FQDN
-  (hostname -f, else hostname); subnet routes (or empty + optional defaults
-  from misc/tailscale/default.gateways.list, comma-separated); tags (or empty + optional
-  defaults from misc/tailscale/default.tags.list). Runs:
-  tailscale up --accept-dns --ssh --reset [options].
+--- Step 6 — Time sync (chrony) ---
+  Gate: "n" skips. 6.1: NTP servers (space-separated; empty = pool.ntp.org).
+  Writes /etc/chrony/chrony.conf.d/99-papita-ntp.conf and restarts chrony.
 
---- Step 7 — Post-startup (Ceph noout off after boot) ---
-  y = install; ? = show explanation and post-startup-proc.sh in less, then 7.1 confirm; n = skip.
-  Symlinks into /usr/local/bin and /etc/systemd/system; daemon-reload; enable/start service.
-  Startup hook runs ceph osd unset noout after boot; on the main node (7.2) it may also
-  send WoL to other cluster nodes via pvenode wakeonlan.
-  7.2: if this node is the "main" node, writes /etc/default/pve-main-node with the machine hostname.
+--- Step 7 — Cluster /etc/hosts (pre-cluster) ---
+  Run before pvecm create/join so nodes resolve each other by name.
+  7.1: DNS domain suffix (required). Literal (cluster.home.arpa) or keyword (oldtimers.*,
+  *.oldtimers.lan). Trailing .* tries zone labels from python/data/default.domain.suffixes.list.
+  7.2: FQDN regex (empty = python/data/default.hosts.regex).
+  Resolves candidates from python/data/default.hosts.list via python/misc/cluster/discover_hosts.py
+  (Python 3 + DNS). Includes this host when resolvable. 7.3: confirm merge into /etc/hosts
+  between markers # BEGIN/END papita-pve-cluster-hosts.
 
---- Step 8 — Pre-shutdown (Ceph noout before power-off) ---
-  Same y/?/n flow as step 7 for pre-shutdown-proc.sh; symlinks, enable/start unit.
-  Shutdown/reboot hook runs ceph osd set noout (via pre-shutdown-proc.sh) before power-off.
+--- Step 8 — Tailscale (install + forwarding + firewall + optional NAT) ---
+  y/c/n install flow; sysctl forwarding; 8.1 cluster.fw Tailscale ACCEPT rule; 8.2 optional NAT masq.
+  All cluster nodes install Tailscale (AWS EFS data plane). Remote admin uses main node only.
 
---- Step 9 — PVE subscription nag (web UI) ---
-  Gate: "n" skips. If "y": if proxmoxlib.js.bak exists, restores it first; backs up
-  proxmoxlib.js, inserts a line after checked_command to bypass the subscription check,
-  restarts pveproxy. Vendor file—may be overwritten on upgrades.
+--- Step 9 — tailscale up ---
+  Hostname, tags; tailscale up --accept-dns --ssh --reset.
+  9.0: main vs worker — workers skip --advertise-routes (pfSense advertises 172.16.0.0/16).
+  Main node: route advertisement usually unnecessary; optional fallback in default.lan.routes.list.
+  Optional 9.4: post-init sanity (status, IPv4, MagicDNS, admin-console reminders).
 
---- Step 10 — Proxmox web UI (8006) Tailscale-only (iptables) ---
-  After you answer "y" to step 10, if /etc/default/pve-main-node matches this host’s
-  HOSTNAME (set in step 7.2), the iptables changes are skipped so the main node keeps
-  broader UI access; you still see the prompt first.
-  WARNING: Use only after every planned cluster node is connected on Tailscale and you
-  can open the UI via Tailscale; otherwise you may lose non-Tailscale access during setup.
-  Gate: "n" skips. If "y" and not main node: inserts iptables INPUT rules papita-drop-8006
-  and papita-allow-ts-8006 so rule order is ACCEPT tcp/8006 from 100.64.0.0/10, then
-  DROP tcp/8006 for all other sources (same idea as Monica/Tailscale hardening notes).
-  Installs iptables-persistent and runs netfilter-persistent save. IPv4 INPUT only;
-  validate with https://<tailscale-ip>:8006 vs public IP. Proxmox datacenter/node firewall
-  can add defense-in-depth if you mirror ACCEPT-before-DROP there.
+--- Tailscale topology (this lab) ---
+  Hybrid model:
+  - Every PVE node: steps 8–9 (Tailscale client for EFS over tailnet).
+  - Main node only: step 10.2 (/etc/default/pve-main-node), step 17 (Tailscale TLS :8006).
+  - Worker nodes: no subnet routes, no step 17.
+  - pfSense (172.16.0.1): subnet router for 172.16.0.0/16 — remote admin reaches LAN via pfSense.
+  - deploy/tailscale-pfsense-lan.sh configure — approve route + patch ACLs from workstation.
+  - deploy/proxmox.sh --ip-address 172.16.0.101 — cluster ops via main node LAN IP.
 
---- Step 11 — Proxmox Web UI TLS via Tailscale ---
-  Reference: https://tailscale.com/docs/integrations/proxmox
-  Gate: you must answer "y" to 11. QUESTION (this is the main cluster node) or the
-  entire step is skipped — certificate setup is intended for one designated primary host.
-  If "y", 11.1 asks whether to run tailscale cert + pvenode cert set (writes certs under
-  /var/lib/papita-tailscale-pve-cert, restarts API proxy). Requires tailscale (steps 5–6),
-  jq (step 1), and pvenode.
-  Optional 11.2: installs /usr/local/sbin/papita-pve-tailscale-cert-renew.sh and
-  /etc/cron.d/papita-pve-tailscale-cert; 11.2.1 prompts for five cron time fields (empty
-  uses default 0 */12 * * *, as in Tailscale’s Proxmox doc). Alternative from Tailscale
-  (not scripted here): Serve
-  proxy to localhost:8006 for HTTPS on 443 — see the same integration page.
+--- Step 10 — Post-startup ---
+  Ceph osd unset noout after boot; optional quorum wait (10.3, /etc/default/papita-post-startup);
+  main-node WoL peers (10.2 → /etc/default/pve-main-node).
+
+--- Step 11 — Pre-shutdown ---
+  Optional pvesh stopall (11.2–11.3 → /etc/default/papita-pre-shutdown); Ceph osd set noout.
+
+--- Step 12 — Email notifications ---
+  postfix (optional SMTP relay 12.3); pvesh set /cluster/options --mailto / --mailfrom.
+
+--- Step 13 — SMART monitoring ---
+  smartmontools + /usr/local/sbin/papita-smart-scan.sh cron (13.1 schedule; default 0 3 1 * *).
+
+--- Step 14 — Enable Proxmox cluster firewall ---
+  Sets enable: 1 in /etc/pve/firewall/cluster.fw after Tailscale rule exists (step 8.1).
+
+--- Step 15 — PVE subscription nag (web UI) ---
+  proxmoxlib.js patch + pveproxy restart.
+
+--- Step 16 — Periodic backup (vzdump) ---
+  16.1 storage (default local), 16.2 mode (default snapshot), 16.3 compress (default zstd),
+  16.4 cron schedule (default 0 2 * * 0). Installs /usr/local/sbin/papita-vzdump-all.sh.
+
+--- Step 17 — Proxmox Web UI TLS via Tailscale ---
+  Main node only. tailscale cert + pvenode cert set; optional renewal cron (17.2).

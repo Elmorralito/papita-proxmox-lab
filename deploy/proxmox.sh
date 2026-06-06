@@ -13,16 +13,6 @@ CLUSTER_NODE_IDS=()
 TARGET_REMOTE_PATH="/${TARGET_USERNAME}"
 PROJECT_PATH="$(dirname "$(dirname "$(realpath "$0")")")"
 
-if ! command -v jq >/dev/null 2>&1; then
-    log "ERROR" "jq utility is not installed."
-    exit 255
-fi
-
-if ! command -v ssh >/dev/null 2>&1 || ! command -v scp >/dev/null 2>&1; then
-    log "ERROR" "SSH utilities are not installed."
-    exit 255
-fi
-
 # shellcheck source=${PROJECT_PATH}/deploy/utils.sh
 {
     cd "${PROJECT_PATH}" && source "${PROJECT_PATH}/deploy/utils.sh"
@@ -39,23 +29,90 @@ fi
     exit 255
 }
 
+if ! command -v jq >/dev/null 2>&1; then
+    log "ERROR" "jq utility is not installed."
+    exit 255
+fi
+
+if ! command -v ssh >/dev/null 2>&1 || ! command -v scp >/dev/null 2>&1; then
+    log "ERROR" "SSH utilities are not installed."
+    exit 255
+fi
+
+_deploy_tree_via_tar() {
+    local src_dir="$1"
+    local remote_dir="$2"
+    shift 2
+    local -a excludes=("$@")
+    local -a tar_cmd=(tar -C "$src_dir")
+    local pattern
+
+    # macOS bsdtar embeds com.apple.provenance xattrs; GNU tar on PVE warns on extract.
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        tar_cmd+=(--disable-copyfile)
+    fi
+
+    for pattern in "${excludes[@]}"; do
+        tar_cmd+=(--exclude="$pattern")
+    done
+    tar_cmd+=(-cf - .)
+
+    ssh "${SSH_COMMON_OPTS[@]}" "$TARGET_USERNAME@$IP_ADDRESS" mkdir -p "$remote_dir"
+    COPYFILE_DISABLE=1 "${tar_cmd[@]}" | ssh "${SSH_COMMON_OPTS[@]}" "$TARGET_USERNAME@$IP_ADDRESS" \
+        "tar -C ${remote_dir} -xf - --warning=no-unknown-keyword"
+}
+
 setup_node() {
+    local required_local_file
+    for required_local_file in \
+        src/bash/setup-pve-node.sh \
+        src/bash/misc/tailscale/default.gateways.list \
+        src/bash/misc/tailscale/default.lan.routes.list \
+        src/bash/misc/tailscale/default.tags.list \
+        src/python/misc/cluster/discover_hosts.py \
+        src/python/data/default.hosts.list; do
+        if [[ ! -f "$PROJECT_PATH/$required_local_file" ]]; then
+            log "ERROR" "Local bundle incomplete: missing ${required_local_file}"
+            exit 255
+        fi
+    done
+
     log "WARN" "Replacing ${TARGET_REMOTE_PATH}/deploy on $IP_ADDRESS (removing old copy before transfer)."
     # Pass path as argv (not inside one remote "…" string) so SC2029 does not apply; path expands locally by design.
     ssh "${SSH_COMMON_OPTS[@]}" "$TARGET_USERNAME@$IP_ADDRESS" rm -rf -- "${TARGET_REMOTE_PATH}/deploy"
 
     log "INFO" "Deploying setup-pve-node bundle to $IP_ADDRESS:$TARGET_REMOTE_PATH/deploy."
-    scp "${SSH_COMMON_OPTS[@]}" -r "$PROJECT_PATH/src/bash" "$TARGET_USERNAME@$IP_ADDRESS:$TARGET_REMOTE_PATH/deploy"
+    ssh "${SSH_COMMON_OPTS[@]}" "$TARGET_USERNAME@$IP_ADDRESS" mkdir -p "${TARGET_REMOTE_PATH}/deploy"
+    # tar preserves misc/tailscale/ reliably (macOS scp -r src/bash/. can skip nested dirs).
+    _deploy_tree_via_tar "$PROJECT_PATH/src/bash" "${TARGET_REMOTE_PATH}/deploy" \
+        __pycache__ '*.pyc' misc/cluster
+    _deploy_tree_via_tar "$PROJECT_PATH/src/python" "${TARGET_REMOTE_PATH}/deploy/python" \
+        __pycache__ '*.pyc'
     scp "${SSH_COMMON_OPTS[@]}" "$PROJECT_PATH/deploy/utils.sh" "$TARGET_USERNAME@$IP_ADDRESS:$TARGET_REMOTE_PATH/deploy/utils.sh"
     scp "${SSH_COMMON_OPTS[@]}" "$PROJECT_PATH/deploy/usage.sh" "$TARGET_USERNAME@$IP_ADDRESS:$TARGET_REMOTE_PATH/deploy/usage.sh"
-    ssh "${SSH_COMMON_OPTS[@]}" "$TARGET_USERNAME@$IP_ADDRESS" mkdir -p "${TARGET_REMOTE_PATH}/deploy/docs"
-    scp "${SSH_COMMON_OPTS[@]}" "$PROJECT_PATH/deploy/docs/setup-pve-node.usage.txt" "$TARGET_USERNAME@$IP_ADDRESS:$TARGET_REMOTE_PATH/deploy/docs/setup-pve-node.usage.txt"
+    ssh "${SSH_COMMON_OPTS[@]}" "$TARGET_USERNAME@$IP_ADDRESS" mkdir -p "${TARGET_REMOTE_PATH}/deploy/data"
+    scp "${SSH_COMMON_OPTS[@]}" "$PROJECT_PATH/deploy/data/setup-pve-node.usage.txt" "$TARGET_USERNAME@$IP_ADDRESS:$TARGET_REMOTE_PATH/deploy/data/setup-pve-node.usage.txt"
 
-    log "INFO" "Deployed src/bash/, utils.sh, usage.sh, and docs/setup-pve-node.usage.txt to $IP_ADDRESS:$TARGET_REMOTE_PATH/deploy."
+    log "INFO" "Deployed src/bash/, src/python/ (misc/cluster + data), utils.sh, usage.sh, and data/setup-pve-node.usage.txt to $IP_ADDRESS:$TARGET_REMOTE_PATH/deploy."
 
     ssh "${SSH_COMMON_OPTS[@]}" "$TARGET_USERNAME@$IP_ADDRESS" chmod -R a+rx "${TARGET_REMOTE_PATH}/deploy"
 
-    log "INFO" "Set permissions for $IP_ADDRESS:$TARGET_REMOTE_PATH/deploy."
+    local required_deploy_file
+    for required_deploy_file in \
+        setup-pve-node.sh \
+        misc/tailscale/default.gateways.list \
+        misc/tailscale/default.lan.routes.list \
+        misc/tailscale/default.tags.list \
+        python/misc/cluster/discover_hosts.py \
+        python/data/default.hosts.list; do
+        if ! ssh "${SSH_COMMON_OPTS[@]}" "$TARGET_USERNAME@$IP_ADDRESS" \
+            "test -f ${TARGET_REMOTE_PATH}/deploy/${required_deploy_file}"; then
+            log "ERROR" "Deploy bundle incomplete on ${IP_ADDRESS}: missing ${required_deploy_file}"
+            exit 255
+        fi
+    done
+
+    log "INFO" "Set permissions for $IP_ADDRESS:$TARGET_REMOTE_PATH/deploy (python bundle at .../deploy/python/)."
 
     # -tt: allocate a remote PTY so setup-pve-node.sh prompts (read -e/-p) work even if stdin here is not a TTY.
     # Remote TERM fallback when the client did not set one (e.g. some IDE terminals).

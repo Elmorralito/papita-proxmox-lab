@@ -31,7 +31,8 @@ Before making changes, confirm you understand:
 Repo context:
 - [ ] Hybrid Proxmox + AWS over Tailscale
 - [ ] Entry CLI: deploy/toolkit.sh (run from repo root)
-- [ ] PVE scripts copied to /root/deploy on nodes
+- [ ] PVE scripts copied to /root/deploy on nodes (src/bash/ → deploy/ on node)
+- [ ] PVE setup manual: deploy/data/setup-pve-node.usage.txt
 - [ ] Terraform root: terraform/plans/main.tf (S3 backend)
 - [ ] Secrets: *.tfvars, .env — never commit
 - [ ] Python: dev tooling only (no app package yet)
@@ -56,7 +57,7 @@ When you need to locate or understand a component:
 3. **Read the entrypoint** — don't start in submodules; follow the call chain:
    - `deploy/toolkit.sh` → `proxmox.sh` / `terraform.sh`
    - `terraform/plans/main.tf` → `hybrid_proxmox_aws_cluster/main.tf` → `aws/`
-   - `deploy/proxmox.sh setup-node` → SCP `src/bash/` → `setup-pve-node.sh`
+   - `deploy/proxmox.sh setup-node` → SCP `src/bash/`, `src/python/`, `utils.sh`, `usage.sh`, `data/setup-pve-node.usage.txt` → `bash setup-pve-node.sh`
 4. **Check untracked config** — `terraform/environments/config.{dev|prod|poc}.tfvars`, `.env` (gitignored)
 5. **Note absent dirs** — `libs/`, `tests/` referenced by toolkit but not yet in repo
 
@@ -79,16 +80,38 @@ Required: `-e dev\|prod`. Optional: `--env-file`, AWS SSO/MFA, `--pre-commit`, a
 | Action                         | Purpose                                          |
 | ------------------------------ | ------------------------------------------------ |
 | `setup-node`                   | SCP `src/bash/` to node, run `setup-pve-node.sh` |
-| `get-temp`                     | Cluster temperature via `sensors -j`             |
+| `get-temp`                     | Cluster temperature via `sensors -j` (step 5)    |
 | `start-cluster`                | WoL peer nodes via `pvenode wakeonlan`           |
 | `stop-cluster`                 | Per-node `pvesh stopall` + hypervisor shutdown   |
 | `cluster-nodes` / `local-node` | Discovery helpers                                |
 
-SSH: ControlMaster multiplexing; password via `PAPITA_SSH_PASSWORD` or keys.
+SSH: ControlMaster multiplexing; password via `PAPITA_SSH_PASSWORD` or keys. **Must source `utils.sh` before calling `log`.**
 
-### PVE setup steps (`setup-pve-node.sh`)
+### PVE setup (`setup-pve-node.sh`) — 17 steps
 
-1. APT → 2. Hibernate → 3. WoL → 4. Locales → 5–6. Tailscale → 7. Post-startup systemd → 8. Pre-shutdown systemd → 9. Remove subscription nag → 10. Restrict UI to Tailscale → 11. Tailscale TLS cert for :8006
+Controlled by `PVE_SETUP_LAST_STEP=17` and `_skip_pve_step` when jumping via menu.
+
+| #   | Step                          | Notes                                                                 |
+| --- | ----------------------------- | --------------------------------------------------------------------- |
+| 1   | APT + deps + cron + microcode | `apt-dependencies.list`; exits on failure                             |
+| 2   | Hibernate off                 | WoL-friendly poweroff                                                 |
+| 3   | Wake-on-LAN                   |                                                                       |
+| 4   | Locales                       |                                                                       |
+| 5   | lm-sensors                    | Enables `proxmox.sh get-temp`                                         |
+| 6   | chrony NTP                    | Configurable pool servers                                             |
+| 7   | `/etc/hosts`                  | `src/python/misc/cluster/discover_hosts.py` — **before cluster join** |
+| 8   | Tailscale setup               | sysctl, optional `cluster.fw`, optional NAT                           |
+| 9   | `tailscale up`                | Optional sanity check 9.4                                             |
+| 10  | Post-startup hook             | Quorum wait, ceph noout unset, main-node WoL                          |
+| 11  | Pre-shutdown hook             | Optional stopall, ceph noout set                                      |
+| 12  | Email                         | postfix + Proxmox mailto                                              |
+| 13  | SMART monitoring              | Monthly cron                                                          |
+| 14  | Enable cluster firewall       | `enable: 1` in `cluster.fw`                                           |
+| 15  | Subscription nag              | proxmoxlib.js patch                                                   |
+| 16  | vzdump backup cron            | Configurable schedule/storage                                         |
+| 17  | Tailscale TLS :8006           | Main node only                                                        |
+
+Manual: `deploy/data/setup-pve-node.usage.txt` (shown via `usage_setup_pve_node` in `deploy/usage.sh`).
 
 ### Terraform (`deploy/terraform.sh`)
 
@@ -98,10 +121,11 @@ Resource basename: `{plan_version}-{owner}-{project}-{environment}-{region}` (se
 
 ## Agent conventions
 
-- **Shell:** `set -euo pipefail`; source `deploy/utils.sh` + `deploy/usage.sh`; use `log INFO|WARN|ERROR`
-- **Remote deploy path on PVE:** `/root/deploy`
+- **Shell:** `set -euo pipefail`; source `deploy/utils.sh` + `deploy/usage.sh` before `log`; use `log INFO|WARN|ERROR`
+- **Remote deploy path on PVE:** `/root/deploy` (contents of `src/bash/` plus copied `utils.sh`, `usage.sh`, `data/`)
 - **Terraform edits:** under `terraform/plans/`; env values in untracked tfvars
 - **Docs:** runbooks in `docs/TIPSNTRICKS.md`; diagram in `docs/Diagrams.drawio`
+- **Adding a setup step:** bump `PVE_SETUP_LAST_STEP`, add `_skip_pve_step N`, update menu + `deploy/data/setup-pve-node.usage.txt`
 
 ## Refreshing the map
 

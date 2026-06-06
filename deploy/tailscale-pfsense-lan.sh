@@ -3,8 +3,10 @@
 set -euo pipefail
 
 PROJECT_PATH="$(dirname "$(dirname "$(realpath "$0")")")"
-LAN_CIDR="${LAN_CIDR:-172.16.1.0/24}"
-LAN_TEST_IP="${LAN_TEST_IP:-172.16.1.101}"
+LAN_CIDR="${LAN_CIDR:-172.16.0.0/16}"
+LAN_TEST_IP="${LAN_TEST_IP:-172.16.0.101}"
+MAIN_PVE_LAN_IP="${MAIN_PVE_LAN_IP:-172.16.0.101}"
+MAIN_PVE_TAILSCALE_NAME="${MAIN_PVE_TAILSCALE_NAME:-}"
 PFSENSE_NAME="${PFSENSE_NAME:-pfsense-fw001}"
 TAILSCALE_TAILNET="${TAILSCALE_TAILNET:-tailf1ad0d.ts.net}"
 
@@ -143,11 +145,14 @@ PY
 patch_acl_grants() {
     local current merged
     current="$(ts_api GET "/tailnet/${TAILSCALE_TAILNET}/acl")"
-    merged="$(python3 - <<'PY' "$current" "$LAN_CIDR"
+    merged="$(python3 - <<'PY' "$current" "$LAN_CIDR" "$MAIN_PVE_LAN_IP" "$MAIN_PVE_TAILSCALE_NAME"
 import json, sys
 
 acl = json.loads(sys.argv[1])
 lan = sys.argv[2]
+main_lan = sys.argv[3]
+main_ts = sys.argv[4].strip()
+main_ip = f"{main_lan}/32"
 
 tag_owners = acl.setdefault("tagOwners", {})
 for tag in (
@@ -164,11 +169,16 @@ new_grants = [
     {"src": ["tag:auth-client"], "dst": [lan], "ip": ["*"]},
     {"src": ["tag:pfsense-oldtimers-client"], "dst": [lan], "ip": ["*"]},
     {"src": ["tag:private-node"], "dst": [lan], "ip": ["*"]},
+    {"src": ["tag:private-node"], "dst": [main_ip], "ip": ["tcp:8006", "tcp:22"]},
     {"src": ["tag:pve-oldtimers-cluster"], "dst": [lan], "ip": ["*"]},
-    {"src": ["tag:server-node"], "dst": [lan], "ip": ["tcp:443", "tcp:8006", "tcp:22"]},
+    {"src": ["tag:server-node"], "dst": [main_ip], "ip": ["tcp:443", "tcp:8006", "tcp:22"]},
     {"src": [lan], "dst": ["tag:pve-oldtimers-cluster"], "ip": ["*"]},
     {"src": [lan], "dst": ["tag:private-node"], "ip": ["*"]},
 ]
+if main_ts:
+    new_grants.append(
+        {"src": ["tag:private-node"], "dst": [main_ts], "ip": ["tcp:8006", "tcp:22"]}
+    )
 
 grants = acl.setdefault("grants", [])
 
@@ -179,13 +189,19 @@ def grant_key(g):
         tuple(g.get("ip", [])),
     )
 
+# Replace broad server-node → whole LAN :8006 grant with main-node-only rule.
+superseded = {
+    (("tag:server-node",), (lan,), ("tcp:443", "tcp:8006", "tcp:22")),
+}
+grants[:] = [g for g in grants if grant_key(g) not in superseded]
+
 existing = {grant_key(g) for g in grants}
 for g in new_grants:
     if grant_key(g) not in existing:
         grants.append(g)
 
 auto = acl.setdefault("autoApprovers", {}).setdefault("routes", {})
-for tag in ("tag:pfsense-lan-router", "tag:pve-oldtimers-cluster", "tag:server-node"):
+for tag in ("tag:pfsense-lan-router",):
     routes = auto.setdefault(tag, [])
     if lan not in routes:
         routes.append(lan)
@@ -194,17 +210,18 @@ print(json.dumps(acl))
 PY
 )"
     ts_api POST "/tailnet/${TAILSCALE_TAILNET}/acl" "$merged" >/dev/null
-    log INFO "ACL updated with grants for ${LAN_CIDR}."
+    log INFO "ACL updated with grants for ${LAN_CIDR} (main PVE admin: ${MAIN_PVE_LAN_IP})."
 }
 
 print_pfsense_steps() {
     cat <<EOF
-pfSense WebGUI (reachable at https://100.91.3.47 over Tailscale):
+pfSense WebGUI (LAN ${LAN_CIDR}; gateway 172.16.0.1):
 
 1. VPN → Tailscale → Settings → Routing
    - Advertised Routes: ${LAN_CIDR}
    - Accept Subnet Routes: enabled (for site-to-site)
    - Save
+   - Approve route in Tailscale admin (or run: $0 approve-routes)
 
 2. Firewall → NAT → Outbound → Hybrid outbound NAT
    - Add: Interface Tailscale, Source ${LAN_CIDR}, Destination any, Translation interface address
@@ -212,8 +229,14 @@ pfSense WebGUI (reachable at https://100.91.3.47 over Tailscale):
 3. Firewall → Rules → LAN (above block rules)
    - Pass LAN net → 100.64.0.0/10
 
-4. Optional: Firewall → Rules → Tailscale
-   - Pass 100.64.0.0/10 → ${LAN_CIDR} (defense in depth; subnet routes may bypass this tab)
+4. Optional — restrict Proxmox UI to main node (defense in depth; ACLs are primary):
+   - Firewall → Aliases → TAILNET_ALLOWED: admin laptop 100.x /32 addresses
+   - LAN rules (order matters):
+     - Pass: Source TAILNET_ALLOWED → Destination ${MAIN_PVE_LAN_IP}, TCP 8006, 22
+     - Block: Source 100.64.0.0/10 → Destination <worker PVE LAN IPs>, TCP 8006
+
+5. Optional: Firewall → Rules → Tailscale
+   - Pass 100.64.0.0/10 → ${LAN_CIDR} (subnet routes may bypass this tab)
 
 Then run: $0 configure
 EOF
@@ -234,6 +257,22 @@ verify_connectivity() {
         log INFO "ICMP to ${LAN_TEST_IP} succeeded."
     else
         log WARN "ICMP to ${LAN_TEST_IP} failed (host firewall may block ping)."
+    fi
+    if command -v curl >/dev/null 2>&1; then
+        log INFO "Proxmox UI probe https://${LAN_TEST_IP}:8006 (main node) ..."
+        if curl -fsSk --connect-timeout 5 "https://${LAN_TEST_IP}:8006/" >/dev/null 2>&1; then
+            log INFO "HTTPS :8006 on ${LAN_TEST_IP} responded (admin path via pfSense route)."
+        else
+            log WARN "HTTPS :8006 on ${LAN_TEST_IP} did not respond (node down, firewall, or ACL)."
+        fi
+    fi
+    if [[ -n "${MAIN_PVE_TAILSCALE_NAME:-}" ]] && command -v curl >/dev/null 2>&1; then
+        log INFO "Proxmox UI probe https://${MAIN_PVE_TAILSCALE_NAME}:8006 (MagicDNS) ..."
+        if curl -fsSk --connect-timeout 5 "https://${MAIN_PVE_TAILSCALE_NAME}:8006/" >/dev/null 2>&1; then
+            log INFO "HTTPS :8006 on ${MAIN_PVE_TAILSCALE_NAME} responded (direct tailnet path)."
+        else
+            log WARN "HTTPS :8006 on ${MAIN_PVE_TAILSCALE_NAME} did not respond."
+        fi
     fi
 }
 
