@@ -94,7 +94,6 @@ exclude = [".git", "__pycache__", "dist", "*.ipynb"]
 max-line-length = 120
 max-complexity = 18
 
-
 [tool.interrogate]
 paths = ["./"]
 exclude = [
