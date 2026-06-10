@@ -1141,3 +1141,398 @@ In [Tailscale admin → DNS](https://login.tailscale.com/admin/dns):
 | Perl `Setting locale failed` / `LC_CTYPE=UTF-8` | SSH client (macOS/Cursor) sends invalid `LC_CTYPE=UTF-8`                 | Node: `locale-gen en_US.UTF-8`; `update-locale LANG=en_US.UTF-8 LC_CTYPE=en_US.UTF-8`; set sshd `AcceptEnv LANG LANGUAGE` (not `LC_*`); Mac: `SendEnv -LC_CTYPE` in `~/.ssh/config` |
 | WAN WebGUI unreachable                          | Default WAN block (expected)                                             | Access via LAN IP or add controlled WAN allow rule                                                                                                                                  |
 | WAN/LAN same subnet                             | Overlapping ranges                                                       | Re-number LAN to non-overlapping RFC1918 range                                                                                                                                      |
+
+---
+
+## TrueNAS Scale — storage pools, Scrutiny, and Uptime Kuma
+
+This section covers **TrueNAS Scale** storage pool behaviour, the **Scrutiny** SMART app, and **Uptime Kuma** monitoring for a homelab with **pfSense** and a **3-node Proxmox VE** cluster (`pvenode-001` … `003`, LAN `172.16.0.0/16`, gateway `172.16.0.1`).
+
+**References:**
+
+- [TrueNAS Scale docs](https://www.truenas.com/docs/scale/)
+- [Scrutiny (GitHub)](https://github.com/AnalogJ/scrutiny)
+- [Scrutiny TrueNAS app catalog](https://apps.truenas.com/catalog/scrutiny_community/)
+- [Uptime Kuma (GitHub)](https://github.com/louislam/uptime-kuma)
+- [TrueNAS 25.10 SMART changes](https://forums.truenas.com/t/smart-monitoring-functionality-missing-after-latest-update-25-10-rc/55206)
+
+---
+
+### ZFS pools — what is possible
+
+| Scenario                                          | Possible?                        | Notes                                                                                           |
+| ------------------------------------------------- | -------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Create pool on a **partition** (CLI)              | Yes                              | `zpool create pool /dev/disk/by-partuuid/...` works at the ZFS level                            |
+| Create pool on a **partition** (GUI)              | No (practical)                   | GUI uses **whole disks**; TrueNAS partitions them internally (swap + ZFS)                       |
+| **Mixed drive sizes in one vdev** (today)         | Not recommended / blocked in GUI | Vdev capacity = **smallest disk**; GUI may require **Force**                                    |
+| **Mixed sizes across separate vdevs** in one pool | Yes                              | e.g. RAIDZ2 on 3 TB drives + another RAIDZ2 on 8 TB drives                                      |
+| **AnyRaid** (mixed sizes, full capacity per disk) | **TrueNAS 26** / OpenZFS 2.4     | Requires upgrade + `zpool upgrade`; **not reversible** to older ZFS                             |
+| **RAIDZ expansion** (add disk to RAIDZ vdev)      | Yes (24.10+)                     | Add one disk at a time; slow; some parity headroom until rewrite                                |
+| **Remove disk from RAIDZ vdev**                   | No                               | Replace disks or destroy pool                                                                   |
+| **Remove disk from mirror vdev**                  | Yes                              | `zpool detach` one mirror leg                                                                   |
+| **Remove spare / cache / log device**             | Yes                              | Detach via GUI or CLI                                                                           |
+| **Replace with larger disks**                     | Yes                              | Replace one-by-one, resilver; pool grows when **all** disks in vdev are upgraded (`autoexpand`) |
+| **Pools not in `zpool list`**                     | Expected                         | Exported/foreign pools — use `zpool import`                                                     |
+| **Factory reset / wipe all disks**                | Yes                              | Export/destroy pools first, then per-disk wipe                                                  |
+
+**Is mixed-size in one vdev worth it today?** Usually **no** — capacity is capped by the smallest disk. Prefer separate vdevs or wait for **AnyRaid** on TrueNAS 26 if you need heterogeneous drives in one vdev.
+
+**Partition-based pools on TrueNAS:** Avoid unless you accept CLI-only management; the supported path is **whole disks** in the GUI.
+
+---
+
+### Remove disks from pools
+
+Depends on how the disk is used in ZFS:
+
+| Role                     | Action                                                                     |
+| ------------------------ | -------------------------------------------------------------------------- |
+| **Spare**                | GUI: pool status → Remove/Detach; CLI: `zpool remove <pool> <disk-by-id>`  |
+| **Mirror leg**           | `zpool detach <pool> <disk-by-id>` — shrinks mirror to single disk         |
+| **RAIDZ / dRAID member** | **Cannot remove** one disk; replace failed disk or add vdev / destroy pool |
+| **L2ARC / SLOG**         | Detach/remove via pool device management                                   |
+| **Boot pool**            | Separate from data pools — do not treat as data pool disk                  |
+
+Always **back up** before structural changes.
+
+---
+
+### Factory reset disks (remove from all pools)
+
+**System → General → Reset to Defaults** resets **settings only** — it does **not** wipe data pools.
+
+1. **Back up** data and export encryption keys if used.
+2. For **each pool**: **Storage → Pools → ⋮ → Export/Disconnect** with **Destroy data on this pool** enabled.
+3. Wipe leftover metadata per disk:
+
+```bash
+# Find disks
+lsblk
+zpool import   # should show nothing for wiped disks
+
+# Wipe partition tables (replace sdX with correct disk — NOT the boot disk)
+wipefs -a /dev/sdX
+sgdisk --zap-all /dev/sdX
+```
+
+If `wipefs: Device or resource busy`: something still has the disk open — export/destroy the pool first, unmount partitions, or reboot.
+
+---
+
+### Pools not shown in `zpool list`
+
+`zpool list` shows only **imported** pools.
+
+```bash
+zpool import              # pools on disk but not loaded
+zpool import -d /dev/disk/by-id
+zpool import -v
+```
+
+If a pool appears in `zpool import` but not in `zpool list`, it is **on disk but not imported**. Use **Storage → Import Pool** in the GUI or `zpool import <poolname>`.
+
+To clear stale labels after export: `wipefs -a` / `sgdisk --zap-all` on the disk (see above).
+
+---
+
+### Monitoring stack — what to install
+
+| Layer                   | Tool                                  | Purpose                                   |
+| ----------------------- | ------------------------------------- | ----------------------------------------- |
+| Built-in                | **Reporting**, **Alerts**, SMART cron | Baseline CPU/memory/network/pool I/O      |
+| Disk health             | **Scrutiny** app                      | SMART history, trends, failure thresholds |
+| Uptime / services       | **Uptime Kuma** app                   | HTTP/TCP/DNS checks, Telegram alerts      |
+| Deep metrics (optional) | InfluxDB + Grafana + Telegraf         | Long-term graphs; heavier                 |
+
+**Minimal recommended stack:**
+
+```
+Built-in Reporting + Alerts + SMART cron
+  + Scrutiny (disk history)
+  + Uptime Kuma (services/uptime)
+```
+
+Avoid installing Netdata + Beszel + Grafana + Glances together on the NAS — redundant RAM use.
+
+**TrueNAS 25.10+:** built-in SMART scheduling UI was removed; use **Data Protection → Periodic SMART Tests** (cron) and **Scrutiny** for visualization.
+
+---
+
+### Scrutiny — TrueNAS app install checklist
+
+Requires **TrueNAS Scale ≥ 24.10.2.2**. App version: **v0.9.2-omnibus** (web + collector + embedded InfluxDB).
+
+#### Prerequisites
+
+1. **Apps → Settings** — configure an **apps pool/dataset**.
+2. List disks on the shell:
+
+```bash
+smartctl --scan
+# Example output:
+# /dev/sda -d scsi
+# /dev/nvme0 -d nvme
+```
+
+#### Install wizard
+
+| Section                | Setting             | Value                                                   |
+| ---------------------- | ------------------- | ------------------------------------------------------- |
+| **Disks**              | Host Disk Path      | `/dev/sda`, `/dev/sdb`, `/dev/nvme0`, …                 |
+| **Disks**              | Container Disk Path | **Same as host** (e.g. `/dev/sda` → `/dev/sda`)         |
+| **Disks**              | Elevate Privileges  | **Enabled** (required for **NVMe** SMART/temp)          |
+| **Network → WebUI**    | Bind Mode           | **Published**                                           |
+| **Network → WebUI**    | Port                | `31054` (default) or any free port                      |
+| **Network → WebUI**    | Host IPs            | Empty (= all interfaces)                                |
+| **Network → InfluxDB** | Bind Mode           | **None** or **Expose only** (no LAN access needed)      |
+| **Storage**            | Config + InfluxDB   | **ixVolume** (defaults)                                 |
+| **Resources**          | Memory              | ≥ **1024 MB** (512 MB minimum; default 4096 MB is fine) |
+| **Resources**          | CPUs                | 1–2                                                     |
+
+**Disk path rules:**
+
+| Drive type   | Use                        | Avoid                                     |
+| ------------ | -------------------------- | ----------------------------------------- |
+| SATA/SAS     | `/dev/sda`, `/dev/sdb`     | —                                         |
+| NVMe         | `/dev/nvme0`, `/dev/nvme1` | `/dev/nvme0n1` (less complete SMART data) |
+| Boot/OS disk | Optional                   | Skip unless intentional                   |
+
+> [!TIP]
+> If install **times out with multiple disks**, add **one disk**, install, then **Edit app** and add the rest.
+
+#### WebUI access
+
+Scrutiny **includes a WebUI** in the TrueNAS app (same omnibus image).
+
+| Method | URL                                    |
+| ------ | -------------------------------------- |
+| GUI    | **Apps → Installed → Scrutiny → Open** |
+| Direct | `http://<truenas-ip>:31054`            |
+
+Use **HTTP**, not HTTPS (unless behind a reverse proxy).
+
+Verify from shell:
+
+```bash
+curl -s http://127.0.0.1:31054/api/health
+docker ps | grep -i scrutiny
+```
+
+#### After install — SMART cron (required)
+
+Scrutiny **reads** SMART data; it does **not** schedule tests.
+
+1. **Data Protection → Periodic SMART Tests**
+2. Add **Short** (weekly) and **Long** (monthly) tasks for pool disks.
+3. On **fresh 25.10+ installs**, cron jobs may not exist by default — create manually.
+
+#### Scrutiny vs TrueNAS responsibilities
+
+| Task                             | Who               |
+| -------------------------------- | ----------------- |
+| SMART history & trends           | Scrutiny          |
+| Run SHORT/LONG SMART tests       | TrueNAS cron      |
+| Pool / ZFS health                | TrueNAS           |
+| Alert if Scrutiny is down        | Uptime Kuma       |
+| Alert if disk failing thresholds | Scrutiny webhooks |
+
+#### Scrutiny troubleshooting
+
+| Symptom                               | Fix                                                                        |
+| ------------------------------------- | -------------------------------------------------------------------------- |
+| WebUI unreachable                     | Confirm **Published** port; app **Running**; use `http://` not `https://`  |
+| Port 31054 refused                    | Check actual port in **Edit → Network**; test with `curl` on NAS shell     |
+| NVMe shows **failed** with good SMART | Enable Elevate Privileges; clear config/db and restart app if status stuck |
+| No disks in dashboard                 | Wait 5–15 min; verify disk paths; check `smartctl -a /dev/sdX` on host     |
+| `wipefs` busy on disk                 | Export pool first; do not wipe boot disk                                   |
+| Healthcheck timeout                   | Increase start_period/timeout; or install with one disk first              |
+
+Clear app data (loses history) if NVMe status stuck after enabling privileges:
+
+```bash
+# Stop Scrutiny app first via GUI
+rm -rf /mnt/.ix-apps/app_mounts/scrutiny/config/*
+rm -rf /mnt/.ix-apps/app_mounts/scrutiny/influxdb/*
+```
+
+---
+
+### Uptime Kuma — TrueNAS app basics
+
+Default catalog ports: **WebUI `31054` → Scrutiny**, **Uptime Kuma `31050`**.
+
+#### Minimum resources
+
+| App         | RAM (min) | RAM (comfortable)                  | CPU | Disk                            |
+| ----------- | --------- | ---------------------------------- | --- | ------------------------------- |
+| Scrutiny    | 512 MB    | 1 GB                               | 1   | ~500 MB–2 GB (InfluxDB history) |
+| Uptime Kuma | 512 MB    | 512 MB–1 GB (SQLite, <50 monitors) | 1   | ~1 GB+                          |
+
+TrueNAS app defaults set **4096 MB** limits — safe but overkill; **1024 MB** each is usually enough.
+
+Use **SQLite** (default) for Kuma on a memory-tight NAS; avoid embedded **MariaDB** unless you need hundreds of monitors.
+
+#### Connect to the WebUI
+
+1. **Apps → Installed → Uptime Kuma → Open**
+2. Or `http://<truenas-ip>:31050` (confirm port in **Edit → Network**)
+
+First visit: create **admin username/password** immediately.
+
+---
+
+### Uptime Kuma — monitors for this homelab
+
+Checks run **from the TrueNAS container** — they test what the NAS can reach (LAN, Tailscale, internet).
+
+Prefer **HTTP(s)** and **TCP** over **Ping** (ICMP often blocked from the container).
+
+#### Tier 1 — critical
+
+| Monitor        | Type    | Target                                                      |
+| -------------- | ------- | ----------------------------------------------------------- |
+| Internet / WAN | HTTP(s) | `https://1.1.1.1/cdn-cgi/trace`                             |
+| pfSense DNS    | DNS     | `google.com` @ `172.16.0.1`                                 |
+| pfSense GUI    | HTTP(s) | `https://172.16.0.1` (ignore TLS if self-signed)            |
+| TrueNAS GUI    | HTTP(s) | `https://<truenas-ip>:443`                                  |
+| Proxmox ×3     | HTTP(s) | `https://pvenode-00X:8006` (keyword: `Proxmox`; ignore TLS) |
+
+#### Tier 2 — services
+
+| Monitor      | Type    | Target                                       |
+| ------------ | ------- | -------------------------------------------- |
+| TrueNAS SMB  | TCP     | `<nas-ip>:445`                               |
+| TrueNAS NFS  | TCP     | `<nas-ip>:2049`                              |
+| Scrutiny     | HTTP(s) | `http://<nas-ip>:31054`                      |
+| Proxmox SSH  | TCP     | `<node-ip>:22`                               |
+| Internal DNS | DNS     | `pvenode-001.<domain>` via internal resolver |
+
+#### Tier 3 — Tailscale & internet
+
+| Monitor                 | Type    | Target                                |
+| ----------------------- | ------- | ------------------------------------- |
+| Tailscale control plane | HTTP(s) | `https://controlplane.tailscale.com`  |
+| PVE via Tailscale       | HTTP(s) | `https://100.x.x.x:8006` (ignore TLS) |
+| TrueNAS via Tailscale   | HTTP(s) | `https://100.x.x.x:443`               |
+
+**LAN vs Tailscale pairs** help isolate failures:
+
+| LAN  | Tailscale | Likely issue              |
+| ---- | --------- | ------------------------- |
+| Up   | Up        | Healthy                   |
+| Up   | Down      | Tailscale / subnet routes |
+| Down | Up        | LAN routing / switch      |
+| Down | Down      | Host offline              |
+
+#### Push monitors (scheduled jobs)
+
+Use for backups, scrubs, SMART cron completion:
+
+```bash
+curl -fsS "http://<kuma-host>:31050/api/push/<TOKEN>?status=up&msg=scrub+ok"
+```
+
+#### What Kuma cannot monitor from TrueNAS
+
+- Proxmox **quorum / Ceph** state (use push scripts or API checks)
+- pfSense **internal** firewall state (use GUI port checks)
+- **Docker container health** on TrueNAS (docker socket not exposed to Kuma app)
+- Disks on **Proxmox nodes** (Scrutiny only sees **local TrueNAS disks**)
+
+---
+
+### Uptime Kuma — Telegram notification template (HTML)
+
+**Settings → Notifications → Telegram:**
+
+1. Bot token from [@BotFather](https://t.me/BotFather)
+2. Chat ID from [@userinfobot](https://t.me/userinfobot) or getUpdates
+3. Enable **Use Custom Template**
+4. **Message Format:** `HTML`
+5. Paste template below; **Test** before assigning to monitors
+
+```liquid
+{%- assign is_down = false -%}
+{%- assign is_up = false -%}
+{%- if heartbeatJSON -%}
+  {%- if heartbeatJSON.status == 0 -%}
+    {%- assign is_down = true -%}
+  {%- elsif heartbeatJSON.status == 1 -%}
+    {%- assign is_up = true -%}
+  {%- endif -%}
+{%- endif -%}
+
+{%- if is_down -%}
+🚨 <b>ALERT — SERVICE DOWN</b>
+{%- elsif is_up -%}
+✅ <b>RECOVERED — SERVICE UP</b>
+{%- else -%}
+⚠️ <b>STATUS UPDATE</b>
+{%- endif -%}
+
+━━━━━━━━━━━━━━━━━━━━
+<b>Monitor:</b> {{ name }}
+<b>Status:</b> {{ status }}
+<b>Target:</b> <code>{{ hostnameOrURL }}</code>
+<b>Message:</b> {{ msg }}
+
+{%- if heartbeatJSON -%}
+{%- if heartbeatJSON.localDateTime -%}
+<b>Time:</b> {{ heartbeatJSON.localDateTime }}
+{%- endif -%}
+{%- if heartbeatJSON.ping -%}
+<b>Response:</b> {{ heartbeatJSON.ping }} ms
+{%- endif -%}
+{%- if heartbeatJSON.retries and heartbeatJSON.retries > 0 -%}
+<b>Retries:</b> {{ heartbeatJSON.retries }}
+{%- endif -%}
+{%- endif -%}
+
+{%- if monitorJSON.type -%}
+<b>Type:</b> <code>{{ monitorJSON.type | upcase }}</code>
+{%- endif -%}
+
+{%- if is_down -%}
+<b>Hints:</b>
+{%- if name contains "pfSense" or name contains "Gateway" -%}
+ Check WAN, DNS, Tailscale subnet routes
+{%- elsif name contains "Proxmox" or name contains "PVE" -%}
+ Check quorum: <code>pvecm status</code>
+{%- elsif name contains "TrueNAS" or name contains "NAS" -%}
+ Check <code>zpool status</code> and Scrutiny
+{%- elsif name contains "Internet" -%}
+ WAN down while LAN may still work — check pfSense gateway
+{%- else -%}
+ Compare LAN vs Tailscale monitors if both exist
+{%- endif -%}
+{%- endif -%}
+
+<i>Homelab • Uptime Kuma</i>
+```
+
+**Template variables:** `name`, `status`, `hostnameOrURL`, `msg`, `monitorJSON`, `heartbeatJSON`. Use `monitorJSON.description`, `monitorJSON.pathName`, `monitorJSON.tags` for extra context.
+
+**Proxmox HTTPS monitors:** enable **Ignore TLS/SSL errors** (self-signed certs).
+
+---
+
+### TrueNAS Scale monitoring — quick reference
+
+| Port / service          | Default port | Monitor type               |
+| ----------------------- | ------------ | -------------------------- |
+| TrueNAS WebUI           | 443          | HTTP(s)                    |
+| TrueNAS SSH             | 22           | TCP                        |
+| TrueNAS SMB             | 445          | TCP                        |
+| TrueNAS NFS             | 2049         | TCP                        |
+| Scrutiny WebUI          | 31054        | HTTP(s)                    |
+| Uptime Kuma             | 31050        | HTTP(s)                    |
+| pfSense GUI             | 443          | HTTP(s)                    |
+| pfSense DNS             | 53           | DNS                        |
+| Proxmox WebUI/API       | 8006         | HTTP(s)                    |
+| Proxmox SSH             | 22           | TCP                        |
+| Corosync                | 5405         | TCP                        |
+| Tailscale control plane | 443          | HTTP(s)                    |
+| Internet check          | —            | HTTP(s) → Cloudflare trace |
+
+> [!NOTE]
+> Allow **LAN → monitored ports** on pfSense if rules are tightened beyond defaults. Kuma on TrueNAS must reach targets on `172.16.0.0/16` and Tailscale `100.x.x.x` addresses.
