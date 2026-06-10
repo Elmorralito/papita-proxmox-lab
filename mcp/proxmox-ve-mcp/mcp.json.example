@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "proxmox-ve": {
+      "command": "poetry",
+      "args": ["run", "proxmox-ve-mcp"],
+      "cwd": "/absolute/path/to/papita-proxmox-lab",
+      "env": {
+        "PVE_HOST": "pvenode-001.your-tailnet.ts.net",
+        "PVE_PORT": "8006",
+        "PVE_USER": "mcp-agent@pam",
+        "PVE_TOKEN_ID": "mcp-cursor",
+        "PVE_TOKEN_SECRET": "REPLACE_FROM_SECRET_STORE",
+        "PVE_VERIFY_SSL": "true"
+      }
+    }
+  }
+}

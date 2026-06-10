@@ -6,7 +6,8 @@ authors = ["Proxmox AWS Cluster", "Elmoralito <drestrepohinc@gmail.com>"]
 package-mode = false
 
 [tool.poetry.dependencies]
-python = ">=3.9.1,<4.0.0"
+python = ">=3.11,<4.0.0"
+proxmox-ve-mcp = { path = "./mcp/proxmox-ve-mcp", develop = true }
 
 [tool.poetry.group.pre-commit.dependencies]
 black = "^24.4.2"
@@ -19,6 +20,11 @@ build = "^1.2.2.post1"
 flake8-pyproject = "^1.2.3"
 poetry = "^2.2.1"
 interrogate = "^1.7.0"
+
+[tool.poetry.group.test.dependencies]
+pytest = "^8.3.1"
+pytest-asyncio = "^0.25.0"
+respx = "^0.22.0"
 
 [tool.pylint.'MESSAGES CONTROL']
 disable = [
@@ -46,7 +52,17 @@ disable = [
     "unnecessary-comprehension",
     "consider-using-dict-comprehension",
     "E1101",
-    "too-many-instance-attributes"
+    "too-many-instance-attributes",
+    "too-many-arguments",
+    "too-many-positional-arguments",
+    "global-statement",
+    "redefined-builtin",
+    "too-many-locals",
+    "too-many-branches",
+    "too-many-return-statements",
+    "too-many-statements",
+    "chained-comparison",
+    "implicit-str-concat",
 ]
 
 
@@ -80,6 +96,7 @@ extend_skip = [".md", ".json", ".yaml", ".yml", ".sh"]
 known_first_party = [
     "python.datafiles",
     "python.misc",
+    "proxmox_ve_mcp",
 ]
 sections = ["FUTURE", "STDLIB", "THIRDPARTY", "FIRSTPARTY", "LOCALFOLDER"]
 py_version = 312
@@ -99,6 +116,7 @@ paths = ["./"]
 exclude = [
     "./node_modules",
     "./tests",
+    "./mcp/proxmox-ve-mcp/tests",
     "./terraform",
     "./deploy",
     "./libs",
@@ -121,3 +139,8 @@ ignore-private = true
 ignore-magic = true
 ignore-property-decorators = false
 ignore-nested-functions = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests", "mcp/proxmox-ve-mcp/tests"]
+pythonpath = ["mcp/proxmox-ve-mcp/src"]

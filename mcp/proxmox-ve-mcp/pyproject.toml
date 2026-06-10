@@ -1,0 +1,35 @@
+[project]
+name = "proxmox-ve-mcp"
+version = "0.1.0a5"
+description = "Model Context Protocol server for Proxmox VE cluster API operations."
+readme = "README.md"
+authors = [{ name = "Elmorralito", email = "drestrepohinc@gmail.com" }]
+requires-python = ">=3.11,<4"
+dependencies = [
+    "httpx (>=0.28.1,<0.29.0)",
+    "mcp (>=1.9.0,<2.0.0)",
+    "pydantic (>=2.3.0,<3.0)",
+    "pydantic-settings (>=2.6.0,<3.0)",
+    "python-dotenv (>=1.0.1,<2.0)",
+]
+
+[project.optional-dependencies]
+dev = [
+    "respx (>=0.22.0,<0.23.0)",
+]
+
+[project.scripts]
+proxmox-ve-mcp = "proxmox_ve_mcp.server:main"
+proxmox-ve-mcp-smoke = "proxmox_ve_mcp.smoke_cli:main"
+
+[project.urls]
+HomePage = "https://github.com/Elmorralito/papita-proxmox-lab/tree/main/mcp/proxmox-ve-mcp"
+Documentation = "https://github.com/Elmorralito/papita-proxmox-lab/blob/main/mcp/proxmox-ve-mcp/README.md"
+
+[tool.poetry]
+package-mode = true
+packages = [{ include = "proxmox_ve_mcp", from = "src" }]
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"

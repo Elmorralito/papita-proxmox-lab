@@ -1,0 +1,263 @@
+#!/usr/bin/env bash
+# Install, update, test, and sync Cursor MCP servers under mcp/.
+# shellcheck disable=SC1090,SC1091
+set -euo pipefail
+
+ACTION=
+MCP_SERVER=
+SMOKE_EXTENDED=0
+CURSOR_MCP_JSON="${CURSOR_MCP_JSON:-${HOME}/.cursor/mcp.json}"
+
+PROJECT_PATH="$(dirname "$(dirname "$(realpath "$0")")")"
+MCP_ROOT="${PROJECT_PATH}/mcp"
+
+# shellcheck source=${PROJECT_PATH}/deploy/utils.sh
+{
+    cd "${PROJECT_PATH}" && source "${PROJECT_PATH}/deploy/utils.sh"
+} || {
+    echo "[ERROR] Runtime - cannot load utils path."
+    exit 255
+}
+
+# shellcheck source=${PROJECT_PATH}/deploy/usage.sh
+source "${PROJECT_PATH}/deploy/usage.sh"
+
+if ! command -v poetry >/dev/null 2>&1; then
+    log "ERROR" "poetry is not installed."
+    exit 255
+fi
+
+if ! command -v jq >/dev/null 2>&1; then
+    log "ERROR" "jq is not installed."
+    exit 255
+fi
+
+_mcp_packages() {
+    local dir
+    for dir in "${MCP_ROOT}"/*; do
+        [[ -d "${dir}" ]] || continue
+        [[ -f "${dir}/pyproject.toml" ]] || continue
+        basename "${dir}"
+    done
+}
+
+_mcp_package_path() {
+    local name="$1"
+    echo "${MCP_ROOT}/${name}"
+}
+
+_resolve_server_package() {
+    local server="${1:-}"
+    if [[ -n "${server}" ]]; then
+        local pkg="${server}"
+        [[ "${pkg}" != *-mcp ]] && pkg="${server}-mcp"
+        if [[ ! -f "${MCP_ROOT}/${pkg}/pyproject.toml" ]]; then
+            log "ERROR" "Unknown MCP server '${server}' (no package ${MCP_ROOT}/${pkg})."
+            exit 1
+        fi
+        echo "${pkg}"
+        return
+    fi
+    _mcp_packages
+}
+
+_poetry_install_root() {
+    log "INFO" "Installing repo Poetry environment (includes path deps)..."
+    cd "${PROJECT_PATH}"
+    poetry lock
+    poetry install --with test --no-interaction
+}
+
+_install_package_scripts() {
+    local pkg="$1"
+    local pkg_path
+    pkg_path="$(_mcp_package_path "${pkg}")"
+    log "INFO" "Registering console scripts for ${pkg}..."
+    poetry run pip install -e "${pkg_path}" --no-deps --force-reinstall --no-cache-dir
+}
+
+cmd_list() {
+    log "INFO" "MCP packages under ${MCP_ROOT}:"
+    local pkg
+    for pkg in $(_mcp_packages); do
+        local version scripts
+        version="$(grep -E '^version = ' "${MCP_ROOT}/${pkg}/pyproject.toml" | head -1 | sed 's/version = "\(.*\)"/\1/')"
+        scripts="$(python3 -c "
+import tomllib, pathlib
+data = tomllib.loads(pathlib.Path('${MCP_ROOT}/${pkg}/pyproject.toml').read_text())
+print(' '.join(data.get('project', {}).get('scripts', {}).keys()))
+" 2>/dev/null || echo none)"
+        printf '  - %s (v%s) scripts: %s\n' "${pkg}" "${version:-?}" "${scripts:-none}"
+        if [[ -f "${MCP_ROOT}/${pkg}/mcp.json.example" ]]; then
+            jq -r '.mcpServers | keys[]' "${MCP_ROOT}/${pkg}/mcp.json.example" 2>/dev/null \
+                | sed "s/^/      cursor server: /" || true
+        fi
+    done
+}
+
+cmd_install() {
+    _poetry_install_root
+    local pkg
+    for pkg in $(_resolve_server_package "${MCP_SERVER}"); do
+        _install_package_scripts "${pkg}"
+    done
+    log "INFO" "MCP install complete. Next: ./deploy/mcp.sh cursor-sync && ./deploy/mcp.sh smoke --extended"
+}
+
+cmd_update() {
+    log "INFO" "Updating MCP packages (re-lock, reinstall, refresh scripts)..."
+    cmd_install
+}
+
+cmd_test() {
+    _poetry_install_root
+    log "INFO" "Running MCP unit tests..."
+    cd "${PROJECT_PATH}"
+    local paths=()
+    local pkg
+    for pkg in $(_resolve_server_package "${MCP_SERVER}"); do
+        paths+=("mcp/${pkg}/tests")
+    done
+    poetry run pytest "${paths[@]}" -q
+    log "INFO" "MCP tests passed."
+}
+
+cmd_smoke() {
+    _poetry_install_root
+    local pkg="${MCP_SERVER:-proxmox-ve-mcp}"
+    pkg="$(_resolve_server_package "${pkg}")"
+
+    case "${pkg}" in
+    proxmox-ve-mcp)
+        if [[ ! -x "${PROJECT_PATH}/.venv/bin/proxmox-ve-mcp-smoke" ]]; then
+            _install_package_scripts "${pkg}"
+        fi
+        ;;
+    *)
+        log "ERROR" "No smoke CLI for ${pkg}. See mcp/${pkg}/README.md."
+        exit 1
+        ;;
+    esac
+
+    local smoke_args=(poetry run proxmox-ve-mcp-smoke)
+    [[ "${SMOKE_EXTENDED}" -eq 1 ]] && smoke_args+=(--extended)
+
+    if [[ -f "${CURSOR_MCP_JSON}" ]] && jq -e '.mcpServers["proxmox-ve"].env' "${CURSOR_MCP_JSON}" >/dev/null 2>&1; then
+        log "INFO" "Loading PVE_* credentials from ${CURSOR_MCP_JSON} for smoke test."
+        # shellcheck disable=SC1090
+        eval "$(jq -r '.mcpServers["proxmox-ve"].env | to_entries[] | "export \(.key)=\(.value|@sh)"' "${CURSOR_MCP_JSON}")"
+    else
+        log "WARN" "No proxmox-ve env in ${CURSOR_MCP_JSON}; ensure PVE_* variables are set."
+    fi
+
+    cd "${PROJECT_PATH}"
+    log "INFO" "Running smoke test (${pkg})..."
+    "${smoke_args[@]}"
+}
+
+_merge_example_into_config() {
+    local example_file="$1"
+    local tmp merged
+    tmp="$(mktemp)"
+    merged="$(mktemp)"
+    sed "s|/absolute/path/to/papita-proxmox-lab|${PROJECT_PATH}|g" "${example_file}" > "${tmp}"
+
+    if [[ ! -f "${CURSOR_MCP_JSON}" ]]; then
+        mkdir -p "$(dirname "${CURSOR_MCP_JSON}")"
+        cp "${tmp}" "${CURSOR_MCP_JSON}"
+        log "INFO" "Created ${CURSOR_MCP_JSON} from $(basename "${example_file}")."
+        rm -f "${tmp}" "${merged}"
+        return
+    fi
+
+    jq -s '
+        .[0] as $base |
+        .[1] as $add |
+        reduce ($add.mcpServers | keys[]) as $k ($base;
+            if .mcpServers[$k] then
+                .mcpServers[$k].command = $add.mcpServers[$k].command |
+                .mcpServers[$k].args = $add.mcpServers[$k].args |
+                .mcpServers[$k].cwd = $add.mcpServers[$k].cwd |
+                .mcpServers[$k].env = (.mcpServers[$k].env // $add.mcpServers[$k].env)
+            else
+                .mcpServers[$k] = $add.mcpServers[$k]
+            end
+        )
+    ' "${CURSOR_MCP_JSON}" "${tmp}" > "${merged}"
+    mv "${merged}" "${CURSOR_MCP_JSON}"
+    rm -f "${tmp}"
+    log "INFO" "Merged $(basename "${example_file}") into ${CURSOR_MCP_JSON} (existing env preserved)."
+}
+
+cmd_cursor_sync() {
+    local found=0
+    local pkg example
+    for pkg in $(_mcp_packages); do
+        example="${MCP_ROOT}/${pkg}/mcp.json.example"
+        if [[ -f "${example}" ]]; then
+            found=1
+            _merge_example_into_config "${example}"
+        fi
+    done
+    if [[ "${found}" -eq 0 ]]; then
+        log "WARN" "No mcp.json.example files found under ${MCP_ROOT}."
+        exit 1
+    fi
+    log "INFO" "Cursor MCP config synced. Edit secrets in ${CURSOR_MCP_JSON} then reload Cursor."
+}
+
+while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+    list | install | update | test | smoke | cursor-sync)
+        ACTION="$1"
+        shift
+        ;;
+    --server | -s)
+        MCP_SERVER="$2"
+        shift 2
+        ;;
+    --extended)
+        SMOKE_EXTENDED=1
+        shift
+        ;;
+    --cursor-config | -c)
+        CURSOR_MCP_JSON="$2"
+        shift 2
+        ;;
+    --help | -h)
+        usage_mcp
+        ;;
+    *)
+        log "ERROR" "Unknown argument: $1"
+        usage_mcp
+        ;;
+    esac
+done
+
+if [[ -z "${ACTION}" ]]; then
+    log "ERROR" "Action is required."
+    usage_mcp
+fi
+
+case "${ACTION}" in
+list)
+    cmd_list
+    ;;
+install)
+    cmd_install
+    ;;
+update)
+    cmd_update
+    ;;
+test)
+    cmd_test
+    ;;
+smoke)
+    cmd_smoke
+    ;;
+cursor-sync)
+    cmd_cursor_sync
+    ;;
+esac
+
+log "INFO" "Done."

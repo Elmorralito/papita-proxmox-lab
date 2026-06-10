@@ -8,14 +8,15 @@ Network diagram source: [`docs/Diagrams.drawio`](./docs/Diagrams.drawio) (export
 
 ## Overview
 
-| Concern             | Where it lives                                                         | What it does                                                                                       |
-| ------------------- | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| **Workstation CLI** | [`deploy/toolkit.sh`](./deploy/toolkit.sh)                             | Single entrypoint: Python dev tooling, Proxmox SSH deploy, Terraform wrapper, optional AWS SSO/MFA |
-| **PVE bootstrap**   | [`src/bash/setup-pve-node.sh`](./src/bash/setup-pve-node.sh)           | Interactive 17-step node setup (APT, WoL, sensors, hosts, Tailscale, hooks, backups, TLS)          |
-| **Cluster ops**     | [`deploy/proxmox.sh`](./deploy/proxmox.sh)                             | SSH to nodes: `setup-node`, `get-temp`, `start-cluster`, `stop-cluster`                            |
-| **Tailnet + LAN**   | [`deploy/tailscale-pfsense-lan.sh`](./deploy/tailscale-pfsense-lan.sh) | Approve pfSense routes, patch Tailscale ACLs, verify admin path to main PVE                        |
-| **AWS infra**       | [`terraform/plans/`](./terraform/plans/)                               | EFS + optional VPC (**in construction** — see [Terraform plans](./terraform/plans/README.md))      |
-| **Runbooks**        | [`docs/TIPSNTRICKS.md`](./docs/TIPSNTRICKS.md)                         | Ceph, cluster join, pfSense, Tailscale, VM clipboard, maintenance                                  |
+| Concern             | Where it lives                                                         | What it does                                                                                        |
+| ------------------- | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| **Workstation CLI** | [`deploy/toolkit.sh`](./deploy/toolkit.sh)                             | Single entrypoint: Python dev tooling, Proxmox SSH deploy, Terraform wrapper, optional AWS SSO/MFA  |
+| **PVE bootstrap**   | [`src/bash/setup-pve-node.sh`](./src/bash/setup-pve-node.sh)           | Interactive 17-step node setup (APT, WoL, sensors, hosts, Tailscale, hooks, backups, TLS)           |
+| **Cluster ops**     | [`deploy/proxmox.sh`](./deploy/proxmox.sh)                             | SSH to nodes: `setup-node`, `get-temp`, `start-cluster`, `stop-cluster`                             |
+| **Tailnet + LAN**   | [`deploy/tailscale-pfsense-lan.sh`](./deploy/tailscale-pfsense-lan.sh) | Approve pfSense routes, patch Tailscale ACLs, verify admin path to main PVE                         |
+| **AWS infra**       | [`terraform/plans/`](./terraform/plans/)                               | EFS + optional VPC (**in construction** — see [Terraform plans](./terraform/plans/README.md))       |
+| **Runbooks**        | [`docs/TIPSNTRICKS.md`](./docs/TIPSNTRICKS.md)                         | Ceph, cluster join, pfSense, Tailscale, VM clipboard, maintenance                                   |
+| **Cursor MCP**      | [`mcp/`](./mcp/) · [`deploy/mcp.sh`](./deploy/mcp.sh)                  | Install/update MCP servers; [`proxmox-ve-mcp`](./mcp/proxmox-ve-mcp/) for Proxmox REST over `:8006` |
 
 **Lab topology (default):**
 

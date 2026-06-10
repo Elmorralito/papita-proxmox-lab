@@ -206,3 +206,38 @@ check_action_help() {
     "$function_name"
   fi
 }
+
+usage_mcp() {
+  echo -e "${GREEN_TEXT}Usage:${NC_TEXT} deploy/mcp.sh ACTION [OPTIONS]"
+  cat << EOF
+
+  Install and maintain Cursor MCP servers under mcp/.
+
+  ACTION (required, position 1):
+    list          List MCP packages and Cursor server names
+    install       poetry install + register console scripts (all or --server)
+    update        Same as install (re-lock and reinstall)
+    test          Run pytest for MCP package test suites
+    smoke         Post-install connectivity smoke test (proxmox-ve-mcp)
+    cursor-sync   Merge mcp.json.example into ~/.cursor/mcp.json (keeps env secrets)
+
+  Options:
+    -s, --server NAME     MCP package or server id (e.g. proxmox-ve-mcp or proxmox-ve)
+    --extended            Pass --extended to smoke test (full access matrix)
+    -c, --cursor-config   Cursor mcp.json path (default: ~/.cursor/mcp.json)
+    -h, --help            Show this message
+
+  Quick start:
+    ./deploy/mcp.sh install
+    ./deploy/mcp.sh cursor-sync    # edit PVE_TOKEN_SECRET in ~/.cursor/mcp.json
+    ./deploy/mcp.sh smoke --extended
+    # Reload Cursor → Settings → MCP → proxmox-ve connected
+
+  See mcp/README.md for full installation guide.
+EOF
+
+  if [[ "${1:-}" == "0" ]]; then
+    return 0
+  fi
+  exit 1
+}

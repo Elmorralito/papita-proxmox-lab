@@ -140,6 +140,7 @@ def resolve_candidate_fqdn(
 
 
 def _parse_args() -> argparse.Namespace:
+    """Parse CLI flags for cluster host DNS discovery."""
     parser = argparse.ArgumentParser(description="Discover PVE cluster hosts matching a domain regex via DNS")
     parser.add_argument(
         "--domain",
