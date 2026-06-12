@@ -10,7 +10,8 @@
         "PVE_USER": "mcp-agent@pam",
         "PVE_TOKEN_ID": "mcp-cursor",
         "PVE_TOKEN_SECRET": "REPLACE_FROM_SECRET_STORE",
-        "PVE_VERIFY_SSL": "true"
+        "PVE_VERIFY_SSL": "true",
+        "PVE_LOG_LEVEL": "INFO"
       }
     }
   }

@@ -1027,30 +1027,52 @@ Required when LAN hosts must reach tailnet or remote subnets with correct return
 | Destination | Any                                                                     |
 | Translation | Interface address (or pfSense Tailscale IP `/32` if alias UI is broken) |
 
-**B. Tailscale interface — allow tailnet → LAN (exit node / direct tailnet traffic)**
+**B. Tailscale interface — `AUTH_CLIENTS` access (lab agreed layout)**
 
-**Firewall → Rules → Tailscale** — add **above** any block rules:
+Use the Tailscale package alias **`AUTH_CLIENTS`** (authorized tailnet peers) as **Source**, not the full `100.64.0.0/10` range. **Primary enforcement for subnet routes remains Tailscale ACLs**; these rules are admin access + defense in depth ([Netgate forum](https://forum.netgate.com/topic/190879/tailscale-subnet-routes-exit-nodes-pfsense-firewall-rules)).
 
-| #   | Action | Protocol | Source            | Destination     | Port | Description                    |
-| --- | ------ | -------- | ----------------- | --------------- | ---- | ------------------------------ |
-| 1   | Pass   | IPv4 \*  | `100.64.0.0/10`   | `172.16.0.0/16` | \*   | Allow tailnet into pfSense LAN |
-| 2   | Pass   | IPv4 \*  | Tailscale subnets | `LAN net`       | \*   | Alias-based variant            |
+**Apply via API** (requires firewall write privileges on the API user):
 
-Create alias **Firewall → Aliases**:
+```bash
+./deploy/pfsense-firewall-tailscale.sh apply          # live apply + POST /firewall/apply
+./deploy/pfsense-firewall-tailscale.sh apply --dry-run
+```
+
+**Firewall → Rules → Tailscale** (top to bottom):
+
+| #   | Action | Protocol  | Source         | Destination         | Port    | Description                                                       |
+| --- | ------ | --------- | -------------- | ------------------- | ------- | ----------------------------------------------------------------- |
+| 1   | Pass   | TCP       | `AUTH_CLIENTS` | **This firewall**   | 22, 443 | Admin → pfSense (SSH, WebGUI, pfREST); omit 80 unless HTTP needed |
+| 2   | Pass   | TCP/UDP\* | `AUTH_CLIENTS` | **`172.16.0.1/32`** | \*      | Admin → pfSense **LAN IP** (subnet route / local gateway)         |
+| 3   | Pass   | IPv4 \*   | `AUTH_CLIENTS` | **`172.16.0.0/16`** | \*      | Tailnet → lab LAN (keep; do not replace with a block)             |
+| 4   | Block  | IPv4 \*   | any            | any                 | \*      | Optional explicit deny below passes                               |
+
+\* Rule 2: use **TCP 22,443** (and ICMP if you ping the gateway) instead of `*` if you want tighter scope. Rule 3 must **remain** — it covers the rest of the LAN behind pfSense.
+
+> **Do not remove** rules 2–3 when merging admin passes: tailnet clients need **`172.16.0.1`** (pfSense LAN gateway, WebGUI, pfREST) **and** **`172.16.0.0/16`** (PVE and other LAN hosts). Rule 1 covers `(self)` on the Tailscale interface; rule 2 documents **LAN IP** access when traffic arrives via the advertised subnet route.
+
+Create alias **Firewall → Aliases** (optional hardening):
 
 - `TAILNET_ALLOWED` — type **Network(s)**: individual `/32` Tailscale IPs when ACLs allow only specific machines (mirrors ACL `hosts`)
-- `TAILNET_CGNAT` — `100.64.0.0/10` (Tailscale CGNAT; not a LAN route to advertise from PVE)
+- `TAILNET_CGNAT` — `100.64.0.0/10` (reference only; prefer `AUTH_CLIENTS` on pfSense rules)
 
-For **tag-scoped access**, pfSense cannot read Tailscale tags — maintain a **`TAILNET_ALLOWED`** alias listing the **100.x addresses** of machines that ACLs permit, and use that alias as **Source** instead of the full `/10`.
+For **tag-scoped access**, pfSense cannot read Tailscale tags — maintain **`TAILNET_ALLOWED`** listing **100.x** addresses of ACL-permitted machines if you replace `AUTH_CLIENTS` with a manual alias.
 
-**C. LAN interface — allow return traffic from LAN to tailnet**
+**C. LAN interface — LAN → tailnet (optional; usually skip in this lab)**
 
-**Firewall → Rules → LAN**:
+PVE nodes run Tailscale directly; they reach `100.x` peers without pfSense forwarding. **Do not add** a broad `LAN net → 100.64.0.0/10` pass unless a **LAN-only host without Tailscale** must reach tailnet **via pfSense** — that rule widens blast radius (any compromised LAN host could probe the CGNAT space).
 
-| #   | Action | Protocol | Source    | Destination       | Port | Description                       |
-| --- | ------ | -------- | --------- | ----------------- | ---- | --------------------------------- |
-| 1   | Pass   | IPv4 \*  | `LAN net` | `100.64.0.0/10`   | \*   | LAN hosts → tailnet               |
-| 2   | Pass   | IPv4 \*  | `LAN net` | `TAILNET_ALLOWED` | \*   | Stricter: only ACL-approved peers |
+Return traffic for sessions **started from tailnet → LAN** is handled by **stateful firewall** — no LAN rule required for replies.
+
+If you truly need pfSense-routed LAN → tailnet, prefer a narrow destination alias:
+
+**Firewall → Rules → LAN** (only when required):
+
+| #   | Action | Protocol | Source    | Destination       | Port | Description                  |
+| --- | ------ | -------- | --------- | ----------------- | ---- | ---------------------------- |
+| 1   | Pass   | IPv4 \*  | `LAN net` | `TAILNET_ALLOWED` | \*   | Specific tailnet `/32`s only |
+
+**Skip** the permissive `LAN net → 100.64.0.0/10` rule in the default lab layout.
 
 **D. Optional — restrict LAN services by source tailnet IP**
 
@@ -1075,16 +1097,17 @@ Hybrid topology (`setup-pve-node.sh`):
 
 ##### Access matrix (example for this lab)
 
-| Source                        | Destination                 | Enforced by                 | pfSense rule (optional mirror)        |
-| ----------------------------- | --------------------------- | --------------------------- | ------------------------------------- |
-| `tag:private-node`            | `172.16.0.0/16`             | Tailscale grant             | Tailscale → LAN pass (100.x in alias) |
-| `tag:private-node`            | `172.16.0.101:8006,22`      | Tailscale grant             | TAILNET_ALLOWED → main PVE            |
-| `tag:pve-oldtimers-cluster`   | `172.16.0.0/16`             | Tailscale grant             | Same                                  |
-| `tag:server-node`             | `172.16.0.101:443,8006,22`  | Tailscale grant (main only) | LAN rule to main host ports only      |
-| `admin-laptop` (`100.64.x.x`) | `172.16.0.0/16`             | Tailscale grant + `hosts`   | Source = `/32` in `TAILNET_ALLOWED`   |
-| `172.16.0.0/16`               | `tag:pve-oldtimers-cluster` | Tailscale grant (return)    | LAN → Tailscale pass + Hybrid NAT     |
-| Worker 100.x (direct)         | Any                         | **Denied** (no grant)       | N/A — workers not exposed on tailnet  |
-| Any other tailnet member      | `172.16.0.0/16`             | **Denied** (no grant)       | Block or omit pass rule               |
+| Source                        | Destination                 | Enforced by                 | pfSense rule (optional mirror)                   |
+| ----------------------------- | --------------------------- | --------------------------- | ------------------------------------------------ |
+| `tag:private-node`            | `172.16.0.0/16`             | Tailscale grant             | Tailscale → LAN pass (100.x in alias)            |
+| `tag:private-node`            | `172.16.0.101:8006,22`      | Tailscale grant             | TAILNET_ALLOWED → main PVE                       |
+| `tag:pve-oldtimers-cluster`   | `172.16.0.0/16`             | Tailscale grant             | Same                                             |
+| `tag:server-node`             | `172.16.0.101:443,8006,22`  | Tailscale grant (main only) | LAN rule to main host ports only                 |
+| `admin-laptop` (`100.64.x.x`) | `172.16.0.0/16`             | Tailscale grant + `hosts`   | `AUTH_CLIENTS` → LAN (rule 3)                    |
+| `admin-laptop` (`100.64.x.x`) | `172.16.0.1` (pfSense LAN)  | Tailscale grant + pfSense   | `AUTH_CLIENTS` → `172.16.0.1/32` + This firewall |
+| `172.16.0.0/16`               | `tag:pve-oldtimers-cluster` | Tailscale grant (return)    | PVE uses own Tailscale — skip LAN→tailnet rule   |
+| Worker 100.x (direct)         | Any                         | **Denied** (no grant)       | N/A — workers not exposed on tailnet             |
+| Any other tailnet member      | `172.16.0.0/16`             | **Denied** (no grant)       | Block or omit pass rule                          |
 
 #### 9.7 — Optional: Split DNS for internal hostnames
 

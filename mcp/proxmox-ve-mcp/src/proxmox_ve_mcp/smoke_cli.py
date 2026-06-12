@@ -2,7 +2,7 @@
 
 Exposes the ``proxmox-ve-mcp-smoke`` console script (see ``pyproject.toml``). Loads ``PVE_*``
 settings from the environment or a ``.env`` file, runs :func:`~proxmox_ve_mcp.tools.smoke_test.run_smoke_tests`,
-and prints either a human-readable summary or a JSON report on stdout.
+and emits either a human-readable summary or a JSON report on stdout via the CLI logger.
 
 Exit codes:
 
@@ -18,38 +18,21 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
 import sys
 
 from dotenv import load_dotenv
 
 from proxmox_ve_mcp.config import PveSettings
 from proxmox_ve_mcp.context import init_context
+from proxmox_ve_mcp.logging_config import configure_cli_logging, configure_logging
 from proxmox_ve_mcp.tools.smoke_test import run_smoke_tests
+
+logger = logging.getLogger("proxmox_ve_mcp.smoke_cli")
 
 
 def main() -> None:
-    """Parse CLI arguments, run smoke tests, and exit with an appropriate status code.
-
-    Loads environment variables, validates settings, initializes the HTTP client, executes
-    the smoke test suite, and prints results. Errors during settings validation or test
-    execution are written to stderr.
-
-    Command-line flags:
-
-        ``--extended``:
-            Include extended read probes (network, guests, storage, Ceph, write capability).
-        ``--json``:
-            Print the full structured report as JSON instead of the default text summary.
-
-    Side Effects:
-        Exits with code ``2`` on configuration or unhandled runtime errors, ``1`` when any
-        test failed, and ``0`` when ``all_passed`` is true. Closes the HTTP client after tests
-        complete.
-
-    Note:
-        Requires the same ``PVE_*`` variables as the MCP server; ``deploy/mcp.sh smoke`` can
-        load them from ``~/.cursor/mcp.json`` before invoking this script.
-    """
+    """Parse CLI arguments, run smoke tests, and exit with an appropriate status code."""
     parser = argparse.ArgumentParser(
         description="Run Proxmox VE MCP post-install connectivity and access smoke tests.",
     )
@@ -66,11 +49,14 @@ def main() -> None:
     args = parser.parse_args()
 
     load_dotenv()
+    configure_logging()
     try:
         settings = PveSettings()
     except Exception as exc:
-        print(f"Configuration error: {exc}", file=sys.stderr)
+        logger.error("Configuration error: %s", exc)
         sys.exit(2)
+
+    cli = configure_cli_logging(settings.log_level)
 
     async def _run() -> dict:
         """Initialize the client, run smoke tests, and tear down the HTTP session."""
@@ -83,26 +69,29 @@ def main() -> None:
     try:
         report = asyncio.run(_run())
     except Exception as exc:
-        print(f"Smoke test error: {exc}", file=sys.stderr)
+        logger.error("Smoke test error: %s", exc)
         sys.exit(2)
 
     if args.json:
-        print(json.dumps(report, indent=2, default=str))
+        cli.info(json.dumps(report, indent=2, default=str))
     else:
         summary = report["summary"]
-        print(f"Access level: {report['access_level']}")
-        print(f"Host: {report['api_entry_host']} ({report['api_user']}!{report['token_id']})")
-        print(f"Mode: {'extended' if report['extended'] else 'basic'}")
-        print(
-            f"Results: {summary['passed']} passed, {summary['failed']} failed, "
-            f"{summary['warned']} warned, {summary['skipped']} skipped"
+        cli.info("Access level: %s", report["access_level"])
+        cli.info("Host: %s (%s!%s)", report["api_entry_host"], report["api_user"], report["token_id"])
+        cli.info("Mode: %s", "extended" if report["extended"] else "basic")
+        cli.info(
+            "Results: %d passed, %d failed, %d warned, %d skipped",
+            summary["passed"],
+            summary["failed"],
+            summary["warned"],
+            summary["skipped"],
         )
         for test in report["tests"]:
             mark = {"pass": "OK", "fail": "FAIL", "warn": "WARN", "skip": "SKIP"}[test["status"]]
             detail = f" — {test['detail']}" if test.get("detail") else ""
-            print(f"  [{mark}] {test['id']}{detail}")
+            cli.info("  [%s] %s%s", mark, test["id"], detail)
         for rec in report.get("recommendations", []):
-            print(f"  → {rec}")
+            cli.info("  → %s", rec)
 
     sys.exit(0 if report.get("all_passed") else 1)
 

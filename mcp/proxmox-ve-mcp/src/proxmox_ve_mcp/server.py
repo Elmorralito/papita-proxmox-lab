@@ -70,6 +70,8 @@ def main() -> None:
         logger.error("Configuration error: %s", exc)
         sys.exit(1)
 
+    configure_logging(settings.log_level)
+
     init_context(settings)
     logger.info(
         "Starting %s MCP server (host=%s port=%s verify_ssl=%s)",

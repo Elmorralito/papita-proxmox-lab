@@ -2,9 +2,12 @@
 
 This directory holds [Model Context Protocol](https://modelcontextprotocol.io/) servers used by **Cursor** (and other MCP clients) to operate the lab without ad-hoc SSH.
 
-| Package                                | Cursor server id | Purpose                                                          |
-| -------------------------------------- | ---------------- | ---------------------------------------------------------------- |
-| [`proxmox-ve-mcp/`](./proxmox-ve-mcp/) | `proxmox-ve`     | Proxmox VE REST API (`:8006`) — cluster read + gated guest power |
+| Package                                | Cursor server id | Purpose                                                                              |
+| -------------------------------------- | ---------------- | ------------------------------------------------------------------------------------ |
+| [`proxmox-ve-mcp/`](./proxmox-ve-mcp/) | `proxmox-ve`     | Proxmox VE REST API (`:8006`) — cluster read + gated guest power                     |
+| [`pfsense-mcp/`](./pfsense-mcp/)       | `pfsense`        | pfSense pfREST (`:443`) — read-only firewall / Tailscale inspect + lab policy verify |
+
+**pfSense CLIs** (install via `./deploy/mcp.sh install`): `pfsense-mcp-smoke`, `pfsense-mcp-bootstrap` (REST API Allowed Interfaces), `pfsense-mcp-firewall` (Tailscale-tab rules). See [pfsense-mcp/docs/POLICY.md](./pfsense-mcp/docs/POLICY.md).
 
 ---
 
@@ -127,4 +130,4 @@ git pull
 | Smoke test 403                            | Fix token ACL — run `pve_check_token` or see PVE_TOKEN_SETUP.md |
 | `ModuleNotFoundError`                     | `./deploy/mcp.sh update`                                        |
 
-Package-specific docs: [proxmox-ve-mcp/README.md](./proxmox-ve-mcp/README.md).
+Package-specific docs: [proxmox-ve-mcp/README.md](./proxmox-ve-mcp/README.md), [pfsense-mcp/README.md](./pfsense-mcp/README.md).

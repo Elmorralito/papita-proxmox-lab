@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "pfsense": {
+      "command": "poetry",
+      "args": ["run", "pfsense-mcp"],
+      "cwd": "/absolute/path/to/papita-proxmox-lab",
+      "env": {
+        "PFSENSE_HOST": "172.16.0.1",
+        "PFSENSE_PORT": "443",
+        "PFSENSE_API_KEY": "REPLACE_FROM_SECRET_STORE",
+        "PFSENSE_API_USER": "mcp-cursor-agent",
+        "PFSENSE_VERIFY_SSL": "true",
+        "PFSENSE_LOG_LEVEL": "INFO",
+        "PFSENSE_HASH_ALGO": "sha256",
+        "PFSENSE_LENGTH_BYTES": "16"
+      }
+    }
+  }
+}

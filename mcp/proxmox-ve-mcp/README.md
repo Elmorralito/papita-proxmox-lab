@@ -245,6 +245,7 @@ Deferred to **v2**: SSH proxy tool, hard guest stop, migration, MCP resources fo
 | `PVE_TOKEN_SECRET` | Yes\*    | —       | Token secret (shown once at creation)                        |
 | `PVE_API_TOKEN`    | Yes\*    | —       | Alternative: full `USER@REALM!TOKENID=SECRET` string         |
 | `PVE_VERIFY_SSL`   | No       | `true`  | Set `false` only for default self-signed cert before step 17 |
+| `PVE_LOG_LEVEL`    | No       | `INFO`  | stderr JSON log level: `DEBUG`, `INFO`, `WARNING`, `ERROR`   |
 | `PVE_INTEGRATION`  | No       | —       | Set to `1` to run live-cluster integration tests             |
 
 \* Provide either `PVE_API_TOKEN` or all three split fields.

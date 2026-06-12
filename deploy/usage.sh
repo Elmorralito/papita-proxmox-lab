@@ -207,6 +207,58 @@ check_action_help() {
   fi
 }
 
+usage_pfsense_restapi_access() {
+  echo -e "${GREEN_TEXT}Usage:${NC_TEXT} deploy/pfsense-restapi-access.sh ACTION"
+  cat << EOF
+
+  Bootstrap pfREST access when Tailscale IP returns 403 (Allowed Interfaces).
+
+  ACTION (default: fix-access):
+    fix-access         PATCH allowed_interfaces=[] then smoke test
+    show-settings      GET /system/restapi/settings (JSON)
+    webgui-steps       Print manual WebGUI instructions
+    -h, --help         Show this message
+
+  Requires PFSENSE_* in ~/.cursor/mcp.json (./deploy/mcp.sh cursor-sync).
+  PATCH needs mcp-cursor-agent privilege on /system/restapi/settings, or clear Allowed
+  Interfaces manually in WebGUI first.
+
+  See mcp/pfsense-mcp/docs/PFSENSE_API_KEY_SETUP.md
+EOF
+
+  if [[ "${1:-}" == "0" ]]; then
+    return 0
+  fi
+  exit 1
+}
+
+usage_pfsense_firewall_tailscale() {
+  echo -e "${GREEN_TEXT}Usage:${NC_TEXT} deploy/pfsense-firewall-tailscale.sh [apply] [OPTIONS]"
+  cat << EOF
+
+  Apply agreed Tailscale-tab firewall rules on pfSense via pfREST.
+
+  Default action: apply
+
+  OPTIONS:
+    --dry-run          Show planned rule changes without applying
+    --skip-smoke       Do not run MCP smoke tests after a live apply
+    --json             JSON output
+    -h, --help         Show this message
+
+  Requires PFSENSE_* in ~/.cursor/mcp.json. The API user needs POST/PATCH/DELETE
+  on /firewall/rule and POST on /firewall/apply (temporarily grant write on
+  firewall endpoints, or run with an admin key).
+
+  See docs/TIPSNTRICKS.md §9.6 Layer 2 and deploy/tailscale-pfsense-lan.sh pfsense-steps
+EOF
+
+  if [[ "${1:-}" == "0" ]]; then
+    return 0
+  fi
+  exit 1
+}
+
 usage_mcp() {
   echo -e "${GREEN_TEXT}Usage:${NC_TEXT} deploy/mcp.sh ACTION [OPTIONS]"
   cat << EOF
@@ -234,6 +286,9 @@ usage_mcp() {
     # Reload Cursor → Settings → MCP → proxmox-ve connected
 
   See mcp/README.md for full installation guide.
+
+  pfSense API access (403 on Tailscale IP):
+    ./deploy/pfsense-restapi-access.sh fix-access
 EOF
 
   if [[ "${1:-}" == "0" ]]; then

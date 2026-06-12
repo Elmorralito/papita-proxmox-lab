@@ -16,6 +16,7 @@ from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from proxmox_ve_mcp.constants import API_PREFIX
+from proxmox_ve_mcp.logging_config import resolve_log_level
 
 
 class PveSettings(BaseSettings):
@@ -47,6 +48,17 @@ class PveSettings(BaseSettings):
         description="Full token as USER@REALM!TOKENID=SECRET (alternative to split fields)",
     )
     verify_ssl: bool = Field(default=True, description="Verify TLS certificate on :8006")
+    log_level: str = Field(
+        default="INFO",
+        description="Logging level for stderr JSON logs (DEBUG, INFO, WARNING, ERROR)",
+    )
+
+    @field_validator("log_level")
+    @classmethod
+    def validate_log_level(cls, value: str) -> str:
+        """Normalize and validate ``PVE_LOG_LEVEL``."""
+        resolve_log_level(value)
+        return value.strip().upper()
 
     @field_validator("host")
     @classmethod

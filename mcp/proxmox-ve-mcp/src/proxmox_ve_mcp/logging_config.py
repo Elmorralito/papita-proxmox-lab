@@ -17,9 +17,15 @@ Public objects:
 
 import json
 import logging
+import os
 import sys
 from datetime import datetime, timezone
 from typing import Any
+
+DEFAULT_LOG_LEVEL = "INFO"
+ENV_LOG_LEVEL = "PVE_LOG_LEVEL"
+PACKAGE_LOGGER = "proxmox_ve_mcp"
+CLI_LOGGER = "proxmox_ve_mcp.cli"
 
 
 class JsonStderrFormatter(logging.Formatter):
@@ -52,26 +58,57 @@ class JsonStderrFormatter(logging.Formatter):
         return json.dumps(payload, default=str)
 
 
-def configure_logging(level: int = logging.INFO) -> None:
+def resolve_log_level(value: str | int) -> int:
+    """Parse a logging level name or numeric level into an ``logging`` module constant."""
+    if isinstance(value, int):
+        return value
+    cleaned = str(value).strip().upper()
+    if not cleaned:
+        return logging.INFO
+    level = logging.getLevelName(cleaned)
+    if isinstance(level, int):
+        return level
+    raise ValueError(f"Invalid log level: {value!r} (use DEBUG, INFO, WARNING, ERROR)")
+
+
+def configure_logging(level: str | int | None = None) -> None:
     """Configure the ``proxmox_ve_mcp`` logger to write JSON lines to stderr.
 
     Replaces any existing handlers on the named logger, disables propagation to the root
     logger, and attaches a :class:`JsonStderrFormatter`. Intended to be called once from
-    :mod:`proxmox_ve_mcp.server` at process startup.
+    :mod:`proxmox_ve_mcp.server` or CLI entry points at process startup.
 
     Args:
-        level: Minimum log level for the ``proxmox_ve_mcp`` logger (default ``logging.INFO``).
+        level: Minimum log level. When ``None``, reads ``PVE_LOG_LEVEL`` from the
+            environment or defaults to ``INFO``.
 
     Side Effects:
         Mutates the ``proxmox_ve_mcp`` logger handlers and level in the current process.
     """
+    if level is None:
+        level = os.environ.get(ENV_LOG_LEVEL, DEFAULT_LOG_LEVEL)
+    resolved = resolve_log_level(level)
+
     handler = logging.StreamHandler(sys.stderr)
     handler.setFormatter(JsonStderrFormatter())
-    root = logging.getLogger("proxmox_ve_mcp")
+    root = logging.getLogger(PACKAGE_LOGGER)
     root.handlers.clear()
     root.addHandler(handler)
-    root.setLevel(level)
+    root.setLevel(resolved)
     root.propagate = False
+
+
+def configure_cli_logging(level: str | int | None = None) -> logging.Logger:
+    """Configure stderr JSON logging and return a plain-text stdout CLI logger."""
+    configure_logging(level)
+    cli = logging.getLogger(CLI_LOGGER)
+    cli.handlers.clear()
+    stdout_handler = logging.StreamHandler(sys.stdout)
+    stdout_handler.setFormatter(logging.Formatter("%(message)s"))
+    cli.addHandler(stdout_handler)
+    cli.setLevel(logging.INFO)
+    cli.propagate = False
+    return cli
 
 
 def log_tool_event(

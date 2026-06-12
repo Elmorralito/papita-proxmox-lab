@@ -4,6 +4,9 @@ set -euo pipefail
 
 PAPITA_POST_STARTUP_DEFAULTS="/etc/default/papita-post-startup"
 QUORUM_WAIT_SEC=120
+PVECM_STATUS_TIMEOUT=10
+CEPH_COMMAND_TIMEOUT=30
+WOL_COMMAND_TIMEOUT=60
 
 # -----------------------------------------------------------------------------
 # Ceph: clear noout (paired with pre-shutdown-proc.sh "ceph osd set noout")
@@ -14,10 +17,10 @@ set_noout_flag() {
         return 0
     fi
     echo "INFO: Unsetting Ceph OSD noout..."
-    if ceph osd unset noout; then
+    if timeout "${CEPH_COMMAND_TIMEOUT}" ceph osd unset noout; then
         echo "INFO: Ceph OSD noout unset."
     else
-        echo "WARN: Failed to unset Ceph OSD noout (cluster down, quorum loss, or no Ceph); continuing."
+        echo "WARN: Failed to unset Ceph OSD noout (cluster down, quorum loss, timeout, or no Ceph); continuing."
     fi
     return 0
 }
@@ -38,7 +41,7 @@ wait_for_pve_quorum() {
     local interval=5
     echo "INFO: Waiting up to ${QUORUM_WAIT_SEC}s for Proxmox cluster quorum..."
     while ((elapsed < QUORUM_WAIT_SEC)); do
-        if pvecm status 2>/dev/null | grep -qE 'Quorate:[[:space:]]+Yes'; then
+        if timeout "${PVECM_STATUS_TIMEOUT}" pvecm status 2>/dev/null | grep -qE 'Quorate:[[:space:]]+Yes'; then
             echo "INFO: Cluster is quorate."
             return 0
         fi
@@ -98,8 +101,8 @@ wake_on_lan_nodes() {
             continue
         fi
         echo "INFO: Sending WoL to ${node}..."
-        if ! pvenode wakeonlan "$node"; then
-            echo "WARN: pvenode wakeonlan failed for ${node}; continuing."
+        if ! timeout "${WOL_COMMAND_TIMEOUT}" pvenode wakeonlan "$node"; then
+            echo "WARN: pvenode wakeonlan failed or timed out for ${node}; continuing."
         fi
     done < <(jq -r '.[] | .node // empty' <<<"$json_out" 2>/dev/null || true)
 

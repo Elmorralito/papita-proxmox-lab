@@ -8,6 +8,7 @@ package-mode = false
 [tool.poetry.dependencies]
 python = ">=3.11,<4.0.0"
 proxmox-ve-mcp = { path = "./mcp/proxmox-ve-mcp", develop = true }
+pfsense-mcp = { path = "./mcp/pfsense-mcp", develop = true }
 
 [tool.poetry.group.pre-commit.dependencies]
 black = "^24.4.2"
@@ -63,6 +64,7 @@ disable = [
     "too-many-statements",
     "chained-comparison",
     "implicit-str-concat",
+    "cyclic-import",
 ]
 
 
@@ -78,9 +80,10 @@ include = "\\.pyi?$"
 
 
 [tool.mypy]
-mypy_path = ["*"]
+mypy_path = ["mcp/proxmox-ve-mcp/src", "mcp/pfsense-mcp/src"]
 exclude = ["tests"]
 python_version = "3.11"
+plugins = ["pydantic.mypy"]
 disable_error_code = ["union-attr", "misc"]
 warn_unused_ignores = true
 disallow_any_decorated = false
@@ -88,6 +91,11 @@ disallow_untyped_defs = false
 ignore_missing_imports = true
 disallow_untyped_calls = false
 namespace_packages = true
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
 
 
 [tool.isort]
@@ -97,6 +105,7 @@ known_first_party = [
     "python.datafiles",
     "python.misc",
     "proxmox_ve_mcp",
+    "pfsense_mcp",
 ]
 sections = ["FUTURE", "STDLIB", "THIRDPARTY", "FIRSTPARTY", "LOCALFOLDER"]
 py_version = 312
@@ -117,6 +126,7 @@ exclude = [
     "./node_modules",
     "./tests",
     "./mcp/proxmox-ve-mcp/tests",
+    "./mcp/pfsense-mcp/tests",
     "./terraform",
     "./deploy",
     "./libs",

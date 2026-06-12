@@ -1,0 +1,37 @@
+[project]
+name = "pfsense-mcp"
+version = "0.1.0a1"
+description = "Model Context Protocol server for pfSense REST API (pfREST) operations."
+readme = "README.md"
+authors = [{ name = "Elmorralito", email = "drestrepohinc@gmail.com" }]
+requires-python = ">=3.11,<4"
+dependencies = [
+    "httpx (>=0.28.1,<0.29.0)",
+    "mcp (>=1.9.0,<2.0.0)",
+    "pydantic (>=2.3.0,<3.0)",
+    "pydantic-settings (>=2.6.0,<3.0)",
+    "python-dotenv (>=1.0.1,<2.0)",
+]
+
+[project.optional-dependencies]
+dev = [
+    "respx (>=0.22.0,<0.23.0)",
+]
+
+[project.scripts]
+pfsense-mcp = "pfsense_mcp.server:main"
+pfsense-mcp-smoke = "pfsense_mcp.smoke_cli:main"
+pfsense-mcp-bootstrap = "pfsense_mcp.bootstrap_cli:main"
+pfsense-mcp-firewall = "pfsense_mcp.firewall_cli:main"
+
+[project.urls]
+HomePage = "https://github.com/Elmorralito/papita-proxmox-lab/tree/main/mcp/pfsense-mcp"
+Documentation = "https://github.com/Elmorralito/papita-proxmox-lab/blob/main/mcp/pfsense-mcp/README.md"
+
+[tool.poetry]
+package-mode = true
+packages = [{ include = "pfsense_mcp", from = "src" }]
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"

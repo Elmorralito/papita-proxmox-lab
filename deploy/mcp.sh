@@ -133,21 +133,49 @@ cmd_smoke() {
             _install_package_scripts "${pkg}"
         fi
         ;;
+    pfsense-mcp)
+        if [[ ! -x "${PROJECT_PATH}/.venv/bin/pfsense-mcp-smoke" ]]; then
+            _install_package_scripts "${pkg}"
+        fi
+        if [[ ! -x "${PROJECT_PATH}/.venv/bin/pfsense-mcp-bootstrap" ]]; then
+            _install_package_scripts "${pkg}"
+        fi
+        ;;
     *)
         log "ERROR" "No smoke CLI for ${pkg}. See mcp/${pkg}/README.md."
         exit 1
         ;;
     esac
 
-    local smoke_args=(poetry run proxmox-ve-mcp-smoke)
-    [[ "${SMOKE_EXTENDED}" -eq 1 ]] && smoke_args+=(--extended)
+    local smoke_args=()
+    local cursor_server=""
+    case "${pkg}" in
+    proxmox-ve-mcp)
+        smoke_args=(poetry run proxmox-ve-mcp-smoke)
+        cursor_server="proxmox-ve"
+        [[ "${SMOKE_EXTENDED}" -eq 1 ]] && smoke_args+=(--extended)
+        ;;
+    pfsense-mcp)
+        smoke_args=(poetry run pfsense-mcp-smoke)
+        cursor_server="pfsense"
+        ;;
+    esac
 
-    if [[ -f "${CURSOR_MCP_JSON}" ]] && jq -e '.mcpServers["proxmox-ve"].env' "${CURSOR_MCP_JSON}" >/dev/null 2>&1; then
-        log "INFO" "Loading PVE_* credentials from ${CURSOR_MCP_JSON} for smoke test."
+    if [[ -f "${CURSOR_MCP_JSON}" ]] && jq -e ".mcpServers[\"${cursor_server}\"].env" "${CURSOR_MCP_JSON}" >/dev/null 2>&1; then
+        log "INFO" "Loading credentials from ${CURSOR_MCP_JSON} for smoke test (${cursor_server})."
         # shellcheck disable=SC1090
-        eval "$(jq -r '.mcpServers["proxmox-ve"].env | to_entries[] | "export \(.key)=\(.value|@sh)"' "${CURSOR_MCP_JSON}")"
+        eval "$(jq -r ".mcpServers[\"${cursor_server}\"].env | to_entries[] | \"export \(.key)=\(.value|@sh)\"" "${CURSOR_MCP_JSON}")"
     else
-        log "WARN" "No proxmox-ve env in ${CURSOR_MCP_JSON}; ensure PVE_* variables are set."
+        log "WARN" "No ${cursor_server} env in ${CURSOR_MCP_JSON}; ensure variables are set."
+    fi
+
+    if [[ "${pkg}" == "pfsense-mcp" && -f "${PROJECT_PATH}/.env" ]]; then
+        log "INFO" "Loading Tailscale Admin API vars from ${PROJECT_PATH}/.env (if present)."
+        # shellcheck disable=SC1090
+        set -a
+        # shellcheck source=/dev/null
+        source "${PROJECT_PATH}/.env"
+        set +a
     fi
 
     cd "${PROJECT_PATH}"
@@ -178,7 +206,7 @@ _merge_example_into_config() {
                 .mcpServers[$k].command = $add.mcpServers[$k].command |
                 .mcpServers[$k].args = $add.mcpServers[$k].args |
                 .mcpServers[$k].cwd = $add.mcpServers[$k].cwd |
-                .mcpServers[$k].env = (.mcpServers[$k].env // $add.mcpServers[$k].env)
+                .mcpServers[$k].env = (($add.mcpServers[$k].env // {}) * (.mcpServers[$k].env // {}))
             else
                 .mcpServers[$k] = $add.mcpServers[$k]
             end
@@ -186,7 +214,7 @@ _merge_example_into_config() {
     ' "${CURSOR_MCP_JSON}" "${tmp}" > "${merged}"
     mv "${merged}" "${CURSOR_MCP_JSON}"
     rm -f "${tmp}"
-    log "INFO" "Merged $(basename "${example_file}") into ${CURSOR_MCP_JSON} (existing env preserved)."
+    log "INFO" "Merged $(basename "${example_file}") into ${CURSOR_MCP_JSON} (existing env values preserved; new keys added)."
 }
 
 cmd_cursor_sync() {

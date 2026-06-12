@@ -226,17 +226,19 @@ pfSense WebGUI (LAN ${LAN_CIDR}; gateway 172.16.0.1):
 2. Firewall → NAT → Outbound → Hybrid outbound NAT
    - Add: Interface Tailscale, Source ${LAN_CIDR}, Destination any, Translation interface address
 
-3. Firewall → Rules → LAN (above block rules)
-   - Pass LAN net → 100.64.0.0/10
+3. Firewall → Rules → Tailscale (top → bottom; keep all passes)
+   - Pass AUTH_CLIENTS → This firewall  TCP 22,443  (merge old :443/:80/:22; drop 80 if unused)
+   - Pass AUTH_CLIENTS → 172.16.0.1/32  TCP 22,443  (pfSense LAN IP — WebGUI, pfREST via subnet route)
+   - Pass AUTH_CLIENTS → ${LAN_CIDR}  *  (tailnet → lab LAN — required; do not block)
 
-4. Optional — restrict Proxmox UI to main node (defense in depth; ACLs are primary):
+4. Skip LAN net → 100.64.0.0/10 unless a LAN-only host must reach tailnet via pfSense
+   (PVE nodes use their own Tailscale client in this lab)
+
+5. Optional — restrict Proxmox UI to main node (defense in depth; ACLs are primary):
    - Firewall → Aliases → TAILNET_ALLOWED: admin laptop 100.x /32 addresses
    - LAN rules (order matters):
      - Pass: Source TAILNET_ALLOWED → Destination ${MAIN_PVE_LAN_IP}, TCP 8006, 22
      - Block: Source 100.64.0.0/10 → Destination <worker PVE LAN IPs>, TCP 8006
-
-5. Optional: Firewall → Rules → Tailscale
-   - Pass 100.64.0.0/10 → ${LAN_CIDR} (subnet routes may bypass this tab)
 
 Then run: $0 configure
 EOF

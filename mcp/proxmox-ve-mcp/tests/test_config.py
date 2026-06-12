@@ -32,3 +32,16 @@ def test_settings_rejects_host_with_scheme() -> None:
 def test_settings_requires_auth() -> None:
     with pytest.raises(ValueError, match="PVE_API_TOKEN"):
         PveSettings(host="pvenode-001")
+
+
+def test_settings_log_level_default() -> None:
+    settings = PveSettings(
+        host="10.0.0.11",
+        api_token="mcp-agent@pam!cursor=s3cr3t",
+    )
+    assert settings.log_level == "INFO"
+
+
+def test_settings_rejects_invalid_log_level() -> None:
+    with pytest.raises(ValueError, match="Invalid log level"):
+        PveSettings(host="10.0.0.11", api_token="mcp-agent@pam!cursor=s3cr3t", log_level="TRACE")

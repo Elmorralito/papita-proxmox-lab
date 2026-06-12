@@ -905,10 +905,7 @@ setup_post_startup_procedure() {
     ln -sfv "${SCRIPT_DIR}/post-startup-proc.sh" /usr/local/bin/post-startup-proc.sh
     log INFO "Linking post-startup-proc.service to /etc/systemd/system/post-startup-proc.service"
     ln -sfv "${SCRIPT_DIR}/post-startup-proc.service" /etc/systemd/system/post-startup-proc.service
-    log INFO "Reloading systemd daemon..."
-    systemctl daemon-reload
-    systemctl enable post-startup-proc.service
-    systemctl start post-startup-proc.service
+
     prompt_until_yn "10.2. QUESTION: Is this node $HOSTNAME the main node? (y/n): " confirm
     if [ "$confirm" == "y" ]; then
         log INFO "Setting up /etc/default/pve-main-node..."
@@ -927,6 +924,11 @@ EOF
     else
         log INFO "Skipping /etc/default/pve-main-node setup."
     fi
+
+    log INFO "Reloading systemd daemon..."
+    systemctl daemon-reload
+    systemctl enable post-startup-proc.service
+    log INFO "Enabled post-startup-proc.service (runs at boot; not started during setup)."
 
     log INFO "Post-startup procedure is set up. Done."
     return 0
