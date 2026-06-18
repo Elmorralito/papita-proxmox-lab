@@ -30,16 +30,16 @@ Last aligned to repo tree (~46 tracked files). Gitignored paths listed separatel
 
 ## `deploy/` — Orchestration (run from repo root)
 
-| File                       | Role                                                                                                                                |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `toolkit.sh`               | Main CLI: `build`, `devsync`, `test`, `proxmox`, `terraform`, AWS auth, pre-commit                                                  |
-| `proxmox.sh`               | SSH to PVE: `setup-node` (SCP `src/bash/`, `utils.sh`, `usage.sh`, `data/setup-pve-node.usage.txt`), `get-temp`, cluster start/stop |
-| `terraform.sh`             | Terraform wrapper: init → workspace → plan\|apply\|destroy                                                                          |
-| `utils.sh`                 | Shared helpers: `log`, `prompt_pve_start`, `prompt_until_*`, `prompt_crontab_schedule`, AWS auth, `run_command`                     |
-| `usage.sh`                 | Help text: `usage_toolkit`, `usage_proxmox`, `usage_terraform`, `usage_setup_pve_node`                                              |
-| `tailscale-pfsense-lan.sh` | Workstation helper: Tailscale ACL + pfSense LAN integration                                                                         |
+| File                       | Role                                                                                                                                    |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `toolkit.sh`               | Main CLI: `build`, `devsync`, `test`, `proxmox`, `terraform`, AWS auth, pre-commit                                                      |
+| `proxmox.sh`               | SSH to PVE: `setup-node` (SCP `deploy/setup/`, `utils.sh`, `usage.sh`, `docs/setup-pve-node.usage.txt`), `get-temp`, cluster start/stop |
+| `terraform.sh`             | Terraform wrapper: init → workspace → plan\|apply\|destroy                                                                              |
+| `utils.sh`                 | Shared helpers: `log`, `prompt_pve_start`, `prompt_until_*`, `prompt_crontab_schedule`, AWS auth, `run_command`                         |
+| `usage.sh`                 | Help text: `usage_toolkit`, `usage_proxmox`, `usage_terraform`, `usage_setup_pve_node`                                                  |
+| `tailscale-pfsense-lan.sh` | Workstation helper: Tailscale ACL + pfSense LAN integration                                                                             |
 
-### `deploy/data/`
+### `deploy/docs/`
 
 | File                              | Role                                                 |
 | --------------------------------- | ---------------------------------------------------- |
@@ -60,7 +60,7 @@ Last aligned to repo tree (~46 tracked files). Gitignored paths listed separatel
 
 ---
 
-## `src/bash/` — PVE node scripts (SCP'd to `/root/deploy`)
+## `deploy/setup/` — PVE node scripts (SCP'd to `/root/deploy`)
 
 | File                        | Role                                                                                        |
 | --------------------------- | ------------------------------------------------------------------------------------------- |
@@ -88,7 +88,7 @@ Last aligned to repo tree (~46 tracked files). Gitignored paths listed separatel
 | `/etc/default/pve-main-node`                                | 10.2     | Main node hostname for WoL           |
 | `/etc/hosts` (marked block)                                 | 7        | `# BEGIN papita-pve-cluster-hosts` … |
 
-### `src/bash/misc/tailscale/`
+### `deploy/setup/misc/tailscale/`
 
 | File                      | Role                                                           |
 | ------------------------- | -------------------------------------------------------------- |
@@ -96,14 +96,24 @@ Last aligned to repo tree (~46 tracked files). Gitignored paths listed separatel
 | `default.gateways.list`   | Optional PVE `--advertise-routes` (empty; pfSense handles LAN) |
 | `default.lan.routes.list` | Main-node fallback LAN route (`172.16.0.0/16`)                 |
 
-### `src/python/misc/cluster/`
+### `deploy/setup/misc/cluster/`
+
+| File                            | Role                                                          |
+| ------------------------------- | ------------------------------------------------------------- |
+| `default.qdevice.host`          | Dedicated QDevice IP (`corosync-qnetd`; not PVE, not TrueNAS) |
+| `default.truenas.nfs.env`       | TrueNAS NFS + HA group defaults (`172.16.0.100`)              |
+| `qdevice-server-bootstrap.sh`   | Run on QDevice host: install `corosync-qnetd`                 |
+| `papita-node-qdevice-client.sh` | Per PVE node: `corosync-qdevice` + `softdog` (step 18)        |
+| `papita-cluster-quorum-ha.sh`   | Cluster: NFS storage, `pvecm qdevice setup`, HA group         |
+
+### `deploy/python/misc/cluster/`
 
 | File                | Role                                                               |
 | ------------------- | ------------------------------------------------------------------ |
 | `discover_hosts.py` | Step 7 CLI: DNS peer discovery → `/etc/hosts` lines                |
 | `domain_pattern.py` | Wildcard domain suffix keywords (`oldtimers.*`, `*.oldtimers.lan`) |
 
-### `src/python/data/`
+### `deploy/python/datafiles/`
 
 | File                           | Role                                                     |
 | ------------------------------ | -------------------------------------------------------- |
@@ -111,7 +121,7 @@ Last aligned to repo tree (~46 tracked files). Gitignored paths listed separatel
 | `default.hosts.regex`          | Default FQDN regex (e.g. `^pve(node)?-[0-9]{3}(\..+)?$`) |
 | `default.domain.suffixes.list` | Zone labels expanded for trailing `.*` domain keywords   |
 
-Deployed to `/root/deploy/python/` on PVE nodes (`misc/cluster/` + `data/`).
+Deployed to `/root/deploy/python/` on PVE nodes (`misc/cluster/` + `datafiles/`).
 
 ---
 
@@ -217,19 +227,19 @@ Active rules live in `.cursor/rules/`.
 
 ## Configuration cross-reference
 
-| Concern                    | Primary file(s)                                                |
-| -------------------------- | -------------------------------------------------------------- |
-| Python lint/format         | `pyproject.toml`, `.pre-commit-config.yaml`                    |
-| Git exclusions             | `.gitignore`                                                   |
-| AWS/Terraform env          | `terraform/environments/config.<env>.tfvars` (local)           |
-| EFS mount path             | `terraform/plans/main.tf` locals → default `/pve`              |
-| Tailscale CIDR for EFS SG  | `plan_specific_aws_security_params` → default `100.64.0.0/10`  |
-| PVE Tailscale tags/routes  | `src/bash/misc/tailscale/default.*.list`                       |
-| PVE cluster host discovery | `src/python/misc/cluster/` + `src/python/data/default.hosts.*` |
-| PVE setup manual           | `deploy/data/setup-pve-node.usage.txt`                         |
-| PVE step count / skip      | `PVE_SETUP_LAST_STEP`, `_skip_pve_step` in `setup-pve-node.sh` |
-| SSH to PVE                 | `PAPITA_SSH_PASSWORD` env or SSH keys                          |
-| AWS auth in toolkit        | `--aws-sso`, `--aws-mfa`, `--env-file`, `AWS_PROFILE`          |
+| Concern                    | Primary file(s)                                                           |
+| -------------------------- | ------------------------------------------------------------------------- |
+| Python lint/format         | `pyproject.toml`, `.pre-commit-config.yaml`                               |
+| Git exclusions             | `.gitignore`                                                              |
+| AWS/Terraform env          | `terraform/environments/config.<env>.tfvars` (local)                      |
+| EFS mount path             | `terraform/plans/main.tf` locals → default `/pve`                         |
+| Tailscale CIDR for EFS SG  | `plan_specific_aws_security_params` → default `100.64.0.0/10`             |
+| PVE Tailscale tags/routes  | `deploy/setup/misc/tailscale/default.*.list`                              |
+| PVE cluster host discovery | `deploy/python/misc/cluster/` + `deploy/python/datafiles/default.hosts.*` |
+| PVE setup manual           | `deploy/docs/setup-pve-node.usage.txt`                                    |
+| PVE step count / skip      | `PVE_SETUP_LAST_STEP`, `_skip_pve_step` in `setup-pve-node.sh`            |
+| SSH to PVE                 | `PAPITA_SSH_PASSWORD` env or SSH keys                                     |
+| AWS auth in toolkit        | `--aws-sso`, `--aws-mfa`, `--env-file`, `AWS_PROFILE`                     |
 
 ---
 

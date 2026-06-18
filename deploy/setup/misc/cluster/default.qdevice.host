@@ -1,0 +1,4 @@
+# Dedicated Corosync QDevice host (corosync-qnetd).
+# Must NOT be a Proxmox cluster member. Do not use TrueNAS (172.16.0.100) — that host serves NFS only.
+# Bootstrap: bash qdevice-server-bootstrap.sh on this host before pvecm qdevice setup.
+172.16.0.105

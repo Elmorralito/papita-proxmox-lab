@@ -42,6 +42,7 @@ usage_toolkit() {
     -pa, --proxmox-action   Proxmox subcommand (default: setup-node)
     -ip, --ip-address     Proxmox cluster member to SSH into (IP or DNS)
     -hn, --hostname     Proxmox cluster member hostname
+    -if, --identity-file SSH private key path (or env PAPITA_SSH_IDENTITY_FILE)
     *all proxmox.sh options
     ----
     $(usage_proxmox "0" | sed 's/^/    /')
@@ -113,7 +114,7 @@ usage_proxmox() {
   Remote Proxmox helper over SSH (multiplexed session). Requires local jq, ssh, and scp.
 
   ACTION (required, position 1):
-    setup-node     Replace <target-path>/deploy with src/bash/, src/python/ (→ deploy/python/
+    setup-node     Replace <target-path>/deploy with deploy/setup/, deploy/python/ (→ python/
                    with misc/cluster/*.py and datafiles/default.*), utils.sh, usage.sh,
                    deploy/docs/setup-pve-node.usage.txt; chmod a+rx; run setup-pve-node.sh (TTY).
     get-temp, get-temperature
@@ -127,12 +128,19 @@ usage_proxmox() {
                    then /nodes/<node>/status --command shutdown (cluster API, not repeated
                    shutdown on the SSH target). Then pvenode stopall on the local node; with
                    -sln, also request local hypervisor shutdown via the same API.
+    setup-cluster-ha
+                   Deploy misc/cluster bundle; on every online member install corosync-qdevice
+                   + softdog (papita-node-qdevice-client.sh); on the SSH entry host register
+                   QDevice, add TrueNAS NFS (172.16.0.100), create HA group, verify quorum.
+                   Prerequisite: corosync-qnetd on the host in misc/cluster/default.qdevice.host
+                   (NOT TrueNAS). Edit misc/cluster/default.truenas.nfs.env for export path.
 
   Required:
     -ip, --ip-address     Proxmox cluster member to SSH into (IP or DNS)
 
   Optional:
     -user, --username     SSH user (default: root)
+    -if, --identity-file SSH private key path (or env PAPITA_SSH_IDENTITY_FILE; uses IdentitiesOnly)
     -tp, --target-path   Remote base path for deploy (default: /<username>, e.g. /root)
                          Bundle path: <target-path>/deploy/
     -sln, --shutdown-local-node   With stop-cluster only: also shutdown the local node
@@ -140,8 +148,8 @@ usage_proxmox() {
 
   setup-node flow:
     1. SSH multiplexing; reuse for scp and later ssh
-    2. rm -rf remote <target-path>/deploy; tar-stream src/bash → .../deploy/
-       (includes misc/tailscale/); tar-stream src/python → .../deploy/python/
+    2. rm -rf remote <target-path>/deploy; tar-stream deploy/setup → .../deploy/
+       (includes misc/tailscale/); tar-stream deploy/python → .../deploy/python/
     3. scp utils.sh, usage.sh, docs/setup-pve-node.usage.txt; chmod -R a+rx; verify bundle
     4. ssh -tt: cd deploy && bash setup-pve-node.sh
 

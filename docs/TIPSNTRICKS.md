@@ -403,6 +403,95 @@ pvecm status && echo && pvecm nodes && echo && corosync-cfgtool -s
 
 ---
 
+### Quorum, QDevice, TrueNAS NFS, and HA (Path B)
+
+This lab runs a **3-node** cluster (`pvenode-001` … `003`) on LAN `172.16.0.0/16`. Default quorum is **2 of 3** (one node may be offline). To stay quorate with **two nodes deliberately offline** (or to prepare for a 4th node later), use a **QDevice** tie-breaker plus **HA fencing** before shared-storage HA.
+
+| Component    | Lab default                                                       | Role                                                        |
+| ------------ | ----------------------------------------------------------------- | ----------------------------------------------------------- |
+| QDevice host | `172.16.0.102` (`deploy/setup/misc/cluster/default.qdevice.host`) | Runs `corosync-qnetd` — **not** a PVE node, **not** TrueNAS |
+| TrueNAS NFS  | `172.16.0.100` (`default.truenas.nfs.env`)                        | Shared storage for HA VMs (`truenas-nfs` storage ID)        |
+| PVE nodes    | `corosync-qdevice` + `softdog`                                    | QDevice client + watchdog fencing                           |
+
+**Quorum math (3 PVE + QDevice):** 4 votes total → quorum **3** → cluster stays quorate with **2 PVE nodes + QDevice**.
+
+#### One-time: QDevice server
+
+On a **small Debian/Ubuntu VM** at the IP in `default.qdevice.host` (edit the file if you use another host):
+
+```bash
+# Copy qdevice-server-bootstrap.sh to that host, then:
+bash qdevice-server-bootstrap.sh
+```
+
+Or from the repo checkout on the QDevice host:
+
+```bash
+bash deploy/setup/misc/cluster/qdevice-server-bootstrap.sh
+```
+
+#### Per-node: QDevice client + watchdog (step 18)
+
+During `setup-pve-node.sh` **step 18**, or manually on each PVE node:
+
+```bash
+bash /root/deploy/misc/cluster/papita-node-qdevice-client.sh
+```
+
+Installs `corosync-qdevice` and loads **softdog** (`/dev/watchdog*`) for HA fencing.
+
+#### Cluster-wide: QDevice + NFS + HA group
+
+1. Edit `deploy/setup/misc/cluster/default.truenas.nfs.env` — set `TRUENAS_NFS_EXPORT` to your TrueNAS NFS path (TrueNAS **Sharing → NFS** on `172.16.0.100`).
+2. Ensure the NFS export allows all PVE node LAN IPs.
+3. From your workstation (main node LAN IP):
+
+```bash
+./deploy/proxmox.sh setup-cluster-ha --ip-address 172.16.0.101
+```
+
+This deploys `misc/cluster/`, runs the node client on **every online member**, then on the entry host:
+
+- Adds cluster firewall allow for TrueNAS (if `cluster.fw` exists)
+- `pvesm add nfs truenas-nfs` → `172.16.0.100`
+- `pvecm qdevice setup <QDEVICE_IP>`
+- `ha-manager add group papita-ha` with all cluster nodes
+
+#### Add a VM to HA
+
+Storage must be on **`truenas-nfs`** (or another shared store). Then:
+
+```bash
+ha-manager add vm:<VMID> --group papita-ha --state started
+ha-manager status
+```
+
+#### Verification
+
+```bash
+pvecm status
+corosync-quorumtool -s
+pvesm status -storage truenas-nfs
+ha-manager status
+ha-manager crm-command status
+```
+
+Healthy QDevice: `pvecm status` lists Qdevice votes; with two PVE nodes online, `Quorate: Yes`.
+
+#### Rollback
+
+```bash
+ha-manager remove vm:<VMID>    # per resource
+ha-manager remove group papita-ha
+pvesm remove truenas-nfs
+pvecm qdevice remove
+```
+
+> [!WARNING]
+> Do **not** use TrueNAS (`172.16.0.100`) as the QDevice host. Do **not** leave `pvecm expected 1` as a permanent quorum workaround. Enable **softdog on all nodes before** adding HA resources.
+
+---
+
 ## refresh vmbr0 ip address proxmox
 
 To refresh or change the vmbr0 IP address in Proxmox, edit /etc/network/interfaces to update the IP, subnet, and gateway, then update /etc/hosts to match. Apply changes by running ifdown vmbr0 && ifup vmbr0, or restart the network service/reboot. The GUI method (System > Network) is generally preferred.
@@ -831,7 +920,7 @@ Tag the pfSense router so ACLs can reference it as a destination (not just by CI
 3. Copy the key (shown once)
 
 > [!NOTE]
-> Lab PVE nodes use tags from `src/bash/misc/tailscale/default.tags.list`: `tag:private-node`, `tag:pve-oldtimers-cluster`, `tag:server-node`. Define matching `tagOwners` entries for each tag your nodes use.
+> Lab PVE nodes use tags from `deploy/setup/misc/tailscale/default.tags.list`: `tag:private-node`, `tag:pve-oldtimers-cluster`, `tag:server-node`. Define matching `tagOwners` entries for each tag your nodes use.
 
 #### 9.3 — Authenticate pfSense
 
@@ -1150,20 +1239,21 @@ In [Tailscale admin → DNS](https://login.tailscale.com/admin/dns):
 
 ### Quick troubleshooting
 
-| Symptom                                         | Likely cause                                                             | Fix                                                                                                                                                                                 |
-| ----------------------------------------------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| LAN clients no internet                         | WAN down, DNS, or removed default LAN allow rule                         | Check **Status → Gateways**; restore LAN outbound rule                                                                                                                              |
-| LAN clients cannot reach pfSense IP             | Wrong subnet, bridge, or IP conflict                                     | Verify VM IP/gateway; pfSense LAN IP must be unique on segment                                                                                                                      |
-| `LANGW` gateway down                            | Upstream gateway set on LAN                                              | Remove gateway from **Interfaces → LAN**                                                                                                                                            |
-| Tailnet cannot reach LAN VMs                    | Subnet route not approved, missing ACL grant, or missing pfSense NAT     | Approve `172.16.0.0/16`; run `./deploy/tailscale-pfsense-lan.sh configure`; Hybrid NAT LAN→Tailscale                                                                                |
-| Authorized tag still blocked                    | ACL grant missing port or wrong CIDR                                     | Check Access controls → Tests; match `172.16.0.0/16` to pfSense advertised route                                                                                                    |
-| Unauthorized machine reaches LAN                | Overly broad ACL or pfSense pass rule for full `100.64.0.0/10`           | Remove broad grant; use tag-scoped grants + `TAILNET_ALLOWED` alias                                                                                                                 |
-| PVE `cluster.fw` parse error `-log n`           | Invalid log token from older setup script                                | Change to `-log nolog`; run `pve-firewall restart`                                                                                                                                  |
-| PVE node lost internet after step 14            | Cluster firewall enabled without `policy_out: ACCEPT` / `OUT ACCEPT`     | Add `policy_out: ACCEPT` under `[OPTIONS]` and `OUT ACCEPT -log nolog` under `[RULES]`, or set `enable: 0` temporarily                                                              |
-| PVE nodes cannot ping on 172.16.x               | Wrong default gateway on dual-homed node (e.g. 192.168.x not 172.16.0.1) | Put `gateway 172.16.0.1` on the 172.16 bridge; verify L2 on same VLAN                                                                                                               |
-| Perl `Setting locale failed` / `LC_CTYPE=UTF-8` | SSH client (macOS/Cursor) sends invalid `LC_CTYPE=UTF-8`                 | Node: `locale-gen en_US.UTF-8`; `update-locale LANG=en_US.UTF-8 LC_CTYPE=en_US.UTF-8`; set sshd `AcceptEnv LANG LANGUAGE` (not `LC_*`); Mac: `SendEnv -LC_CTYPE` in `~/.ssh/config` |
-| WAN WebGUI unreachable                          | Default WAN block (expected)                                             | Access via LAN IP or add controlled WAN allow rule                                                                                                                                  |
-| WAN/LAN same subnet                             | Overlapping ranges                                                       | Re-number LAN to non-overlapping RFC1918 range                                                                                                                                      |
+| Symptom                                                             | Likely cause                                                             | Fix                                                                                                                                                                                                                                     |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| LAN clients no internet                                             | WAN down, DNS, or removed default LAN allow rule                         | Check **Status → Gateways**; restore LAN outbound rule                                                                                                                                                                                  |
+| LAN clients cannot reach pfSense IP                                 | Wrong subnet, bridge, or IP conflict                                     | Verify VM IP/gateway; pfSense LAN IP must be unique on segment                                                                                                                                                                          |
+| `LANGW` gateway down                                                | Upstream gateway set on LAN                                              | Remove gateway from **Interfaces → LAN**                                                                                                                                                                                                |
+| Tailnet cannot reach LAN VMs                                        | Subnet route not approved, missing ACL grant, or missing pfSense NAT     | Approve `172.16.0.0/16`; run `./deploy/tailscale-pfsense-lan.sh configure`; Hybrid NAT LAN→Tailscale                                                                                                                                    |
+| Authorized tag still blocked                                        | ACL grant missing port or wrong CIDR                                     | Check Access controls → Tests; match `172.16.0.0/16` to pfSense advertised route                                                                                                                                                        |
+| Unauthorized machine reaches LAN                                    | Overly broad ACL or pfSense pass rule for full `100.64.0.0/10`           | Remove broad grant; use tag-scoped grants + `TAILNET_ALLOWED` alias                                                                                                                                                                     |
+| PVE `cluster.fw` parse error `-log n`                               | Invalid log token from older setup script                                | Change to `-log nolog`; run `pve-firewall restart`                                                                                                                                                                                      |
+| PVE node lost internet after step 14                                | Cluster firewall enabled without `policy_out: ACCEPT` / `OUT ACCEPT`     | Add `policy_out: ACCEPT` under `[OPTIONS]` and `OUT ACCEPT -log nolog` under `[RULES]`, or set `enable: 0` temporarily                                                                                                                  |
+| PVE nodes cannot ping on 172.16.x                                   | Wrong default gateway on dual-homed node (e.g. 192.168.x not 172.16.0.1) | Put `gateway 172.16.0.1` on the 172.16 bridge; verify L2 on same VLAN                                                                                                                                                                   |
+| Perl `Setting locale failed` / `LC_CTYPE=UTF-8`                     | SSH client (macOS/Cursor) sends invalid `LC_CTYPE=UTF-8`                 | Node: `locale-gen en_US.UTF-8`; `update-locale LANG=en_US.UTF-8 LC_CTYPE=en_US.UTF-8`; sshd `AcceptEnv LANG LANGUAGE LC_PVE_TICKET` (not `LC_*`); ssh `SendEnv LC_PVE_TICKET`; Mac: `SendEnv -LC_CTYPE` in `~/.ssh/config`              |
+| noVNC “Failed to connect” / `Failed to run vncproxy` on remote node | `LC_PVE_TICKET` stripped from inter-node SSH (custom `sshd_config`)      | On **all** cluster nodes: `AcceptEnv LANG LANGUAGE LC_PVE_TICKET` in `/etc/ssh/sshd_config` and `SendEnv LC_PVE_TICKET` in `/etc/ssh/ssh_config`; `systemctl reload ssh`; test: `LC_PVE_TICKET=foo ssh peer-node 'echo $LC_PVE_TICKET'` |
+| WAN WebGUI unreachable                                              | Default WAN block (expected)                                             | Access via LAN IP or add controlled WAN allow rule                                                                                                                                                                                      |
+| WAN/LAN same subnet                                                 | Overlapping ranges                                                       | Re-number LAN to non-overlapping RFC1918 range                                                                                                                                                                                          |
 
 ---
 

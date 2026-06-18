@@ -26,21 +26,24 @@ from typing import TYPE_CHECKING, Callable
 if TYPE_CHECKING:
     from .domain_pattern import (
         fqdn_candidates,
-        glob_domain_to_regex,
+        fqdn_matches_domain,
         load_zone_suffixes,
+        match_host_pattern,
     )
 else:
     try:
         from .domain_pattern import (
             fqdn_candidates,
-            glob_domain_to_regex,
+            fqdn_matches_domain,
             load_zone_suffixes,
+            match_host_pattern,
         )
     except ImportError:
         from domain_pattern import (
             fqdn_candidates,
-            glob_domain_to_regex,
+            fqdn_matches_domain,
             load_zone_suffixes,
+            match_host_pattern,
         )
 
 
@@ -182,12 +185,11 @@ def main() -> int:
     args = _parse_args()
 
     try:
-        pattern = re.compile(args.pattern)
+        pattern = re.compile(args.pattern.strip())
     except re.error as exc:
         print(f"ERROR: invalid regex: {exc}", file=sys.stderr)
         return 1
 
-    domain_regex = glob_domain_to_regex(args.domain)
     zone_suffixes = load_zone_suffixes(Path(args.zone_suffixes_file) if args.zone_suffixes_file else None)
 
     candidates_path = Path(args.candidates_file)
@@ -195,9 +197,15 @@ def main() -> int:
     found = 0
 
     def fqdn_matches(fqdn: str) -> bool:
-        if domain_regex and not domain_regex.search(fqdn):
+        if not fqdn_matches_domain(args.domain, fqdn):
             return False
-        return bool(pattern.search(fqdn))
+        return match_host_pattern(pattern, fqdn)
+
+    def note_filtered(fqdn: str, ip: str) -> None:
+        print(
+            f"WARN: {fqdn} ({ip}) resolved but did not match domain/pattern filters",
+            file=sys.stderr,
+        )
 
     for cand in load_candidates(candidates_path):
         fqdn, ip = resolve_candidate_fqdn(cand, args.domain, zone_suffixes, resolve_ipv4)
@@ -206,6 +214,7 @@ def main() -> int:
             print(f"WARN: no IPv4 address for {cand} (tried: {tried})", file=sys.stderr)
             continue
         if not fqdn_matches(fqdn):
+            note_filtered(fqdn, ip)
             continue
         if emit_host(ip, fqdn, seen):
             found += 1
@@ -224,6 +233,7 @@ def main() -> int:
                 )
                 continue
             if not fqdn_matches(fqdn):
+                note_filtered(fqdn, ip)
                 continue
             if emit_host(ip, fqdn, seen):
                 found += 1

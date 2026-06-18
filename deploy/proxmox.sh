@@ -5,6 +5,8 @@ set -euo pipefail
 ENV=
 IP_ADDRESS=
 TARGET_USERNAME="root"
+# Optional SSH private key (setup-node, get-temp, etc.): env PAPITA_SSH_IDENTITY_FILE, or --identity-file.
+SSH_IDENTITY_FILE="${PAPITA_SSH_IDENTITY_FILE:-}"
 # Optional shared SSH password for peer nodes (get-temp, etc.): env PAPITA_SSH_PASSWORD / SSH_CLUSTER_PASSWORD, or prompt.
 # Password auth for scripted capture requires sshpass(1). Prefer SSH keys on all cluster members.
 SSH_CLUSTER_PASSWORD="${SSH_CLUSTER_PASSWORD:-${PAPITA_SSH_PASSWORD:-}}"
@@ -12,6 +14,8 @@ SSH_CLUSTER_PASSWORD="${SSH_CLUSTER_PASSWORD:-${PAPITA_SSH_PASSWORD:-}}"
 CLUSTER_NODE_IDS=()
 TARGET_REMOTE_PATH="/${TARGET_USERNAME}"
 PROJECT_PATH="$(dirname "$(dirname "$(realpath "$0")")")"
+PVE_SETUP_DIR="${PROJECT_PATH}/deploy/setup"
+PVE_PYTHON_DIR="${PROJECT_PATH}/deploy/python"
 
 # shellcheck source=${PROJECT_PATH}/deploy/utils.sh
 {
@@ -65,12 +69,12 @@ _deploy_tree_via_tar() {
 setup_node() {
     local required_local_file
     for required_local_file in \
-        src/bash/setup-pve-node.sh \
-        src/bash/misc/tailscale/default.gateways.list \
-        src/bash/misc/tailscale/default.lan.routes.list \
-        src/bash/misc/tailscale/default.tags.list \
-        src/python/misc/cluster/discover_hosts.py \
-        src/python/datafiles/default.hosts.list; do
+        deploy/setup/setup-pve-node.sh \
+        deploy/setup/misc/tailscale/default.gateways.list \
+        deploy/setup/misc/tailscale/default.lan.routes.list \
+        deploy/setup/misc/tailscale/default.tags.list \
+        deploy/python/misc/cluster/discover_hosts.py \
+        deploy/python/datafiles/default.hosts.list; do
         if [[ ! -f "$PROJECT_PATH/$required_local_file" ]]; then
             log "ERROR" "Local bundle incomplete: missing ${required_local_file}"
             exit 255
@@ -83,17 +87,17 @@ setup_node() {
 
     log "INFO" "Deploying setup-pve-node bundle to $IP_ADDRESS:$TARGET_REMOTE_PATH/deploy."
     ssh "${SSH_COMMON_OPTS[@]}" "$TARGET_USERNAME@$IP_ADDRESS" mkdir -p "${TARGET_REMOTE_PATH}/deploy"
-    # tar preserves misc/tailscale/ reliably (macOS scp -r src/bash/. can skip nested dirs).
-    _deploy_tree_via_tar "$PROJECT_PATH/src/bash" "${TARGET_REMOTE_PATH}/deploy" \
-        __pycache__ '*.pyc' misc/cluster
-    _deploy_tree_via_tar "$PROJECT_PATH/src/python" "${TARGET_REMOTE_PATH}/deploy/python" \
+    # tar preserves misc/tailscale/ reliably (macOS scp -r deploy/setup/. can skip nested dirs).
+    _deploy_tree_via_tar "${PVE_SETUP_DIR}" "${TARGET_REMOTE_PATH}/deploy" \
+        __pycache__ '*.pyc'
+    _deploy_tree_via_tar "${PVE_PYTHON_DIR}" "${TARGET_REMOTE_PATH}/deploy/python" \
         __pycache__ '*.pyc'
     scp "${SSH_COMMON_OPTS[@]}" "$PROJECT_PATH/deploy/utils.sh" "$TARGET_USERNAME@$IP_ADDRESS:$TARGET_REMOTE_PATH/deploy/utils.sh"
     scp "${SSH_COMMON_OPTS[@]}" "$PROJECT_PATH/deploy/usage.sh" "$TARGET_USERNAME@$IP_ADDRESS:$TARGET_REMOTE_PATH/deploy/usage.sh"
     ssh "${SSH_COMMON_OPTS[@]}" "$TARGET_USERNAME@$IP_ADDRESS" mkdir -p "${TARGET_REMOTE_PATH}/deploy/docs"
     scp "${SSH_COMMON_OPTS[@]}" "$PROJECT_PATH/deploy/docs/setup-pve-node.usage.txt" "$TARGET_USERNAME@$IP_ADDRESS:$TARGET_REMOTE_PATH/deploy/docs/setup-pve-node.usage.txt"
 
-    log "INFO" "Deployed src/bash/, src/python/ (misc/cluster + datafiles), utils.sh, usage.sh, and docs/setup-pve-node.usage.txt to $IP_ADDRESS:$TARGET_REMOTE_PATH/deploy."
+    log "INFO" "Deployed deploy/setup/, deploy/python/ (misc/cluster + datafiles), utils.sh, usage.sh, and docs/setup-pve-node.usage.txt to $IP_ADDRESS:$TARGET_REMOTE_PATH/deploy."
 
     ssh "${SSH_COMMON_OPTS[@]}" "$TARGET_USERNAME@$IP_ADDRESS" chmod -R a+rx "${TARGET_REMOTE_PATH}/deploy"
 
@@ -103,6 +107,8 @@ setup_node() {
         misc/tailscale/default.gateways.list \
         misc/tailscale/default.lan.routes.list \
         misc/tailscale/default.tags.list \
+        misc/cluster/papita-node-qdevice-client.sh \
+        misc/cluster/papita-cluster-quorum-ha.sh \
         python/misc/cluster/discover_hosts.py \
         python/datafiles/default.hosts.list; do
         if ! ssh "${SSH_COMMON_OPTS[@]}" "$TARGET_USERNAME@$IP_ADDRESS" \
@@ -271,6 +277,70 @@ stop_cluster() {
     return "$ERROR_COUNT"
 }
 
+_deploy_cluster_ha_bundle() {
+    local cluster_dir="${PVE_SETUP_DIR}/misc/cluster"
+    if [[ ! -d "$cluster_dir" ]]; then
+        log "ERROR" "Missing local cluster bundle: ${cluster_dir}"
+        exit 255
+    fi
+    log "INFO" "Deploying misc/cluster HA bundle to ${TARGET_REMOTE_PATH}/deploy/misc/cluster."
+    ssh "${SSH_COMMON_OPTS[@]}" "$TARGET_USERNAME@$IP_ADDRESS" mkdir -p "${TARGET_REMOTE_PATH}/deploy/misc/cluster"
+    _deploy_tree_via_tar "$cluster_dir" "${TARGET_REMOTE_PATH}/deploy/misc/cluster" \
+        __pycache__ '*.pyc'
+    ssh "${SSH_COMMON_OPTS[@]}" "$TARGET_USERNAME@$IP_ADDRESS" \
+        "chmod -R a+rx ${TARGET_REMOTE_PATH}/deploy/misc/cluster && chmod +x ${TARGET_REMOTE_PATH}/deploy/misc/cluster/*.sh"
+}
+
+setup_cluster_ha() {
+    local local_node cluster_cfg_json node_script cluster_script remote_node_cmd remote_cluster_cmd
+
+    if ! local_node=$(get_local_node); then
+        log "ERROR" "Could not determine local Proxmox node (not a cluster member?)."
+        return 255
+    fi
+    log "INFO" "Local cluster node: ${local_node} (SSH entry: ${TARGET_USERNAME}@${IP_ADDRESS})"
+
+    get_cluster_nodes
+    if [[ ${#CLUSTER_NODE_IDS[@]} -eq 0 ]]; then
+        log "ERROR" "No online cluster nodes found."
+        return 255
+    fi
+
+    cluster_cfg_json=$(ssh "${SSH_COMMON_OPTS[@]}" "$TARGET_USERNAME@$IP_ADDRESS" \
+        "pvesh get /cluster/config/nodes --output-format json 2>/dev/null" || true)
+    if [[ -z "$cluster_cfg_json" ]] || ! jq -e . >/dev/null 2>&1 <<<"$cluster_cfg_json"; then
+        log "WARN" "Could not read /cluster/config/nodes JSON; peer SSH may fail."
+        cluster_cfg_json="[]"
+    else
+        cluster_cfg_json=$(jq 'if type == "object" and ((.data | type) == "array") then .data elif type == "array" then . else [] end' <<<"$cluster_cfg_json")
+    fi
+
+    _deploy_cluster_ha_bundle
+
+    node_script="${TARGET_REMOTE_PATH}/deploy/misc/cluster/papita-node-qdevice-client.sh"
+    cluster_script="${TARGET_REMOTE_PATH}/deploy/misc/cluster/papita-cluster-quorum-ha.sh"
+    remote_node_cmd="if [ -f ${node_script} ]; then bash ${node_script}; else export DEBIAN_FRONTEND=noninteractive; apt-get update -qq; apt-get install -y corosync-qdevice; grep -qxF softdog /etc/modules || echo softdog >> /etc/modules; modprobe softdog 2>/dev/null || true; echo papita-node-qdevice-client-inline; fi"
+    remote_cluster_cmd="bash ${cluster_script}"
+
+    log "INFO" "Installing corosync-qdevice + softdog on all cluster members..."
+    _pve_cluster_for_each_remote_ssh "$local_node" "$cluster_cfg_json" "$remote_node_cmd" \
+        _pve_cluster_ha_node_visitor
+
+    log "INFO" "Running cluster quorum + NFS + HA setup on ${local_node}..."
+    if ! ssh "${SSH_COMMON_OPTS[@]}" "$TARGET_USERNAME@$IP_ADDRESS" "exec bash -lc $(printf '%q' "$remote_cluster_cmd")"; then
+        log "ERROR" "papita-cluster-quorum-ha.sh failed on ${IP_ADDRESS}."
+        return 255
+    fi
+
+    log "INFO" "setup-cluster-ha completed. Verify with: pvecm status; ha-manager status; pvesm status."
+    return 0
+}
+
+_pve_cluster_ha_node_visitor() {
+    local node_name=$1
+    log "INFO" "QDevice client installed on ${node_name}."
+}
+
 ACTION="$1"
 shift
 
@@ -300,6 +370,10 @@ while [[ "$#" -gt 0 ]]; do
             ;;
         --target-path | -tp)
             TARGET_REMOTE_PATH="$2"
+            shift 2
+            ;;
+        --identity-file | -if)
+            SSH_IDENTITY_FILE="$2"
             shift 2
             ;;
         --help | -h)
@@ -341,6 +415,16 @@ SSH_PW_EXTRA_OPTS=(
     -o ConnectTimeout=15
 )
 
+if [[ -n "${SSH_IDENTITY_FILE}" ]]; then
+    if [[ ! -f "${SSH_IDENTITY_FILE}" ]] || [[ ! -r "${SSH_IDENTITY_FILE}" ]]; then
+        log "ERROR" "SSH identity file not found or not readable: ${SSH_IDENTITY_FILE}"
+        exit 255
+    fi
+    SSH_COMMON_OPTS+=(-i "${SSH_IDENTITY_FILE}" -o IdentitiesOnly=yes)
+    SSH_PW_EXTRA_OPTS+=(-i "${SSH_IDENTITY_FILE}" -o IdentitiesOnly=yes)
+    log "INFO" "Using SSH identity file: ${SSH_IDENTITY_FILE}"
+fi
+
 # Run remote_cmd (single shell string) on host; print captured stdout. Returns 0 on success.
 # Order: try public-key (BatchMode); then sshpass + SSH_CLUSTER_PASSWORD (from env if set); then prompt (hidden) per host if needed.
 _pve_ssh_capture() {
@@ -354,7 +438,7 @@ _pve_ssh_capture() {
     fi
 
     if ! command -v sshpass &>/dev/null; then
-        log "ERROR" "SSH to ${TARGET_USERNAME}@${host} failed (no key). Install sshpass(1) for password auth, set PAPITA_SSH_PASSWORD (or SSH_CLUSTER_PASSWORD), or add a public key on this host."
+        log "ERROR" "SSH to ${TARGET_USERNAME}@${host} failed (no key). Use --identity-file / PAPITA_SSH_IDENTITY_FILE, install sshpass(1) for password auth, set PAPITA_SSH_PASSWORD (or SSH_CLUSTER_PASSWORD), or add a public key on this host."
         return 1
     fi
 
@@ -367,7 +451,7 @@ _pve_ssh_capture() {
     fi
 
     if [[ ! -t 0 ]]; then
-        log "ERROR" "Cannot prompt for SSH password (stdin is not a TTY). Set PAPITA_SSH_PASSWORD (or SSH_CLUSTER_PASSWORD), or use SSH keys for ${TARGET_USERNAME}@${host}."
+        log "ERROR" "Cannot prompt for SSH password (stdin is not a TTY). Set PAPITA_SSH_PASSWORD (or SSH_CLUSTER_PASSWORD), use --identity-file / PAPITA_SSH_IDENTITY_FILE, or use SSH keys for ${TARGET_USERNAME}@${host}."
         return 1
     fi
     read -r -s -p "SSH password for ${TARGET_USERNAME}@${host}: " SSH_CLUSTER_PASSWORD || return 1
@@ -503,6 +587,9 @@ case "$ACTION" in
         ;;
     stop-cluster)
         stop_cluster
+        ;;
+    setup-cluster-ha)
+        setup_cluster_ha
         ;;
     *)
         log "ERROR" "Invalid action: $ACTION."

@@ -8,16 +8,16 @@ Network diagram source: [`docs/Diagrams.drawio`](./docs/Diagrams.drawio) (export
 
 ## Overview
 
-| Concern             | Where it lives                                                                                                                                              | What it does                                                                                       |
-| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| **Workstation CLI** | [`deploy/toolkit.sh`](./deploy/toolkit.sh)                                                                                                                  | Single entrypoint: Python dev tooling, Proxmox SSH deploy, Terraform wrapper, optional AWS SSO/MFA |
-| **PVE bootstrap**   | [`src/bash/setup-pve-node.sh`](./src/bash/setup-pve-node.sh)                                                                                                | Interactive 17-step node setup (APT, WoL, sensors, hosts, Tailscale, hooks, backups, TLS)          |
-| **Cluster ops**     | [`deploy/proxmox.sh`](./deploy/proxmox.sh)                                                                                                                  | SSH to nodes: `setup-node`, `get-temp`, `start-cluster`, `stop-cluster`                            |
-| **Tailnet + LAN**   | [`deploy/tailscale-pfsense-lan.sh`](./deploy/tailscale-pfsense-lan.sh)                                                                                      | Approve pfSense routes, patch Tailscale ACLs, verify admin path to main PVE                        |
-| **pfSense pfREST**  | [`deploy/pfsense-restapi-access.sh`](./deploy/pfsense-restapi-access.sh) · [`deploy/pfsense-firewall-tailscale.sh`](./deploy/pfsense-firewall-tailscale.sh) | Bootstrap REST API access and apply agreed Tailscale-tab firewall rules via pfREST                 |
-| **Cursor MCP**      | [`mcp/`](./mcp/) · [`deploy/mcp.sh`](./deploy/mcp.sh)                                                                                                       | Install, test, and sync MCP servers for Proxmox VE and pfSense                                     |
-| **AWS infra**       | [`terraform/plans/`](./terraform/plans/)                                                                                                                    | EFS + optional VPC (**in construction** — see [Terraform plans](./terraform/plans/README.md))      |
-| **Runbooks**        | [`docs/TIPSNTRICKS.md`](./docs/TIPSNTRICKS.md)                                                                                                              | Ceph, cluster join, pfSense, Tailscale, VM clipboard, MCP smoke, maintenance                       |
+| Concern             | Where it lives                                                                                                                                              | What it does                                                                                              |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| **Workstation CLI** | [`deploy/toolkit.sh`](./deploy/toolkit.sh)                                                                                                                  | Single entrypoint: Python dev tooling, Proxmox SSH deploy, Terraform wrapper, optional AWS SSO/MFA        |
+| **PVE bootstrap**   | [`deploy/setup/setup-pve-node.sh`](./deploy/setup/setup-pve-node.sh)                                                                                        | Interactive 18-step node setup (APT, WoL, sensors, hosts, Tailscale, hooks, QDevice client, backups, TLS) |
+| **Cluster ops**     | [`deploy/proxmox.sh`](./deploy/proxmox.sh)                                                                                                                  | SSH to nodes: `setup-node`, `setup-cluster-ha`, `get-temp`, `start-cluster`, `stop-cluster`               |
+| **Tailnet + LAN**   | [`deploy/tailscale-pfsense-lan.sh`](./deploy/tailscale-pfsense-lan.sh)                                                                                      | Approve pfSense routes, patch Tailscale ACLs, verify admin path to main PVE                               |
+| **pfSense pfREST**  | [`deploy/pfsense-restapi-access.sh`](./deploy/pfsense-restapi-access.sh) · [`deploy/pfsense-firewall-tailscale.sh`](./deploy/pfsense-firewall-tailscale.sh) | Bootstrap REST API access and apply agreed Tailscale-tab firewall rules via pfREST                        |
+| **Cursor MCP**      | [`mcp/`](./mcp/) · [`deploy/mcp.sh`](./deploy/mcp.sh)                                                                                                       | Install, test, and sync MCP servers for Proxmox VE and pfSense                                            |
+| **AWS infra**       | [`terraform/plans/`](./terraform/plans/)                                                                                                                    | EFS + optional VPC (**in construction** — see [Terraform plans](./terraform/plans/README.md))             |
+| **Runbooks**        | [`docs/TIPSNTRICKS.md`](./docs/TIPSNTRICKS.md)                                                                                                              | Ceph, cluster join, pfSense, Tailscale, VM clipboard, MCP smoke, maintenance                              |
 
 **Lab topology (default):**
 
@@ -70,7 +70,7 @@ Network diagram source: [`docs/Diagrams.drawio`](./docs/Diagrams.drawio) (export
 
 ```text
 papita-proxmox-lab/
-├── deploy/                         # Run from repo root
+├── deploy/                         # Orchestration + PVE bundles (run from repo root)
 │   ├── toolkit.sh                  # Main CLI
 │   ├── proxmox.sh                  # SSH → PVE nodes
 │   ├── terraform.sh                # Terraform init / workspace / plan|apply|destroy
@@ -79,6 +79,13 @@ papita-proxmox-lab/
 │   ├── pfsense-restapi-access.sh   # pfREST Allowed Interfaces bootstrap
 │   ├── pfsense-firewall-tailscale.sh # Tailscale-tab firewall rules via pfREST
 │   ├── utils.sh / usage.sh         # Shared logging, prompts, help text
+│   ├── setup/                      # Copied to /root/deploy on each PVE node
+│   │   ├── setup-pve-node.sh       # 17-step interactive bootstrap
+│   │   ├── post-startup-proc.sh / pre-shutdown-proc.sh
+│   │   └── misc/tailscale/         # default tags, routes, LAN fallback lists
+│   ├── python/                     # Copied to /root/deploy/python on nodes
+│   │   ├── misc/cluster/           # discover_hosts.py, domain_pattern.py (step 7)
+│   │   └── datafiles/              # default.hosts.*, domain suffix lists
 │   └── docs/                       # Usage manuals (less during setup prompts)
 │       ├── setup-pve-node.usage.txt
 │       └── tailscale-pfsense-lan.usage.txt
@@ -86,14 +93,6 @@ papita-proxmox-lab/
 │   ├── README.md                   # Install guide for all MCP packages
 │   ├── proxmox-ve-mcp/             # Proxmox VE REST — 21 tools (read + gated write)
 │   └── pfsense-mcp/                # pfSense pfREST — 7 read-only tools + policy framework
-├── src/
-│   ├── bash/                       # Copied to /root/deploy on each PVE node
-│   │   ├── setup-pve-node.sh       # 17-step interactive bootstrap
-│   │   ├── post-startup-proc.sh / pre-shutdown-proc.sh
-│   │   └── misc/tailscale/         # default tags, routes, LAN fallback lists
-│   └── python/                     # Copied to /root/deploy/python on nodes
-│       ├── misc/cluster/           # discover_hosts.py, domain_pattern.py (step 7)
-│       └── datafiles/              # default.hosts.*, domain suffix lists
 ├── terraform/
 │   ├── environments/               # Local only: config.{dev|prod|poc}.tfvars
 │   └── plans/                      # Terraform root (see plans/README.md)
@@ -135,7 +134,7 @@ poetry install --with pre-commit --with test
 poetry run pre-commit install   # optional: git hooks
 ```
 
-VS Code / Cursor: [`.vscode/settings.json`](./.vscode/settings.json) points the Python extension at `.venv` and adds `src/python` to analysis paths.
+VS Code / Cursor: [`.vscode/settings.json`](./.vscode/settings.json) points the Python extension at `.venv` and adds `deploy/python` to analysis paths.
 
 ### MCP servers (Cursor)
 
@@ -152,7 +151,7 @@ Reload **Cursor** after `cursor-sync`. Full guide: [`mcp/README.md`](./mcp/READM
 
 ### PVE node prerequisites
 
-Nodes are prepared by **`setup-node`** (or run [`src/bash/setup-pve-node.sh`](./src/bash/setup-pve-node.sh) locally on the node). Step 1 installs packages from [`src/bash/apt-dependencies.list`](./src/bash/apt-dependencies.list) (`jq`, `lm-sensors`, `chrony`, `smartmontools`, `postfix`, `python3`, …).
+Nodes are prepared by **`setup-node`** (or run [`deploy/setup/setup-pve-node.sh`](./deploy/setup/setup-pve-node.sh) locally on the node). Step 1 installs packages from [`deploy/setup/apt-dependencies.list`](./deploy/setup/apt-dependencies.list) (`jq`, `lm-sensors`, `chrony`, `smartmontools`, `postfix`, `python3`, …).
 
 ---
 
@@ -199,8 +198,8 @@ Required keys for `deploy/terraform.sh`: `tf_backend_bucket`, `tf_backend_key`, 
 ### SSH to PVE
 
 - **User:** `root` (default)
-- **Auth:** SSH keys preferred; optional `PAPITA_SSH_PASSWORD` or `SSH_CLUSTER_PASSWORD` for scripted peer access (`get-temp`, etc.)
-- **Remote bundle path:** `/root/deploy` (contents of `src/bash/`, `src/python/`, plus copied `utils.sh`, `usage.sh`, `docs/setup-pve-node.usage.txt`)
+- **Auth:** SSH keys preferred (`--identity-file` / `-if`, or env `PAPITA_SSH_IDENTITY_FILE`); optional `PAPITA_SSH_PASSWORD` or `SSH_CLUSTER_PASSWORD` for scripted peer access (`get-temp`, etc.)
+- **Remote bundle path:** `/root/deploy` (contents of `deploy/setup/`, `deploy/python/`, plus copied `utils.sh`, `usage.sh`, `docs/setup-pve-node.usage.txt`)
 
 ---
 
@@ -283,6 +282,7 @@ Policy reference: [pfsense-mcp/docs/POLICY.md](./mcp/pfsense-mcp/docs/POLICY.md)
 | Action                         | Purpose                                                |
 | ------------------------------ | ------------------------------------------------------ |
 | `setup-node`                   | Replace remote `/root/deploy`, run `setup-pve-node.sh` |
+| `setup-cluster-ha`             | QDevice + TrueNAS NFS + HA group (see TIPSNTRICKS)     |
 | `get-temp`                     | Cluster-wide `sensors -j` table                        |
 | `start-cluster`                | WoL peer nodes via `pvenode wakeonlan`                 |
 | `stop-cluster`                 | `pvesh stopall` + shutdown per node                    |
@@ -298,7 +298,7 @@ Manual for setup prompts: [`deploy/docs/setup-pve-node.usage.txt`](./deploy/docs
 
 ### PVE setup steps (`setup-pve-node.sh`)
 
-Controlled by `PVE_SETUP_LAST_STEP=17`. At the first prompt, enter `y`, `n`, a step number `1`–`17`, or `h`/`help` for the full manual.
+Controlled by `PVE_SETUP_LAST_STEP=18`. At the first prompt, enter `y`, `n`, a step number `1`–`18`, or `h`/`help` for the full manual.
 
 | Step | Topic                                                                         |
 | ---- | ----------------------------------------------------------------------------- |
@@ -319,6 +319,9 @@ Controlled by `PVE_SETUP_LAST_STEP=17`. At the first prompt, enter `y`, `n`, a s
 | 15   | Remove PVE subscription nag                                                   |
 | 16   | vzdump backup cron                                                            |
 | 17   | Tailscale TLS cert for UI `:8006` (**main node only**)                        |
+| 18   | QDevice client (`corosync-qdevice`) + softdog watchdog (HA fencing prep)      |
+
+After all nodes complete step 18, run **`./deploy/proxmox.sh setup-cluster-ha --ip-address 172.16.0.101`** from the workstation (see [TIPSNTRICKS § Quorum, QDevice, TrueNAS NFS, and HA](./docs/TIPSNTRICKS.md)).
 
 ### Tailscale + pfSense LAN
 
@@ -350,13 +353,13 @@ Flow: read `terraform/environments/config.<env>.tfvars` → `terraform init` (S3
 
 ## Python tooling
 
-| Component                                                                                  | Role                                                   |
-| ------------------------------------------------------------------------------------------ | ------------------------------------------------------ |
-| [`mcp/proxmox-ve-mcp/`](./mcp/proxmox-ve-mcp/)                                             | Proxmox VE MCP server (FastMCP, httpx, Pydantic)       |
-| [`mcp/pfsense-mcp/`](./mcp/pfsense-mcp/)                                                   | pfSense pfREST MCP server + lab policy framework       |
-| [`src/python/misc/cluster/discover_hosts.py`](./src/python/misc/cluster/discover_hosts.py) | Step 7: DNS peer discovery → `/etc/hosts` lines        |
-| [`src/python/misc/cluster/domain_pattern.py`](./src/python/misc/cluster/domain_pattern.py) | Wildcard domain suffix expansion (`oldtimers.*`, etc.) |
-| [`src/python/datafiles/`](./src/python/datafiles/)                                         | Default host lists, regex, domain suffix labels        |
+| Component                                                                                        | Role                                                   |
+| ------------------------------------------------------------------------------------------------ | ------------------------------------------------------ |
+| [`mcp/proxmox-ve-mcp/`](./mcp/proxmox-ve-mcp/)                                                   | Proxmox VE MCP server (FastMCP, httpx, Pydantic)       |
+| [`mcp/pfsense-mcp/`](./mcp/pfsense-mcp/)                                                         | pfSense pfREST MCP server + lab policy framework       |
+| [`deploy/python/misc/cluster/discover_hosts.py`](./deploy/python/misc/cluster/discover_hosts.py) | Step 7: DNS peer discovery → `/etc/hosts` lines        |
+| [`deploy/python/misc/cluster/domain_pattern.py`](./deploy/python/misc/cluster/domain_pattern.py) | Wildcard domain suffix expansion (`oldtimers.*`, etc.) |
+| [`deploy/python/datafiles/`](./deploy/python/datafiles/)                                         | Default host lists, regex, domain suffix labels        |
 
 On PVE nodes, Python is **runtime-only** (no Poetry). On the workstation, Poetry manages MCP packages as **path dependencies** and dev linters (black, isort, flake8, pylint, mypy, interrogate) via [`pyproject.toml`](./pyproject.toml) and [`.pre-commit-config.yaml`](./.pre-commit-config.yaml).
 

@@ -29,13 +29,13 @@ fi
 
 APT_DEPENDENCIES_LIST="${SCRIPT_DIR}/apt-dependencies.list"
 
-# Python bundle: proxmox.sh copies src/python/ → <deploy>/python/ (misc/cluster + datafiles).
+# Python bundle: proxmox.sh copies deploy/python/ → <remote>/deploy/python/ (misc/cluster + datafiles).
 _resolve_python_root() {
     local candidate=""
     for candidate in \
         "${SCRIPT_DIR}/python" \
         "${SCRIPT_DIR}/../python" \
-        "${REPO_ROOT}/src/python"; do
+        "${REPO_ROOT}/deploy/python"; do
         if [[ -d "${candidate}/misc/cluster" && -d "${candidate}/datafiles" ]]; then
             cd "${candidate}" && pwd
             return 0
@@ -52,7 +52,7 @@ CLUSTER_ZONE_SUFFIXES_FILE="${PYTHON_ROOT}/datafiles/default.domain.suffixes.lis
 DISCOVER_HOSTS_PY="${PYTHON_ROOT}/misc/cluster/discover_hosts.py"
 PAPITA_HOSTS_BLOCK_BEGIN="# BEGIN papita-pve-cluster-hosts"
 PAPITA_HOSTS_BLOCK_END="# END papita-pve-cluster-hosts"
-PVE_SETUP_LAST_STEP=17
+PVE_SETUP_LAST_STEP=18
 START_FROM_STEP=0
 DEFAULT_CRONTAB_SCHEDULE="0 4 * * 6"
 # Tailscale Proxmox cert renewal cron (step 17.2); five fields only — user/command appended by script.
@@ -117,6 +117,7 @@ confirm_pve_setup() {
 15. Remove PVE subscription alert
 16. Configure periodic backup job (vzdump)
 17. Proxmox Web UI: Tailscale-issued TLS certificate (HTTPS 8006)
+18. QDevice client + HA watchdog (corosync-qdevice, softdog)
 
   Usage: at the "Input:" prompt, enter h, help, ?, usage, -h, or --help to open the full manual in less (q to quit), then choose again.
 EOF
@@ -478,6 +479,7 @@ setup_locales() {
 
 # macOS/Cursor SSH often sends LC_CTYPE=UTF-8 (invalid on Debian). profile.d runs after bash
 # warns; rejecting LC_* in sshd AcceptEnv stops the bad value reaching login shells.
+# Keep LC_PVE_TICKET — Proxmox passes the VNC auth ticket over inter-node SSH for noVNC.
 _papita_install_locale_profile_fix() {
     local full_locale="$1"
     local dropin="/etc/profile.d/papita-locale-fix.sh"
@@ -494,16 +496,33 @@ EOF
 
 _papita_fix_sshd_accept_env_locales() {
     local sshd_config="/etc/ssh/sshd_config"
+    local ssh_config="/etc/ssh/ssh_config"
+    local accept_line="AcceptEnv LANG LANGUAGE LC_PVE_TICKET"
     if [[ ! -f "${sshd_config}" ]]; then
         return 0
     fi
     if grep -qE '^AcceptEnv[[:space:]]+.*LC_\*' "${sshd_config}"; then
-        sed -i -E '/^AcceptEnv[[:space:]]+.*LC_\*/c AcceptEnv LANG LANGUAGE' "${sshd_config}"
-        if systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null; then
-            log INFO "sshd: AcceptEnv LANG LANGUAGE only (ignores client LC_CTYPE=UTF-8)."
+        sed -i -E "/^AcceptEnv[[:space:]]+.*LC_\\*/c ${accept_line}" "${sshd_config}"
+        log INFO "sshd: ${accept_line} (drops client LC_* except Proxmox VNC ticket)."
+    elif grep -qE '^AcceptEnv LANG LANGUAGE$' "${sshd_config}"; then
+        sed -i -E "s/^AcceptEnv LANG LANGUAGE$/${accept_line}/" "${sshd_config}"
+        log INFO "sshd: added LC_PVE_TICKET to AcceptEnv (cross-node noVNC)."
+    elif ! grep -q 'LC_PVE_TICKET' "${sshd_config}"; then
+        echo "${accept_line}" >>"${sshd_config}"
+        log INFO "sshd: appended ${accept_line}."
+    fi
+    if [[ -f "${ssh_config}" ]] && ! grep -q 'LC_PVE_TICKET' "${ssh_config}"; then
+        if grep -qE '^Host[[:space:]]+\*' "${ssh_config}"; then
+            sed -i '/^Host[[:space:]]\+\*/a\    SendEnv LC_PVE_TICKET' "${ssh_config}"
         else
-            log WARN "Could not reload sshd; run: systemctl reload ssh"
+            printf 'Host *\n    SendEnv LC_PVE_TICKET\n' >>"${ssh_config}"
         fi
+        log INFO "ssh client: SendEnv LC_PVE_TICKET (console proxy to peer nodes)."
+    fi
+    if systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null; then
+        log INFO "sshd reloaded."
+    else
+        log WARN "Could not reload sshd; run: systemctl reload ssh"
     fi
     return 0
 }
@@ -1326,6 +1345,36 @@ EOF
 }
 
 # -----------------------------------------------------------------------------
+# QDevice client + softdog watchdog (per-node HA fencing prerequisite).
+# Cluster-wide QDevice/NFS/HA: ./deploy/proxmox.sh setup-cluster-ha from workstation.
+# -----------------------------------------------------------------------------
+setup_quorum_ha_client() {
+    _skip_pve_step 18 "QDevice client and HA watchdog setup" && return 0
+
+    prompt_until_ynet "18. QUESTION: Install corosync-qdevice and enable softdog watchdog (HA fencing prep)? (y/n, e or t to exit setup): " confirm
+    if [ "$confirm" != "y" ]; then
+        return 0
+    fi
+
+    local node_script="${SCRIPT_DIR}/misc/cluster/papita-node-qdevice-client.sh"
+    if [ ! -f "$node_script" ]; then
+        log ERROR "Missing ${node_script}. Re-run deploy/proxmox.sh setup-node to refresh the bundle."
+        return 1
+    fi
+
+    bash "$node_script" || {
+        log ERROR "papita-node-qdevice-client.sh failed."
+        return 1
+    }
+
+    log INFO "Per-node QDevice client ready. After all cluster members run step 18:"
+    log INFO "  1) Bootstrap QDevice server (NOT TrueNAS): bash misc/cluster/qdevice-server-bootstrap.sh on the host in misc/cluster/default.qdevice.host"
+    log INFO "  2) From workstation: ./deploy/proxmox.sh setup-cluster-ha --ip-address <MAIN_NODE_LAN_IP>"
+    log INFO "  Edit misc/cluster/default.truenas.nfs.env for TrueNAS export path before step 2."
+    return 0
+}
+
+# -----------------------------------------------------------------------------
 # Main
 # -----------------------------------------------------------------------------
 main() {
@@ -1368,6 +1417,7 @@ main() {
 
     setup_backup_job || log WARN "Backup job setup failed; continuing."
     setup_pve_tailscale_ui_certificate || log WARN "Proxmox Tailscale UI certificate step failed; continuing."
+    setup_quorum_ha_client || log WARN "QDevice client / HA watchdog step failed; continuing."
 
     log INFO "Done."
 }

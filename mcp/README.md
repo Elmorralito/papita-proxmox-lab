@@ -6,6 +6,7 @@ This directory holds [Model Context Protocol](https://modelcontextprotocol.io/) 
 | -------------------------------------- | ---------------- | ------------------------------------------------------------------------------------ |
 | [`proxmox-ve-mcp/`](./proxmox-ve-mcp/) | `proxmox-ve`     | Proxmox VE REST API (`:8006`) — cluster read + gated guest power                     |
 | [`pfsense-mcp/`](./pfsense-mcp/)       | `pfsense`        | pfSense pfREST (`:443`) — read-only firewall / Tailscale inspect + lab policy verify |
+| [`truenas-mcp/`](./truenas-mcp/)       | `truenas`        | TrueNAS WebSocket API — storage health, Scrutiny app, gated writes                   |
 
 **pfSense CLIs** (install via `./deploy/mcp.sh install`): `pfsense-mcp-smoke`, `pfsense-mcp-bootstrap` (REST API Allowed Interfaces), `pfsense-mcp-firewall` (Tailscale-tab rules). See [pfsense-mcp/docs/POLICY.md](./pfsense-mcp/docs/POLICY.md).
 
@@ -42,7 +43,8 @@ Reload **Cursor** after `cursor-sync`. In Settings → MCP, confirm `proxmox-ve`
 
 ```bash
 ./deploy/mcp.sh install --server proxmox-ve-mcp   # one package only
-./deploy/mcp.sh smoke --extended                   # full access-level matrix
+./deploy/mcp.sh smoke --extended                   # proxmox-ve full matrix
+./deploy/mcp.sh smoke --server truenas-mcp         # TrueNAS WebSocket auth
 ./deploy/mcp.sh cursor-sync --cursor-config ~/.cursor/mcp.json
 ```
 
@@ -130,4 +132,4 @@ git pull
 | Smoke test 403                            | Fix token ACL — run `pve_check_token` or see PVE_TOKEN_SETUP.md |
 | `ModuleNotFoundError`                     | `./deploy/mcp.sh update`                                        |
 
-Package-specific docs: [proxmox-ve-mcp/README.md](./proxmox-ve-mcp/README.md), [pfsense-mcp/README.md](./pfsense-mcp/README.md).
+Package-specific docs: [proxmox-ve-mcp/README.md](./proxmox-ve-mcp/README.md), [pfsense-mcp/README.md](./pfsense-mcp/README.md), [truenas-mcp/README.md](./truenas-mcp/README.md).

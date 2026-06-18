@@ -141,6 +141,11 @@ cmd_smoke() {
             _install_package_scripts "${pkg}"
         fi
         ;;
+    truenas-mcp)
+        if [[ ! -x "${PROJECT_PATH}/.venv/bin/truenas-mcp-smoke" ]]; then
+            _install_package_scripts "${pkg}"
+        fi
+        ;;
     *)
         log "ERROR" "No smoke CLI for ${pkg}. See mcp/${pkg}/README.md."
         exit 1
@@ -158,6 +163,11 @@ cmd_smoke() {
     pfsense-mcp)
         smoke_args=(poetry run pfsense-mcp-smoke)
         cursor_server="pfsense"
+        ;;
+    truenas-mcp)
+        smoke_args=(poetry run truenas-mcp-smoke)
+        cursor_server="truenas"
+        [[ "${SMOKE_EXTENDED}" -eq 1 ]] && smoke_args+=(--extended)
         ;;
     esac
 

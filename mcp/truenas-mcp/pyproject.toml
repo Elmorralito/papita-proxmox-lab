@@ -1,0 +1,30 @@
+[project]
+name = "truenas-mcp"
+version = "0.2.0a1"
+description = "Model Context Protocol server for TrueNAS WebSocket API operations."
+readme = "README.md"
+authors = [{ name = "Elmorralito", email = "drestrepohinc@gmail.com" }]
+requires-python = ">=3.11,<4"
+dependencies = [
+    "mcp (>=1.9.0,<2.0.0)",
+    "pydantic (>=2.3.0,<3.0)",
+    "pydantic-settings (>=2.6.0,<3.0)",
+    "python-dotenv (>=1.0.1,<2.0)",
+    "websockets (>=14.0,<16.0)",
+]
+
+[project.scripts]
+truenas-mcp = "truenas_mcp.server:main"
+truenas-mcp-smoke = "truenas_mcp.smoke_cli:main"
+
+[project.urls]
+HomePage = "https://github.com/Elmorralito/papita-proxmox-lab/tree/main/mcp/truenas-mcp"
+Documentation = "https://github.com/Elmorralito/papita-proxmox-lab/blob/main/mcp/truenas-mcp/README.md"
+
+[tool.poetry]
+package-mode = true
+packages = [{ include = "truenas_mcp", from = "src" }]
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"

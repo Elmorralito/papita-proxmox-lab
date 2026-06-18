@@ -9,6 +9,7 @@ package-mode = false
 python = ">=3.11,<4.0.0"
 proxmox-ve-mcp = { path = "./mcp/proxmox-ve-mcp", develop = true }
 pfsense-mcp = { path = "./mcp/pfsense-mcp", develop = true }
+truenas-mcp = { path = "./mcp/truenas-mcp", develop = true }
 
 [tool.poetry.group.pre-commit.dependencies]
 black = "^24.4.2"
@@ -80,7 +81,7 @@ include = "\\.pyi?$"
 
 
 [tool.mypy]
-mypy_path = ["mcp/proxmox-ve-mcp/src", "mcp/pfsense-mcp/src"]
+mypy_path = ["mcp/proxmox-ve-mcp/src", "mcp/pfsense-mcp/src", "mcp/truenas-mcp/src"]
 exclude = ["tests"]
 python_version = "3.11"
 plugins = ["pydantic.mypy"]
@@ -106,6 +107,7 @@ known_first_party = [
     "python.misc",
     "proxmox_ve_mcp",
     "pfsense_mcp",
+    "truenas_mcp",
 ]
 sections = ["FUTURE", "STDLIB", "THIRDPARTY", "FIRSTPARTY", "LOCALFOLDER"]
 py_version = 312
@@ -127,8 +129,9 @@ exclude = [
     "./tests",
     "./mcp/proxmox-ve-mcp/tests",
     "./mcp/pfsense-mcp/tests",
+    "./mcp/truenas-mcp/tests",
     "./terraform",
-    "./deploy",
+    "./deploy/setup",
     "./libs",
     "./dist",
     "./build",
@@ -152,5 +155,5 @@ ignore-nested-functions = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["tests", "mcp/proxmox-ve-mcp/tests"]
-pythonpath = ["mcp/proxmox-ve-mcp/src"]
+testpaths = ["tests", "mcp/proxmox-ve-mcp/tests", "mcp/truenas-mcp/tests"]
+pythonpath = ["mcp/proxmox-ve-mcp/src", "mcp/truenas-mcp/src"]

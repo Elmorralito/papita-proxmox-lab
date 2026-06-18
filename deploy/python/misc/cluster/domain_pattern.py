@@ -9,7 +9,9 @@ resolved FQDNs.
 
 Public API:
     ``DEFAULT_ZONE_SUFFIXES``, ``contains_glob``, ``load_zone_suffixes``,
-    ``expand_domain_suffix``, ``fqdn_candidates``, ``glob_domain_to_regex``.
+    ``expand_domain_suffix``, ``fqdn_candidates``, ``glob_domain_to_regex``,
+    ``literal_domain_to_regex``, ``domain_to_fqdn_regex``, ``match_host_pattern``,
+    ``fqdn_matches_domain``.
 """
 
 from __future__ import annotations
@@ -47,8 +49,8 @@ def load_zone_suffixes(path: Path | None) -> tuple[str, ...]:
 
     Reads a newline-delimited file (comments after ``#`` ignored). When ``path``
     is ``None``, missing, or yields no non-empty lines, returns
-    ``DEFAULT_ZONE_SUFFIXES``. An empty line in the file represents trying the
-    base name alone (no trailing zone label).
+    ``DEFAULT_ZONE_SUFFIXES``. A blank line (optional whitespace) inserts an empty
+    zone label so trailing-``.*`` expansion also tries the base name alone.
 
     Args:
         path: Optional path to a zone-suffix list (e.g.
@@ -61,7 +63,12 @@ def load_zone_suffixes(path: Path | None) -> tuple[str, ...]:
         return DEFAULT_ZONE_SUFFIXES
     items: list[str] = []
     for raw in path.read_text(encoding="utf-8").splitlines():
-        line = raw.split("#", 1)[0].strip()
+        stripped = raw.strip()
+        if not stripped or stripped.startswith("#"):
+            if stripped == "":
+                items.append("")
+            continue
+        line = stripped.split("#", 1)[0].strip()
         if line:
             items.append(line)
     return tuple(items) if items else DEFAULT_ZONE_SUFFIXES
@@ -148,9 +155,10 @@ def fqdn_candidates(
 
 
 def glob_domain_to_regex(domain: str) -> re.Pattern[str] | None:
-    """Compile a regex that matches full FQDNs allowed by a glob domain keyword.
+    """Compile a regex that matches full FQDNs allowed by a domain keyword.
 
-    Returns ``None`` for literal (non-glob) domains. For trailing ``.*``, matches
+    Returns ``None`` for literal (non-glob) domains — callers should use
+    ``literal_domain_to_regex`` instead. For trailing ``.*``, matches
     ``short.base`` with optional extra dot-separated labels after ``base``. For
     leading ``*.``, matches ``short.{fixed_suffix}``. Other globs escape literal
     dots and map ``*``/``?`` to ``[^.]+``/``[^.]`` within the suffix portion.
@@ -163,6 +171,9 @@ def glob_domain_to_regex(domain: str) -> re.Pattern[str] | None:
         contains no glob characters.
     """
     domain = domain.strip().lstrip(".")
+    if not domain:
+        return re.compile(r"(?!x)")  # match nothing
+
     if not contains_glob(domain):
         return None
 
@@ -171,8 +182,45 @@ def glob_domain_to_regex(domain: str) -> re.Pattern[str] | None:
         return re.compile(rf"^[^.]+\.{base}(\.[^.]+)*$")
 
     if domain.startswith("*."):
-        suffix = re.escape(domain[2:].lstrip("."))
+        remainder = domain[2:].lstrip(".")
+        if contains_glob(remainder):
+            return None
+        suffix = re.escape(remainder)
         return re.compile(rf"^[^.]+\.{suffix}$")
 
     escaped = re.escape(domain).replace(r"\*", r"[^.]+").replace(r"\?", r"[^.]")
     return re.compile(rf"^[^.]+\.{escaped}$")
+
+
+def literal_domain_to_regex(domain: str) -> re.Pattern[str]:
+    """Compile a regex that matches ``short.{literal_suffix}`` FQDNs exactly."""
+    domain = domain.strip().lstrip(".")
+    if not domain:
+        return re.compile(r"(?!x)")
+    suffix = re.escape(domain)
+    return re.compile(rf"^[^.]+\.{suffix}$")
+
+
+def domain_to_fqdn_regex(domain: str) -> re.Pattern[str]:
+    """Return an FQDN filter for a literal suffix or glob domain keyword."""
+    globbed = glob_domain_to_regex(domain)
+    if globbed is not None:
+        return globbed
+    return literal_domain_to_regex(domain)
+
+
+def fqdn_short_label(fqdn: str) -> str:
+    """Return the hostname label before the first dot in ``fqdn``."""
+    return fqdn.split(".", 1)[0]
+
+
+def match_host_pattern(pattern: re.Pattern[str], fqdn: str) -> bool:
+    """Match ``pattern`` against the full FQDN or its short hostname label."""
+    if pattern.fullmatch(fqdn):
+        return True
+    return bool(pattern.fullmatch(fqdn_short_label(fqdn)))
+
+
+def fqdn_matches_domain(domain: str, fqdn: str) -> bool:
+    """Return whether ``fqdn`` belongs to the configured domain keyword."""
+    return bool(domain_to_fqdn_regex(domain).fullmatch(fqdn))

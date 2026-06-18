@@ -89,6 +89,9 @@ deploy_proxmox() {
   if [[ -n "${TEMP_HOSTNAME:-}" ]]; then
     proxmox_cmd+=(--hostname "${TEMP_HOSTNAME}")
   fi
+  if [[ -n "${TEMP_SSH_IDENTITY_FILE:-}" ]]; then
+    proxmox_cmd+=(--identity-file "${TEMP_SSH_IDENTITY_FILE}")
+  fi
   run_command 1 "${proxmox_cmd[*]}"
 }
 
@@ -190,6 +193,10 @@ while [[ "$#" -gt 0 ]]; do
     ;;
   --hostname | -hn)
     TEMP_HOSTNAME="$2"
+    shift 2
+    ;;
+  --identity-file | -if)
+    TEMP_SSH_IDENTITY_FILE="$2"
     shift 2
     ;;
   --help | -h)

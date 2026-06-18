@@ -320,13 +320,13 @@ Official docs: [Proxmox VE API](https://pve.proxmox.com/pve-docs/pve-admin-guide
 
 ## Appendix B — Repository file index
 
-| Path                            | Relevance                               |
-| ------------------------------- | --------------------------------------- |
-| `docs/TIPSNTRICKS.md`           | Runbooks, cluster troubleshooting, Ceph |
-| `deploy/proxmox.sh`             | SSH automation, pvesh patterns          |
-| `src/bash/post-startup-proc.sh` | Quorum, Ceph noout unset, WoL           |
-| `src/bash/pre-shutdown-proc.sh` | stopall, Ceph noout set                 |
-| `src/bash/setup-pve-node.sh`    | Out-of-scope bootstrap                  |
+| Path                                | Relevance                               |
+| ----------------------------------- | --------------------------------------- |
+| `docs/TIPSNTRICKS.md`               | Runbooks, cluster troubleshooting, Ceph |
+| `deploy/proxmox.sh`                 | SSH automation, pvesh patterns          |
+| `deploy/setup/post-startup-proc.sh` | Quorum, Ceph noout unset, WoL           |
+| `deploy/setup/pre-shutdown-proc.sh` | stopall, Ceph noout set                 |
+| `deploy/setup/setup-pve-node.sh`    | Out-of-scope bootstrap                  |
 
 ---
 

@@ -9,12 +9,12 @@ What it is
   WoL-capable interfaces, etc.) via deploy/utils.sh.
 
 How to run
-  Local (repository checkout; deploy/utils.sh, deploy/usage.sh, src/python/, and this file):
-    bash src/bash/setup-pve-node.sh
-    bash src/bash/setup-pve-node.sh --help    # this manual in a pager, then exit
-    Step 7 resolves src/python/ via ../python (misc/cluster + datafiles).
+  Local (repository checkout; deploy/utils.sh, deploy/usage.sh, deploy/python/, and this file):
+    bash deploy/setup/setup-pve-node.sh
+    bash deploy/setup/setup-pve-node.sh --help    # this manual in a pager, then exit
+    Step 7 resolves deploy/python/ via ../python (misc/cluster + datafiles).
 
-  Remote (deploy/proxmox.sh copies src/bash/ → <target-path>/deploy/, src/python/ →
+  Remote (deploy/proxmox.sh copies deploy/setup/ → <target-path>/deploy/, deploy/python/ →
   .../deploy/python/, plus utils.sh, usage.sh, and deploy/docs/setup-pve-node.usage.txt,
   then runs setup-pve-node.sh over SSH):
     ./deploy/proxmox.sh -ip <host> ...
@@ -22,7 +22,7 @@ How to run
 First prompt (after the on-screen step list)
   y              Start from step 1 (full run)
   n              Exit immediately; no further steps
-  1-17           Skip all steps before this number; begin at that step
+  1-18           Skip all steps before this number; begin at that step
   (empty)        Same as starting from the beginning (step 1)
   h, help, ?, usage, -h, --help
                  Show this manual again in the pager, then ask again (CLI --help as above)
@@ -30,7 +30,7 @@ First prompt (after the on-screen step list)
 Failure behavior
   Step 1 (APT) can exit the whole script on error (missing apt-dependencies.list,
   failed apt install, or jq / vim / unattended-upgrades missing after install).
-  Steps 2-17: errors are usually logged and the script continues with the next step.
+  Steps 2-18: errors are usually logged and the script continues with the next step.
 
 --- Step 1 — APT configuration ---
   Gate: answer "n" at 1. QUESTION to skip the entire step.
@@ -109,3 +109,10 @@ Failure behavior
 
 --- Step 17 — Proxmox Web UI TLS via Tailscale ---
   Main node only. tailscale cert + pvenode cert set; optional renewal cron (17.2).
+
+--- Step 18 — QDevice client + HA watchdog ---
+  Installs corosync-qdevice (also in apt-dependencies.list) and enables softdog for HA fencing.
+  Cluster-wide QDevice registration, TrueNAS NFS, and HA group: from workstation run
+  ./deploy/proxmox.sh setup-cluster-ha --ip-address <MAIN_NODE_LAN_IP>
+  after bootstrapping corosync-qnetd on the host in misc/cluster/default.qdevice.host
+  (NOT TrueNAS 172.16.0.100). Edit misc/cluster/default.truenas.nfs.env for NFS export path.

@@ -13,6 +13,7 @@ chrony
 smartmontools
 postfix
 python3
+corosync-qdevice
 
 # OPTIONAL DEPS
 build-essential

@@ -46,8 +46,8 @@ RUNBOOK_REFS: dict[str, str] = {
     "pve_list_storage": "docs/TIPSNTRICKS.md — pvesm status",
     "pve_get_ceph_status": "docs/TIPSNTRICKS.md — OSD Storage at startup (manual only; MCP read-only)",
     "pve_list_ceph_osds": "docs/TIPSNTRICKS.md — OSD Storage at startup (manual only)",
-    "pve_stopall_guests": "src/bash/pre-shutdown-proc.sh — pair with ceph osd set noout manually",
-    "pve_shutdown_guest": "src/bash/pre-shutdown-proc.sh — graceful shutdown before maintenance",
+    "pve_stopall_guests": "deploy/setup/pre-shutdown-proc.sh — pair with ceph osd set noout manually",
+    "pve_shutdown_guest": "deploy/setup/pre-shutdown-proc.sh — graceful shutdown before maintenance",
     "pve_start_guest": "deploy/proxmox.sh — guest power; use read tools to verify target first",
 }
 
@@ -57,5 +57,5 @@ BASH_ONLY_WORKFLOWS: dict[str, str] = {
     "get-temp": "deploy/proxmox.sh get-temp",
     "start-cluster": "deploy/proxmox.sh start-cluster (WoL)",
     "stop-cluster": "deploy/proxmox.sh stop-cluster (node shutdown)",
-    "ceph-noout": "src/bash/pre-shutdown-proc.sh / post-startup-proc.sh",
+    "ceph-noout": "deploy/setup/pre-shutdown-proc.sh / post-startup-proc.sh",
 }

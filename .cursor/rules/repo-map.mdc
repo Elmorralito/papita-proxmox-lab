@@ -11,7 +11,7 @@ Hybrid **Proxmox VE cluster + AWS** lab. On-prem PVE nodes connect to AWS (EFS s
 
 ```
 Local workstation
-  deploy/toolkit.sh ─┬─► deploy/proxmox.sh ──SSH──► PVE nodes (src/bash/setup-pve-node.sh)
+  deploy/toolkit.sh ─┬─► deploy/proxmox.sh ──SSH──► PVE nodes (deploy/setup/setup-pve-node.sh)
                      └─► deploy/terraform.sh ──────► terraform/plans/ (S3 backend)
                                                           └─► hybrid_proxmox_aws_cluster
                                                                 └─► aws/ (VPC, EFS, IAM)
@@ -28,27 +28,32 @@ papita-proxmox-lab/
 │   ├── utils.sh               # log(), prompts (prompt_pve_start, prompt_until_*), AWS auth, run_command
 │   ├── usage.sh               # usage_toolkit, usage_proxmox, usage_terraform, usage_setup_pve_node
 │   ├── tailscale-pfsense-lan.sh   # Tailscale ACL + pfSense LAN helper (workstation)
-│   └── data/
-│       ├── setup-pve-node.usage.txt       # PVE setup manual (less during prompts)
-│       └── tailscale-pfsense-lan.usage.txt
-├── src/bash/                  # SCP'd to /root/deploy on PVE by proxmox.sh setup-node
-│   ├── setup-pve-node.sh      # Interactive 17-step PVE bootstrap (PVE_SETUP_LAST_STEP=17)
-│   ├── post-startup-proc.sh   # Boot: quorum wait, ceph noout unset, WoL from main node
-│   ├── pre-shutdown-proc.sh   # Shutdown: optional pvesh stopall, ceph osd set noout
-│   ├── post-startup-proc.service / pre-shutdown-proc.service
-│   ├── apt-dependencies.list  # Step 1 packages (jq, lm-sensors, chrony, smartmontools, …)
-│   └── misc/tailscale/
-│       ├── default.tags.list      # Tailscale ACL tags (tag:private-node, …)
-│       ├── default.gateways.list  # Optional PVE subnet routes (empty; pfSense advertises LAN)
-│       └── default.lan.routes.list  # Main-node fallback LAN route (172.16.0.0/16)
-├── src/python/                # SCP'd to /root/deploy/python on PVE (proxmox.sh setup-node)
-│   ├── misc/cluster/
-│   │   ├── discover_hosts.py      # Step 7: DNS peer discovery → /etc/hosts
-│   │   └── domain_pattern.py      # Wildcard domain suffix keywords (oldtimers.*)
-│   └── data/
-│       ├── default.hosts.list     # Candidate node short names
-│       ├── default.hosts.regex    # FQDN filter regex
-│       └── default.domain.suffixes.list  # Zone labels for .* suffix expansion
+│   ├── docs/
+│   │   ├── setup-pve-node.usage.txt       # PVE setup manual (less during prompts)
+│   │   └── tailscale-pfsense-lan.usage.txt
+│   ├── setup/                  # SCP'd to /root/deploy on PVE by proxmox.sh setup-node
+│   │   ├── setup-pve-node.sh      # Interactive 18-step PVE bootstrap (PVE_SETUP_LAST_STEP=18)
+│   │   ├── post-startup-proc.sh   # Boot: quorum wait, ceph noout unset, WoL from main node
+│   │   ├── pre-shutdown-proc.sh   # Shutdown: optional pvesh stopall, ceph osd set noout
+│   │   ├── post-startup-proc.service / pre-shutdown-proc.service
+│   │   ├── apt-dependencies.list  # Step 1 packages (jq, lm-sensors, chrony, smartmontools, …)
+│   │   ├── misc/tailscale/
+│   │   │   ├── default.tags.list      # Tailscale ACL tags (tag:private-node, …)
+│   │   │   ├── default.gateways.list  # Optional PVE subnet routes (empty; pfSense advertises LAN)
+│   │   │   └── default.lan.routes.list  # Main-node fallback LAN route (172.16.0.0/16)
+│   │   └── misc/cluster/              # QDevice + TrueNAS NFS + HA (setup-cluster-ha)
+│   │       ├── default.qdevice.host / default.truenas.nfs.env
+│   │       ├── qdevice-server-bootstrap.sh
+│   │       ├── papita-node-qdevice-client.sh
+│   │       └── papita-cluster-quorum-ha.sh
+│   └── python/                # SCP'd to /root/deploy/python on PVE (proxmox.sh setup-node)
+│       ├── misc/cluster/
+│       │   ├── discover_hosts.py      # Step 7: DNS peer discovery → /etc/hosts
+│       │   └── domain_pattern.py      # Wildcard domain suffix keywords (oldtimers.*)
+│       └── datafiles/
+│           ├── default.hosts.list     # Candidate node short names
+│           ├── default.hosts.regex    # FQDN filter regex
+│           └── default.domain.suffixes.list  # Zone labels for .* suffix expansion
 ├── terraform/
 │   ├── environments/          # NOT in git — config.{dev|prod|poc}.tfvars (see .gitignore)
 │   └── plans/
@@ -91,7 +96,8 @@ Required: `-e dev|prod`. Optional: `--env-file`, AWS SSO/MFA flags, `--pre-commi
 
 | Action | Purpose |
 |--------|---------|
-| `setup-node` | SCP `src/bash/` to node, run `setup-pve-node.sh` |
+| `setup-node` | SCP `deploy/setup/` to node, run `setup-pve-node.sh` |
+| `setup-cluster-ha` | QDevice client on all nodes + TrueNAS NFS + HA group on entry host |
 | `get-temp` | Cluster-wide temperature via `sensors -j` (requires step 5) |
 | `start-cluster` | WoL peer nodes via `pvenode wakeonlan` |
 | `stop-cluster` | Per-node `pvesh stopall` + hypervisor shutdown |
@@ -122,6 +128,7 @@ Step skip: `_skip_pve_step N` when `START_FROM_STEP > N`. Menu max: `PVE_SETUP_L
 | 15 | Remove PVE subscription nag |
 | 16 | vzdump cron (`papita-vzdump-all.sh`, configurable schedule) |
 | 17 | Tailscale TLS cert for UI :8006 (main node only) |
+| 18 | QDevice client (`corosync-qdevice`) + softdog watchdog (HA fencing prep) |
 
 **Node-installed helpers (when steps run):** `/usr/local/sbin/papita-{smart-scan,vzdump-all,tailscale-cert-renew}.sh`, `/etc/default/papita-{post-startup,pre-shutdown}`, `/etc/cron.d/papita-*`.
 
