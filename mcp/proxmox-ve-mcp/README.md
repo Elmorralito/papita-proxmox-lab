@@ -225,7 +225,6 @@ These workflows stay in Bash or manual runbooks. The MCP surfaces them in `BASH_
 | Full cluster shutdown (node hypervisor)       | `deploy/proxmox.sh stop-cluster`                |
 | Ceph `noout` set/unset                        | `pre-shutdown-proc.sh` / `post-startup-proc.sh` |
 | Ceph OSD startup / mutations                  | `docs/TIPSNTRICKS.md` § OSD Storage (manual)    |
-| Terraform / AWS provisioning                  | `deploy/terraform.sh`                           |
 | Node removal, corosync edits, storage destroy | Manual / TIPSNTRICKS runbooks                   |
 
 Deferred to **v2**: SSH proxy tool, hard guest stop, migration, MCP resources for TIPSNTRICKS sections, true quorum via `pvecm`.

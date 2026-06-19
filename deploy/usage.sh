@@ -18,9 +18,7 @@ usage_toolkit() {
     build       Build all library wheels from libs/
     devsync     Build wheels and sync into local dev environment (pip install)
     test        Build wheels and run pytest with coverage
-    terraform   Deploy infrastructure via Terraform (same as deploy)
     proxmox     Deploy infrastructure via Proxmox
-    deploy_terraform      Same as action terraform
     deploy_proxmox      Same as action proxmox
     none        No action; useful with --pre-commit only
 
@@ -30,13 +28,6 @@ usage_toolkit() {
   Paths:
     -lip, --libs-input-path   Libraries source directory. Default: ${LIBS_INPUT_PATH}
     -lop, --libs-output-path  Output directory for built wheels. Default: ${LIBS_OUTPUT_PATH}
-
-  Terraform:
-    -ta, --terraform-action   Terraform subcommand (default: deploy)
-    *all terraform.sh options
-    ----
-    $(usage_terraform "0" | sed 's/^/    /')
-    ----
 
   Proxmox:
     -pa, --proxmox-action   Proxmox subcommand (default: setup-node)
@@ -64,42 +55,6 @@ usage_toolkit() {
     -h, --help     Show this message
 EOM
 
-  if [[ "${1:-}" == "0" ]]; then
-    return 0
-  fi
-
-  exit 1
-}
-
-usage_terraform() {
-  echo -e "${GREEN_TEXT}Usage:${NC_TEXT} $0 ACTION [OPTIONS]"
-  cat << EOF
-
-  ACTION (required, position 1):
-    init      Initialize Terraform in terraform/plans (S3 backend from tfvars); then select workspace
-    plan      Show execution plan (no auto-apply)
-    apply     Apply changes with -auto-approve
-    deploy    Same as apply
-    destroy   Destroy managed resources with -auto-approve
-
-  Flow:
-    Always runs init, then workspace select/create (<project>-<env>), then the ACTION above.
-
-  Environment (required):
-    -e, --env, --environment   Target environment; loads terraform/environments/config.<env>.tfvars by default
-
-  Terraform:
-    --tfvars-file              Override path to the .tfvars file (default: terraform/environments/config.<env>.tfvars)
-
-  AWS:
-    -p, --profile, --aws-profile   AWS profile for backend and provider (default: default)
-    -r, --region, --aws-region     AWS region; if omitted, taken from tfvars region= or us-east-1
-
-  Tailscale (terraform init only):
-    -itp, --input-tailscale-params   Prompt for API key and tailnet instead of env vars
-    Otherwise set TAILSCALE_API_KEY and TAILSCALE_TAILNET when your init needs them.
-
-EOF
   if [[ "${1:-}" == "0" ]]; then
     return 0
   fi
@@ -279,17 +234,21 @@ usage_mcp() {
     update        Same as install (re-lock and reinstall)
     test          Run pytest for MCP package test suites
     smoke         Post-install connectivity smoke test (proxmox-ve-mcp)
-    cursor-sync   Merge mcp.json.example into ~/.cursor/mcp.json (keeps env secrets)
+    cursor-sync   Merge mcp.json.example into Cursor MCP configs (keeps env secrets)
 
   Options:
     -s, --server NAME     MCP package or server id (e.g. proxmox-ve-mcp or proxmox-ve)
     --extended            Pass --extended to smoke test (full access matrix)
-    -c, --cursor-config   Cursor mcp.json path (default: ~/.cursor/mcp.json)
+    -c, --cursor-config   Single target mcp.json path (default: ~/.cursor/mcp.json)
+    --all-targets         Sync ~/.cursor/mcp.json and .cursor/mcp.json (cursor-agent + IDE)
+    --if-changed          Skip when mcp.json.example files are unchanged
+    --enable-agent        Run cursor-agent mcp enable for each repo MCP server
     -h, --help            Show this message
 
   Quick start:
     ./deploy/mcp.sh install
-    ./deploy/mcp.sh cursor-sync    # edit PVE_TOKEN_SECRET in ~/.cursor/mcp.json
+    ./deploy/mcp.sh cursor-sync --all-targets    # edit secrets in ~/.cursor/mcp.json once
+    ./deploy/install-git-hooks.sh                # auto-sync on git pull + agent session
     ./deploy/mcp.sh smoke --extended
     # Reload Cursor → Settings → MCP → proxmox-ve connected
 

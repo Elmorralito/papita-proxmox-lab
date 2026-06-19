@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# After git pull/merge, refresh Cursor MCP configs when mcp.json.example files changed.
+set -euo pipefail
+
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+[[ -f "${ROOT}/deploy/mcp.sh" ]] || exit 0
+
+cd "${ROOT}"
+./deploy/mcp.sh cursor-sync --all-targets --if-changed --enable-agent 2>/dev/null || true

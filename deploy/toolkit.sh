@@ -95,11 +95,6 @@ deploy_proxmox() {
   run_command 1 "${proxmox_cmd[*]}"
 }
 
-deploy_terraform() {
-  log "INFO" "Starting deployment to Terraform on environment: ${ENV}..."
-  run_command 1 "${PROJECT_PATH}/deploy/terraform.sh ${TF_ACTION:-"deploy"} --env ${ENV} --profile ${AWS_PROFILE} --region ${AWS_REGION} ${RAW_ARGS[*]:1}"
-}
-
 pre_commit() {
   if [ -z "${PRE_COMMIT:-}" ]; then
     return
@@ -179,10 +174,6 @@ while [[ "$#" -gt 0 ]]; do
     TEMP_PRE_COMMIT="1"
     shift 1
     ;;
-  --terraform-action | -ta)
-    TEMP_TF_ACTION="$2"
-    shift 2
-    ;;
   --proxmox-action | -pa)
     TEMP_PROXMOX_ACTION="$2"
     shift 2
@@ -226,7 +217,6 @@ if [[ -n "${ENV_FILE:-}" ]]; then
   export AWS_MFA_ROLE_SESSION_NAME="${TEMP_AWS_MFA_ROLE_SESSION_NAME:-${AWS_MFA_ROLE_SESSION_NAME:-${AWS_MFA_ROLE_SESSION_NAME_DEFAULT:-}}}"
   export AWS_MFA_ASSUME_ROLE_ARN="${TEMP_AWS_MFA_ASSUME_ROLE_ARN:-${AWS_MFA_ASSUME_ROLE_ARN:-${AWS_MFA_ASSUME_ROLE_ARN_DEFAULT:-}}}"
   export AWS_MFA_FORCE="${TEMP_AWS_MFA_FORCE:-${AWS_MFA_FORCE:-${AWS_MFA_FORCE_DEFAULT:-0}}}"
-  export TF_ACTION="${TEMP_TF_ACTION:-${TF_ACTION:-"deploy"}}"
   export PRE_COMMIT="${TEMP_PRE_COMMIT:-${PRE_COMMIT:-0}}"
   export LIBS_INPUT_PATH="${TEMP_LIBS_INPUT_PATH:-${LIBS_INPUT_PATH:-}}"
   export LIBS_OUTPUT_PATH="${TEMP_LIBS_OUTPUT_PATH:-${LIBS_OUTPUT_PATH:-}}"
@@ -281,9 +271,6 @@ test)
   ;;
 proxmox|deploy_proxmox)
   deploy_proxmox
-  ;;
-terraform|deploy_terraform)
-  deploy_terraform
   ;;
 none)
   log "INFO" "Doing noting..."

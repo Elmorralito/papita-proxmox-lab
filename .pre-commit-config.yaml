@@ -15,7 +15,6 @@ repos:
     hooks:
       - id: prettier
         args: ["--write", "*.yaml", "*.yml"]
-        exclude: "^terraform/.*"
 
   - repo: https://github.com/koalaman/shellcheck-precommit
     rev: v0.10.0
@@ -101,24 +100,6 @@ repos:
         stages: [pre-commit, manual]
         args: ["--fix", "--disable", "MD013,MD033,MD041,MD024,MD025"]
         types_or: [markdown]
-
-  # - repo: https://github.com/antonbabenko/pre-commit-terraform
-  #   rev: "v1.97.4"
-  #   hooks:
-  #     - id: terraform_fmt
-  #     - id: terraform_tflint
-  #     - id: terraform_validate
-  #     - id: terraform_docs
-  #       args:
-  #         - --hook-config=--path-to-file=README.md
-  #         - --hook-config=--add-to-existing-file=true
-  #         - --hook-config=--create-file-if-not-exist=true
-
-  # - repo: https://github.com/mcole18/terraform-check-unused-variables.git
-  #   rev: v1.1.0
-  #   hooks:
-  #     - id: check-unused-vars
-  #       args: [-r, --dir=., --var-file=variables.tf]
 
   # - repo: https://github.com/adrienverge/yamllint
   #   rev: v1.37.1

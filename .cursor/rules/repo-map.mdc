@@ -5,16 +5,14 @@ alwaysApply: true
 
 # papita-proxmox-lab — Repository Map
 
-Hybrid **Proxmox VE cluster + AWS** lab. On-prem PVE nodes connect to AWS (EFS shared storage) over **Tailscale**. Bash deploy scripts orchestrate node setup and Terraform; Python tooling is dev-only (Poetry + pre-commit).
+**Proxmox VE cluster** homelab. On-prem PVE nodes connect over **Tailscale** and LAN; Bash deploy scripts orchestrate node setup and cluster ops; Python tooling is dev-only (Poetry + pre-commit).
 
 ## Architecture (high level)
 
 ```
 Local workstation
-  deploy/toolkit.sh ─┬─► deploy/proxmox.sh ──SSH──► PVE nodes (deploy/setup/setup-pve-node.sh)
-                     └─► deploy/terraform.sh ──────► terraform/plans/ (S3 backend)
-                                                          └─► hybrid_proxmox_aws_cluster
-                                                                └─► aws/ (VPC, EFS, IAM)
+  deploy/toolkit.sh ──► deploy/proxmox.sh ──SSH──► PVE nodes (deploy/setup/setup-pve-node.sh)
+  deploy/mcp.sh     ──► Cursor MCP servers (proxmox-ve, pfsense, truenas)
 ```
 
 ## Directory tree
@@ -22,11 +20,11 @@ Local workstation
 ```
 papita-proxmox-lab/
 ├── deploy/                    # Orchestration entrypoints (run from repo root)
-│   ├── toolkit.sh             # Main CLI: build|test|proxmox|terraform + AWS auth
+│   ├── toolkit.sh             # Main CLI: build|test|proxmox + optional AWS auth
 │   ├── proxmox.sh             # SSH to PVE: setup-node, cluster start/stop, get-temp
-│   ├── terraform.sh           # init → workspace → plan|apply|destroy
-│   ├── utils.sh               # log(), prompts (prompt_pve_start, prompt_until_*), AWS auth, run_command
-│   ├── usage.sh               # usage_toolkit, usage_proxmox, usage_terraform, usage_setup_pve_node
+│   ├── mcp.sh                 # Install / test / smoke MCP servers
+│   ├── utils.sh               # log(), prompts, AWS auth, run_command
+│   ├── usage.sh               # usage_toolkit, usage_proxmox, usage_setup_pve_node
 │   ├── tailscale-pfsense-lan.sh   # Tailscale ACL + pfSense LAN helper (workstation)
 │   ├── docs/
 │   │   ├── setup-pve-node.usage.txt       # PVE setup manual (less during prompts)
@@ -54,29 +52,21 @@ papita-proxmox-lab/
 │           ├── default.hosts.list     # Candidate node short names
 │           ├── default.hosts.regex    # FQDN filter regex
 │           └── default.domain.suffixes.list  # Zone labels for .* suffix expansion
-├── terraform/
-│   ├── environments/          # NOT in git — config.{dev|prod|poc}.tfvars (see .gitignore)
-│   └── plans/
-│       ├── main.tf            # Root module; S3 backend; wires hybrid_proxmox_aws_cluster
-│       ├── variables.tf       # environment, owner, aws_*, plan_specific_aws_security_params
-│       └── hybrid_proxmox_aws_cluster/
-│           ├── main.tf        # AWS + Tailscale providers; module aws
-│           ├── variables.tf / locals.tf
-│           ├── aws/           # VPC (optional), EFS + access point, SG, IAM for Tailscale router
-│           │   ├── network.tf, efs.tf, iam.tf, outputs.tf
-│           └── tailscale/     # Placeholder module (variables only; no resources yet)
+├── mcp/                       # Cursor MCP servers (Poetry path deps)
+│   ├── proxmox-ve-mcp/
+│   ├── pfsense-mcp/
+│   └── truenas-mcp/
 ├── docs/
 │   ├── TIPSNTRICKS.md         # Ceph, OSD, cluster maintenance runbooks
 │   └── Diagrams.drawio
-├── rules-tmp/                 # Draft Cursor rules (not active; active rules live in .cursor/rules/)
-├── pyproject.toml             # Poetry dev deps + linter config (no app package yet)
+├── pyproject.toml             # Poetry dev deps + linter config
 ├── poetry.lock / .python-version (3.14)
 ├── .pre-commit-config.yaml
 ├── .gitignore
 └── README.md
 ```
 
-**Referenced but absent from repo:** `libs/` (Poetry wheels), `tests/` (pytest), `terraform/environments/*.tfvars` (local secrets).
+**Referenced but absent from repo:** `libs/` (Poetry wheels), `tests/` (pytest).
 
 ## Key workflows
 
@@ -88,9 +78,8 @@ papita-proxmox-lab/
 | `devsync` | build + pip install wheels |
 | `test` | build + pytest with coverage |
 | `proxmox` / `deploy_proxmox` | Delegate to `proxmox.sh` |
-| `terraform` / `deploy_terraform` | Delegate to `terraform.sh` |
 
-Required: `-e dev|prod`. Optional: `--env-file`, AWS SSO/MFA flags, `--pre-commit`, `--proxmox-action`, `--terraform-action`.
+Required: `-e dev|prod`. Optional: `--env-file`, AWS SSO/MFA flags, `--pre-commit`, `--proxmox-action`.
 
 ### Proxmox (`deploy/proxmox.sh`)
 
@@ -107,7 +96,7 @@ Requires `--ip-address`. SSH: ControlMaster multiplexing; password via `PAPITA_S
 
 ### PVE setup steps (`setup-pve-node.sh`)
 
-Step skip: `_skip_pve_step N` when `START_FROM_STEP > N`. Menu max: `PVE_SETUP_LAST_STEP` (17).
+Step skip: `_skip_pve_step N` when `START_FROM_STEP > N`. Menu max: `PVE_SETUP_LAST_STEP` (18).
 
 | Step | Topic |
 |------|--------|
@@ -132,45 +121,18 @@ Step skip: `_skip_pve_step N` when `START_FROM_STEP > N`. Menu max: `PVE_SETUP_L
 
 **Node-installed helpers (when steps run):** `/usr/local/sbin/papita-{smart-scan,vzdump-all,tailscale-cert-renew}.sh`, `/etc/default/papita-{post-startup,pre-shutdown}`, `/etc/cron.d/papita-*`.
 
-### Terraform (`deploy/terraform.sh`)
-
-Flow: read `terraform/environments/config.<env>.tfvars` → `terraform init` (S3 backend from tfvars) → workspace `<project>-<env>` → action.
-
-Root entrypoint: **`terraform/plans/main.tf`** (not the hybrid submodule directly).
-
-## Terraform module wiring
-
-```
-terraform/plans/main.tf
-  └── module hybrid_proxmox_aws_cluster (./hybrid_proxmox_aws_cluster)
-        └── module aws (./aws)
-              ├── network.tf  — optional VPC/subnets; EFS SG (port 2049 from Tailscale CIDR)
-              ├── efs.tf      — encrypted EFS, access point at /pve, KMS optional
-              └── iam.tf      — Tailscale router EC2 role (SSM only)
-```
-
-**Resource basename:** `{plan_version}-{owner}-{project}-{environment}-{region}` (see `hybrid_proxmox_aws_cluster/locals.tf`).
-
-**Providers:** aws ~> 5.28, tailscale ~> 0.13, archive, null, external, local, random.
-
-**Environments:** `dev`, `prod`, `poc` (validated in `terraform/plans/variables.tf`).
-
 ## Configuration files
 
 | File | Role |
 |------|------|
 | `pyproject.toml` | Poetry (package-mode=false); black/isort/flake8/mypy/pylint/interrogate settings |
 | `.pre-commit-config.yaml` | trailing-ws, yaml/toml, shellcheck, isort, black, flake8, pylint, mypy |
-| `.gitignore` | `.terraform/`, `*.tfvars`, `.env`, `poetry.lock`, drawio backups |
-| `terraform/plans/.terraform.lock.hcl` | Provider lock at plans root |
-| `terraform/plans/hybrid_proxmox_aws_cluster/.terraform.lock.hcl` | Provider lock at plan module |
-| `terraform/plans/hybrid_proxmox_aws_cluster/aws/.terraform.lock.hcl` | Provider lock at aws submodule |
+| `.gitignore` | `.env`, `poetry.lock`, drawio backups |
 
 ## Conventions for agents
 
 - **Shell:** `set -euo pipefail`; source `deploy/utils.sh` + `deploy/usage.sh` before calling `log`; use `log INFO|WARN|ERROR` (or `log "INFO" "…"` in deploy scripts).
 - **Remote deploy path on PVE:** `/root/deploy` (default).
-- **Secrets:** never commit `.tfvars`, `.env`, Tailscale API keys; load via env or `--env-file`.
+- **Secrets:** never commit `.env`, Tailscale API keys; load via env or `--env-file`.
 - **Python:** dev tooling only today; extend `libs/` + `tests/` when adding packages.
-- **Terraform changes:** edit under `terraform/plans/`; env-specific values go in untracked `terraform/environments/config.<env>.tfvars`.
 - **Docs:** operational runbooks in `docs/TIPSNTRICKS.md`; network diagram in `docs/Diagrams.drawio`.

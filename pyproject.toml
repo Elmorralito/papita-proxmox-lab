@@ -130,7 +130,6 @@ exclude = [
     "./mcp/proxmox-ve-mcp/tests",
     "./mcp/pfsense-mcp/tests",
     "./mcp/truenas-mcp/tests",
-    "./terraform",
     "./deploy/setup",
     "./libs",
     "./dist",
