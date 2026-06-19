@@ -1,6 +1,6 @@
 # papita-proxmox-lab
 
-Hybrid **Proxmox VE** homelab with an **AWS** data plane: on-prem PVE nodes share **EFS** storage over **Tailscale**, while **pfSense** advertises the lab LAN to the tailnet for remote admin. Bash deploy scripts orchestrate node bootstrap, cluster operations, Tailscale ACLs, and (when restored) Terraform. **Cursor MCP servers** under [`mcp/`](./mcp/) expose structured Proxmox and pfSense APIs to AI agents.
+Hybrid **Proxmox VE** homelab: on-prem PVE nodes on **Tailscale** with **pfSense** advertising the lab LAN to the tailnet for remote admin. Bash deploy scripts orchestrate node bootstrap and cluster operations. **Cursor MCP servers** under [`mcp/`](./mcp/) expose structured Proxmox and pfSense APIs to AI agents.
 
 Network diagram source: [`docs/Diagrams.drawio`](./docs/Diagrams.drawio) (export to `docs/Diagrams-Network.png` for a static image).
 
@@ -10,20 +10,19 @@ Network diagram source: [`docs/Diagrams.drawio`](./docs/Diagrams.drawio) (export
 
 | Concern             | Where it lives                                                                                                                                              | What it does                                                                                              |
 | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| **Workstation CLI** | [`deploy/toolkit.sh`](./deploy/toolkit.sh)                                                                                                                  | Single entrypoint: Python dev tooling, Proxmox SSH deploy, Terraform wrapper, optional AWS SSO/MFA        |
+| **Workstation CLI** | [`deploy/toolkit.sh`](./deploy/toolkit.sh)                                                                                                                  | Single entrypoint: Python dev tooling, Proxmox SSH deploy, optional AWS SSO/MFA                           |
 | **PVE bootstrap**   | [`deploy/setup/setup-pve-node.sh`](./deploy/setup/setup-pve-node.sh)                                                                                        | Interactive 18-step node setup (APT, WoL, sensors, hosts, Tailscale, hooks, QDevice client, backups, TLS) |
 | **Cluster ops**     | [`deploy/proxmox.sh`](./deploy/proxmox.sh)                                                                                                                  | SSH to nodes: `setup-node`, `setup-cluster-ha`, `get-temp`, `start-cluster`, `stop-cluster`               |
 | **Tailnet + LAN**   | [`deploy/tailscale-pfsense-lan.sh`](./deploy/tailscale-pfsense-lan.sh)                                                                                      | Approve pfSense routes, patch Tailscale ACLs, verify admin path to main PVE                               |
 | **pfSense pfREST**  | [`deploy/pfsense-restapi-access.sh`](./deploy/pfsense-restapi-access.sh) · [`deploy/pfsense-firewall-tailscale.sh`](./deploy/pfsense-firewall-tailscale.sh) | Bootstrap REST API access and apply agreed Tailscale-tab firewall rules via pfREST                        |
 | **Cursor MCP**      | [`mcp/`](./mcp/) · [`deploy/mcp.sh`](./deploy/mcp.sh)                                                                                                       | Install, test, and sync MCP servers for Proxmox VE and pfSense                                            |
-| **AWS infra**       | [`terraform/plans/`](./terraform/plans/)                                                                                                                    | EFS + optional VPC (**in construction** — see [Terraform plans](./terraform/plans/README.md))             |
 | **Runbooks**        | [`docs/TIPSNTRICKS.md`](./docs/TIPSNTRICKS.md)                                                                                                              | Ceph, cluster join, pfSense, Tailscale, VM clipboard, MCP smoke, maintenance                              |
 
 **Lab topology (default):**
 
 - **LAN:** `172.16.0.0/16` (gateway `172.16.0.1` on pfSense)
 - **Main PVE admin node:** `172.16.0.101` (LAN + optional MagicDNS TLS on step 17)
-- **Tailscale:** all PVE nodes join the tailnet for **EFS NFS**; pfSense is the **subnet router** for LAN; workers do not advertise routes
+- **Tailscale:** all PVE nodes join the tailnet for remote admin; pfSense is the **subnet router** for LAN; workers do not advertise routes
 - **Remote admin:** reach Proxmox via pfSense subnet route and/or main-node Tailscale TLS — not worker `:8006` on the tailnet
 - **AI agents (Cursor):** MCP over stdio to `proxmox-ve-mcp` (`:8006`) and `pfsense-mcp` (pfREST `:443`)
 
@@ -36,17 +35,17 @@ Network diagram source: [`docs/Diagrams.drawio`](./docs/Diagrams.drawio) (export
                     │  Workstation (this repo)                 │
                     │  deploy/toolkit.sh · deploy/mcp.sh       │
                     │  Cursor ──► proxmox-ve-mcp / pfsense-mcp │
-                    └───────┬─────────────────┬───────────────┘
-                            │                 │
-              deploy/proxmox.sh     deploy/terraform.sh
-                            │                 │
-                            ▼                 ▼
-              ┌─────────────────────┐   ┌──────────────────┐
-              │  PVE cluster (on-prem)│   │  AWS             │
-              │  • setup-pve-node.sh  │   │  EFS (NFS :2049) │
-              │  • Tailscale client   │───┤  optional VPC    │
-              │  • corosync / Ceph    │   │  (Terraform)     │
-              └──────────┬────────────┘   └──────────────────┘
+                    └───────┬─────────────────────────────┘
+                            │
+              deploy/proxmox.sh
+                            │
+                            ▼
+              ┌─────────────────────┐
+              │  PVE cluster (on-prem)│
+              │  • setup-pve-node.sh  │
+              │  • Tailscale client   │
+              │  • corosync / Ceph    │
+              └──────────┬────────────┘
                          │
               ┌──────────▼────────────┐
               │  pfSense (Tailscale     │
@@ -60,7 +59,7 @@ Network diagram source: [`docs/Diagrams.drawio`](./docs/Diagrams.drawio) (export
               (ACL + route approval from workstation)
 ```
 
-**Data flow:** PVE nodes mount EFS over Tailscale (`100.64.0.0/10` allowed on EFS security groups). Management traffic between nodes uses the **LAN / corosync** network. Operators use the **main node** for UI and toolkit commands over LAN or tailnet paths documented in TIPSNTRICKS §9. **MCP servers** use the same tailnet/LAN paths with API tokens (Proxmox) or pfREST API keys (pfSense) — no SSH shell for agent reads.
+**Data flow:** Management traffic between PVE nodes uses the **LAN / corosync** network. Operators use the **main node** for UI and toolkit commands over LAN or tailnet paths documented in TIPSNTRICKS §9. **MCP servers** use the same paths with API tokens (Proxmox) or pfREST API keys (pfSense) — no SSH shell for agent reads.
 
 ![](./docs/Diagrams-Components.svg)
 
@@ -73,7 +72,6 @@ papita-proxmox-lab/
 ├── deploy/                         # Orchestration + PVE bundles (run from repo root)
 │   ├── toolkit.sh                  # Main CLI
 │   ├── proxmox.sh                  # SSH → PVE nodes
-│   ├── terraform.sh                # Terraform init / workspace / plan|apply|destroy
 │   ├── mcp.sh                      # Install / test / smoke / cursor-sync MCP servers
 │   ├── tailscale-pfsense-lan.sh    # Tailscale API + pfSense LAN helper
 │   ├── pfsense-restapi-access.sh   # pfREST Allowed Interfaces bootstrap
@@ -93,9 +91,6 @@ papita-proxmox-lab/
 │   ├── README.md                   # Install guide for all MCP packages
 │   ├── proxmox-ve-mcp/             # Proxmox VE REST — 21 tools (read + gated write)
 │   └── pfsense-mcp/                # pfSense pfREST — 7 read-only tools + policy framework
-├── terraform/
-│   ├── environments/               # Local only: config.{dev|prod|poc}.tfvars
-│   └── plans/                      # Terraform root (see plans/README.md)
 ├── docs/
 │   ├── TIPSNTRICKS.md              # Operational runbooks
 │   └── Diagrams.drawio
@@ -103,7 +98,7 @@ papita-proxmox-lab/
 └── .pre-commit-config.yaml
 ```
 
-**Not in git (local / secrets):** `terraform/environments/*.tfvars`, `.env`, `~/.cursor/mcp.json` (with real tokens), `.venv/`.
+**Not in git (local / secrets):** `.env`, `~/.cursor/mcp.json` (with real tokens), `.venv/`.
 
 ---
 
@@ -118,8 +113,6 @@ papita-proxmox-lab/
 | **Python** 3.11+                | MCP servers and pre-commit (3.14 in [`.python-version`](./.python-version)) |
 | **jq**                          | Proxmox JSON (`pvesh`, cluster discovery, `mcp.json` merge)                 |
 | **ssh**, **scp**                | `deploy/proxmox.sh`                                                         |
-| **AWS CLI**                     | Terraform backend and providers (when plans exist)                          |
-| **Terraform** `>= 1.6.5, < 2.0` | Via `deploy/terraform.sh` (when plans exist)                                |
 | **pre-commit** (optional)       | `./deploy/toolkit.sh … --pre-commit` or local hooks                         |
 | **Cursor** (optional)           | MCP client for `proxmox-ve` and `pfsense` servers                           |
 
@@ -141,7 +134,8 @@ VS Code / Cursor: [`.vscode/settings.json`](./.vscode/settings.json) points the 
 ```bash
 chmod +x deploy/mcp.sh   # once
 ./deploy/mcp.sh install
-./deploy/mcp.sh cursor-sync
+./deploy/mcp.sh cursor-sync --all-targets
+./deploy/install-git-hooks.sh   # optional: auto-sync on git pull + agent session start
 # Edit ~/.cursor/mcp.json → set PVE_TOKEN_SECRET, PFSENSE_API_KEY, hosts as needed
 ./deploy/mcp.sh smoke --server proxmox-ve-mcp
 ./deploy/mcp.sh smoke --server pfsense-mcp
@@ -174,7 +168,7 @@ Used by `deploy/tailscale-pfsense-lan.sh` and as optional **Tailscale Admin API*
 
 ### Cursor MCP (`~/.cursor/mcp.json`)
 
-`./deploy/mcp.sh cursor-sync` merges each package's `mcp.json.example` into your Cursor config (preserves existing `env` secrets). Set **`cwd`** to the **repo root** so Poetry reuses `.venv/`.
+`./deploy/mcp.sh cursor-sync --all-targets` merges each package's `mcp.json.example` into `~/.cursor/mcp.json` and `.cursor/mcp.json` (preserves existing `env` secrets). Run `./deploy/install-git-hooks.sh` once to keep both configs updated after `git pull` and on each agent session. Set **`cwd`** to the **repo root** so Poetry reuses `.venv/`.
 
 | Server id    | Package          | Key variables                                                                         |
 | ------------ | ---------------- | ------------------------------------------------------------------------------------- |
@@ -182,18 +176,6 @@ Used by `deploy/tailscale-pfsense-lan.sh` and as optional **Tailscale Admin API*
 | `pfsense`    | `pfsense-mcp`    | `PFSENSE_HOST` (IPv4/IPv6 only), `PFSENSE_API_KEY`, optional `PFSENSE_LOG_LEVEL`      |
 
 Setup guides: [proxmox-ve-mcp/docs/PVE_TOKEN_SETUP.md](./mcp/proxmox-ve-mcp/docs/PVE_TOKEN_SETUP.md), [pfsense-mcp/docs/PFSENSE_API_KEY_SETUP.md](./mcp/pfsense-mcp/docs/PFSENSE_API_KEY_SETUP.md).
-
-### Terraform variables (per environment)
-
-Create **local** files (never commit):
-
-```text
-terraform/environments/config.dev.tfvars
-terraform/environments/config.prod.tfvars
-terraform/environments/config.poc.tfvars
-```
-
-Required keys for `deploy/terraform.sh`: `tf_backend_bucket`, `tf_backend_key`, `region`, plus root module variables — see [`terraform/plans/README.md`](./terraform/plans/README.md) for a full skeleton.
 
 ### SSH to PVE
 
@@ -219,10 +201,9 @@ All deploy commands assume the **repository root** as the current working direct
 | `devsync`                        | `build` + pip install wheels into the active env           |
 | `test`                           | `build` + pytest with coverage (when `tests/` exists)      |
 | `proxmox` / `deploy_proxmox`     | Delegate to [`deploy/proxmox.sh`](./deploy/proxmox.sh)     |
-| `terraform` / `deploy_terraform` | Delegate to [`deploy/terraform.sh`](./deploy/terraform.sh) |
 | `none`                           | No-op; useful with `--pre-commit` only                     |
 
-Common flags: `--env-file`, `--aws-sso` / `--aws-mfa`, `--pre-commit`, `--proxmox-action`, `--terraform-action`, `--ip-address`, `--hostname`, `--profile`, `--region`.
+Common flags: `--env-file`, `--aws-sso` / `--aws-mfa`, `--pre-commit`, `--proxmox-action`, `--ip-address`, `--hostname`, `--profile`, `--region`.
 
 ```bash
 # Full help
@@ -233,9 +214,6 @@ Common flags: `--env-file`, `--aws-sso` / `--aws-mfa`, `--pre-commit`, `--proxmo
 
 # Cluster temperatures (requires lm-sensors / step 5 on nodes)
 ./deploy/toolkit.sh proxmox -e dev -ip 172.16.0.101 -pa get-temp
-
-# Terraform plan (when .tf sources exist)
-./deploy/toolkit.sh terraform -e dev -ta plan --aws-sso
 ```
 
 ### MCP servers (`deploy/mcp.sh`)
@@ -335,20 +313,6 @@ export TAILSCALE_TAILNET='your-tailnet.ts.net'
 
 Actions: `configure`, `approve-routes`, `patch-acl`, `verify`, `pfsense-steps`. Manual: [`deploy/docs/tailscale-pfsense-lan.usage.txt`](./deploy/docs/tailscale-pfsense-lan.usage.txt).
 
-### Terraform
-
-> **Status:** Plans under [`terraform/plans/`](./terraform/plans/) are **in construction**. `deploy/terraform.sh` remains wired for the previous layout; restore or rewrite `.tf` files before running apply.
-
-When available:
-
-```bash
-./deploy/terraform.sh plan   -e dev
-./deploy/terraform.sh apply  -e dev
-./deploy/terraform.sh destroy -e dev
-```
-
-Flow: read `terraform/environments/config.<env>.tfvars` → `terraform init` (S3 backend) → workspace `papita-proxmox-lab-<env>` → action. Details: [`terraform/plans/README.md`](./terraform/plans/README.md).
-
 ---
 
 ## Python tooling
@@ -386,9 +350,8 @@ Both MCP packages emit **structured JSON logs on stderr** (`PVE_LOG_LEVEL` / `PF
 | Shell conventions       | `set -euo pipefail`; source `deploy/utils.sh` + `deploy/usage.sh` before `log`                                                                   |
 | Adding a PVE setup step | Bump `PVE_SETUP_LAST_STEP`, add `_skip_pve_step`, update menu + [`deploy/docs/setup-pve-node.usage.txt`](./deploy/docs/setup-pve-node.usage.txt) |
 | Adding an MCP package   | Create `mcp/<name>-mcp/`, add path dep to root `pyproject.toml`, document in [`mcp/README.md`](./mcp/README.md)                                  |
-| Terraform edits         | Under `terraform/plans/`; env values in untracked tfvars only                                                                                    |
 
-**Secrets:** never commit `*.tfvars`, `.env`, API tokens, Tailscale keys, or `~/.cursor/mcp.json` with real credentials (see [`.gitignore`](./.gitignore)).
+**Secrets:** never commit `.env`, API tokens, Tailscale keys, or `~/.cursor/mcp.json` with real credentials (see [`.gitignore`](./.gitignore)).
 
 ---
 
@@ -403,7 +366,6 @@ Both MCP packages emit **structured JSON logs on stderr** (`PVE_LOG_LEVEL` / `PF
 | [**Proxmox Tips & Tricks**](./docs/TIPSNTRICKS.md)                              | Ceph, cluster destroy/join, corosync, pfSense, Tailscale ACLs, MCP, Fedora VM |
 | [**PVE setup manual**](./deploy/docs/setup-pve-node.usage.txt)                  | Full 17-step reference (shown in `less` during setup)                         |
 | [**Tailscale / pfSense manual**](./deploy/docs/tailscale-pfsense-lan.usage.txt) | ACL grants, verify, pfSense checklist                                         |
-| [**Terraform plans**](./terraform/plans/README.md)                              | AWS module design, tfvars, workspace flow, restore notes                      |
 | [**Network diagram**](./docs/Diagrams.drawio)                                   | Editable architecture (draw.io)                                               |
 
 ---
@@ -416,7 +378,6 @@ Both MCP packages emit **structured JSON logs on stderr** (`PVE_LOG_LEVEL` / `PF
 | Tailscale / pfSense automation       | Active (`tailscale-pfsense-lan.sh`, `pfsense-*` pfREST helpers) |
 | **Cursor MCP — Proxmox VE**          | Active (`proxmox-ve-mcp` v0.1.0a5 — read + gated write)         |
 | **Cursor MCP — pfSense**             | Active (`pfsense-mcp` v0.1.0a1 — read-only + lab policy verify) |
-| Terraform AWS stack                  | **In construction** — `.tf` removed; README + wrapper remain    |
 | Legacy Python app packages (`libs/`) | Referenced by toolkit; not in repository                        |
 
 ---

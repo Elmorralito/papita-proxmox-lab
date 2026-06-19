@@ -37,7 +37,27 @@ Reload **Cursor** after `cursor-sync`. In Settings → MCP, confirm `proxmox-ve`
 | `update`      | Same as `install` — run after `git pull` when MCP code changed                                          |
 | `test`        | `pytest` for MCP test suites                                                                            |
 | `smoke`       | Run post-install smoke tests (loads `PVE_*` from `~/.cursor/mcp.json`)                                  |
-| `cursor-sync` | Merge each `mcp/*/mcp.json.example` into `~/.cursor/mcp.json` (preserves existing `env` secrets)        |
+| `cursor-sync` | Merge each `mcp/*/mcp.json.example` into Cursor MCP configs (preserves existing `env` secrets) |
+
+**Auto-sync (recommended once per clone):**
+
+```bash
+./deploy/install-git-hooks.sh
+```
+
+This installs:
+
+- **Git hooks** (`post-merge`, `post-checkout`) — refresh MCP configs after `git pull`
+- **Cursor `sessionStart` hook** — sync when an agent session opens in this repo
+
+Both run `./deploy/mcp.sh cursor-sync --all-targets --if-changed --enable-agent`, which updates:
+
+| Target | Used by |
+| ------ | ------- |
+| `~/.cursor/mcp.json` | cursor-agent CLI, Cursor IDE (user-level) |
+| `.cursor/mcp.json` | cursor-agent when `--workspace` is this repo (project-level) |
+
+The first project sync seeds `.cursor/mcp.json` from your user config so secrets carry over. Edit API tokens once in `~/.cursor/mcp.json`; later syncs preserve them.
 
 ### Options
 
@@ -45,7 +65,9 @@ Reload **Cursor** after `cursor-sync`. In Settings → MCP, confirm `proxmox-ve`
 ./deploy/mcp.sh install --server proxmox-ve-mcp   # one package only
 ./deploy/mcp.sh smoke --extended                   # proxmox-ve full matrix
 ./deploy/mcp.sh smoke --server truenas-mcp         # TrueNAS WebSocket auth
+./deploy/mcp.sh cursor-sync --all-targets
 ./deploy/mcp.sh cursor-sync --cursor-config ~/.cursor/mcp.json
+./deploy/mcp.sh cursor-sync --all-targets --if-changed --enable-agent
 ```
 
 ---

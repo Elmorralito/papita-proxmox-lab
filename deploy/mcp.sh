@@ -6,10 +6,16 @@ set -euo pipefail
 ACTION=
 MCP_SERVER=
 SMOKE_EXTENDED=0
+SYNC_IF_CHANGED=0
+SYNC_ENABLE_AGENT=0
+SYNC_ALL_TARGETS=0
 CURSOR_MCP_JSON="${CURSOR_MCP_JSON:-${HOME}/.cursor/mcp.json}"
+CURSOR_MCP_PROJECT_JSON=
 
 PROJECT_PATH="$(dirname "$(dirname "$(realpath "$0")")")"
 MCP_ROOT="${PROJECT_PATH}/mcp"
+MCP_SYNC_FINGERPRINT="${PROJECT_PATH}/.cursor/.mcp-sync-fingerprint"
+CURSOR_MCP_PROJECT_JSON="${PROJECT_PATH}/.cursor/mcp.json"
 
 # shellcheck source=${PROJECT_PATH}/deploy/utils.sh
 {
@@ -227,7 +233,36 @@ _merge_example_into_config() {
     log "INFO" "Merged $(basename "${example_file}") into ${CURSOR_MCP_JSON} (existing env values preserved; new keys added)."
 }
 
-cmd_cursor_sync() {
+_mcp_examples_fingerprint() {
+    local examples=()
+    local pkg
+    for pkg in $(_mcp_packages); do
+        [[ -f "${MCP_ROOT}/${pkg}/mcp.json.example" ]] && examples+=("${MCP_ROOT}/${pkg}/mcp.json.example")
+    done
+    if [[ "${#examples[@]}" -eq 0 ]]; then
+        echo "none"
+        return
+    fi
+    shasum -a 256 "${examples[@]}" | shasum -a 256 | awk '{print $1}'
+}
+
+_mcp_sync_needed() {
+    [[ "${SYNC_IF_CHANGED}" -eq 0 ]] && return 0
+    local current stored
+    current="$(_mcp_examples_fingerprint)"
+    if [[ ! -f "${MCP_SYNC_FINGERPRINT}" ]]; then
+        return 0
+    fi
+    stored="$(tr -d '[:space:]' < "${MCP_SYNC_FINGERPRINT}")"
+    [[ "${current}" != "${stored}" ]]
+}
+
+_mcp_write_sync_fingerprint() {
+    mkdir -p "$(dirname "${MCP_SYNC_FINGERPRINT}")"
+    _mcp_examples_fingerprint > "${MCP_SYNC_FINGERPRINT}"
+}
+
+_cursor_sync_targets() {
     local found=0
     local pkg example
     for pkg in $(_mcp_packages); do
@@ -241,7 +276,58 @@ cmd_cursor_sync() {
         log "WARN" "No mcp.json.example files found under ${MCP_ROOT}."
         exit 1
     fi
-    log "INFO" "Cursor MCP config synced. Edit secrets in ${CURSOR_MCP_JSON} then reload Cursor."
+}
+
+_enable_cursor_agent_mcps() {
+    if [[ "${SYNC_ENABLE_AGENT}" -eq 0 ]]; then
+        return 0
+    fi
+    if ! command -v cursor-agent >/dev/null 2>&1; then
+        log "WARN" "cursor-agent not on PATH; skipping MCP enable."
+        return 0
+    fi
+    local pkg example server
+    for pkg in $(_mcp_packages); do
+        example="${MCP_ROOT}/${pkg}/mcp.json.example"
+        [[ -f "${example}" ]] || continue
+        while IFS= read -r server; do
+            [[ -n "${server}" ]] || continue
+            if cursor-agent mcp enable "${server}" >/dev/null 2>&1; then
+                log "INFO" "cursor-agent: enabled MCP server '${server}'."
+            fi
+        done < <(jq -r '.mcpServers | keys[]' "${example}" 2>/dev/null)
+    done
+}
+
+cmd_cursor_sync() {
+    if ! _mcp_sync_needed; then
+        log "INFO" "MCP examples unchanged; skipping cursor-sync (--if-changed)."
+        return 0
+    fi
+
+    local -a targets=()
+    if [[ "${SYNC_ALL_TARGETS}" -eq 1 ]]; then
+        targets=("${HOME}/.cursor/mcp.json" "${CURSOR_MCP_PROJECT_JSON}")
+    else
+        targets=("${CURSOR_MCP_JSON}")
+    fi
+
+    local target
+    for target in "${targets[@]}"; do
+        if [[ "${target}" == "${CURSOR_MCP_PROJECT_JSON}" \
+            && ! -f "${target}" \
+            && -f "${HOME}/.cursor/mcp.json" ]]; then
+            mkdir -p "$(dirname "${target}")"
+            cp "${HOME}/.cursor/mcp.json" "${target}"
+            log "INFO" "Seeded ${target} from ~/.cursor/mcp.json (env secrets copied)."
+        fi
+        CURSOR_MCP_JSON="${target}"
+        _cursor_sync_targets
+    done
+
+    _mcp_write_sync_fingerprint
+    _enable_cursor_agent_mcps
+    log "INFO" "Cursor MCP config synced. Reload Cursor or restart cursor-agent if servers changed."
 }
 
 while [[ "$#" -gt 0 ]]; do
@@ -261,6 +347,18 @@ while [[ "$#" -gt 0 ]]; do
     --cursor-config | -c)
         CURSOR_MCP_JSON="$2"
         shift 2
+        ;;
+    --all-targets)
+        SYNC_ALL_TARGETS=1
+        shift
+        ;;
+    --if-changed)
+        SYNC_IF_CHANGED=1
+        shift
+        ;;
+    --enable-agent)
+        SYNC_ENABLE_AGENT=1
+        shift
         ;;
     --help | -h)
         usage_mcp

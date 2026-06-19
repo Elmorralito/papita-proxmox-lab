@@ -100,7 +100,7 @@ Workstation (Cursor / deploy scripts)
 | BR-002 | **Classify** tools as read / write / destructive          | Must     | Every tool declares safety class; no destructive v1 | **Met** | `ToolClass` in `registry.py`; `meta.tool_class`; 0 destructive |
 | BR-003 | Align with **existing lab workflows**                     | Must     | Each v1 tool maps to repo workflow (§7.4)           | **Met** | `RUNBOOK_REFS`, tool docstrings                                |
 | BR-004 | **Tailscale** hostname to `:8006`                         | Must     | Config via `PVE_HOST`; TLS verify configurable      | **Met** | `config.py`, `PVE_VERIFY_SSL`                                  |
-| BR-005 | Do **not** replace bootstrap or Terraform                 | Won't    | `setup-node` and `terraform.sh` remain              | **N/A** | `BASH_ONLY_WORKFLOWS` in `pve_cluster_health`                  |
+| BR-005 | Do **not** replace bootstrap workflows                    | Won't    | `setup-node` remains                                | **N/A** | `BASH_ONLY_WORKFLOWS` in `pve_cluster_health`                  |
 | BR-006 | **Audit trail** for mutating invocations                  | Should   | Structured logs: tool, node, vmid, outcome          | **Met** | `write_tool_handler` → JSON stderr                             |
 | BR-007 | **Revocable** automation access                           | Must     | Token rotation documented; no root in config        | **Doc** | `docs/PVE_TOKEN_SETUP.md`                                      |
 | BR-008 | Faster incident diagnosis                                 | Should   | Resources, tasks, health in one session             | **Met** | `pve_cluster_health`, `pve_list_tasks`, `pve_list_resources`   |
@@ -159,7 +159,7 @@ Workstation (Cursor / deploy scripts)
 | FR-904 | Wake-on-LAN                          | Won't    | No REST                 | **N/A** |
 | FR-905 | lm-sensors / `get-temp`              | Won't    | No REST                 | **N/A** |
 | FR-906 | Subscription nag patch               | Won't    | setup step 15           | **N/A** |
-| FR-907 | Terraform / AWS EFS                  | Won't    | Separate toolchain      | **N/A** |
+| FR-907 | External infrastructure-as-code tooling | Won't    | Out of MCP scope        | **N/A** |
 | FR-908 | Storage delete                       | Won't    | Destructive             | **N/A** |
 
 Documented in README + `BASH_ONLY_WORKFLOWS`.
