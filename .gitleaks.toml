@@ -1,0 +1,26 @@
+title = "papita-proxmox-lab secret scan"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Tracked example files and documented placeholder values"
+paths = [
+  '''(?i).*\.env\.example$''',
+  '''(?i).*mcp\.json\.example$''',
+  '''(?i).*\.tfvars\.example$''',
+]
+regexTarget = "match"
+regexes = [
+  '''REPLACE_FROM_SECRET_STORE''',
+  '''REPLACE_ME''',
+  '''00000000-0000-0000-0000-000000000000''',
+  '''xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx''',
+  '''your-org-terraform-state''',
+  '''your-handle''',
+  '''your-key''',
+  '''your-tailnet\.ts\.net''',
+  '''ssh-ed25519 AAAA\.\.\. user@host''',
+  '''terraform-disabled@pam!disabled=''',
+  '''\$\{TAILSCALE_API_KEY\}:''',
+]
