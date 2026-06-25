@@ -492,6 +492,144 @@ pvecm qdevice remove
 
 ---
 
+### Lab shutdown and startup (`pvecm-oldtimers`)
+
+Use this when powering down the homelab from a workstation. Cluster name: **`pvecm-oldtimers`**. LAN: `172.16.0.0/16`.
+
+#### Recommended power-down order
+
+1. **Proxmox cluster** — stop guests, then hypervisors (`stop-cluster`).
+2. **TrueNAS** (`172.16.0.100`) — after PVE is down so NFS clients are gone.
+3. **QDevice VM** (`172.16.0.102`), **pfSense**, and other infra — as needed.
+
+Startup is roughly the reverse: TrueNAS and pfSense first, then PVE (`start-cluster` / WoL / physical power).
+
+#### Shut down Proxmox cluster
+
+SSH entry host: LAN IP of any online member, or Tailscale **`oldtimers-pve-endpoint.<tailnet>`** (see `deploy/proxmox.sh`).
+
+```bash
+./deploy/proxmox.sh stop-cluster \
+  --ip-address oldtimers-pve-endpoint.tailf1ad0d.ts.net \
+  --shutdown-local-node --yes
+```
+
+| Flag                             | Effect                                                    |
+| -------------------------------- | --------------------------------------------------------- |
+| `--shutdown-local-node` / `-sln` | Also shut down the SSH entry node after `pvenode stopall` |
+| `--yes` / `-y`                   | Skip the local-node shutdown confirmation prompt          |
+
+Per **peer** node (via cluster API on the entry host): `pvesh create /nodes/<node>/stopall`, then `pvesh create /nodes/<node>/status --command shutdown`. On the **local** node: `pvenode stopall`, then optional local hypervisor shutdown.
+
+Nodes with step **11** (pre-shutdown) may run `pvesh stopall` and `ceph osd set noout` automatically on reboot/shutdown.
+
+#### Start Proxmox cluster
+
+At least one node must already be reachable (physical power, IPMI, or WoL from a peer that is up):
+
+```bash
+./deploy/proxmox.sh start-cluster --ip-address <reachable-pve-host>
+```
+
+Sends Wake-on-LAN to offline peers via `pvenode wakeonlan`. Post-startup on the main node (step **10**) can WoL remaining peers after quorum.
+
+#### Shut down TrueNAS (`172.16.0.100`)
+
+**Not exposed in truenas-mcp v1** — use the WebSocket API, WebUI, or NAS shell. API method: [`system.shutdown`](https://api.truenas.com/v25.10/api_methods_system.shutdown.html) (requires **FULL_ADMIN**; returns a **job id** — poll until `SUCCESS`).
+
+##### Before shutdown
+
+1. **Stop Proxmox first** (see power-down order above) so NFS clients on `truenas-nfs` are gone.
+2. Optional: stop heavy **Apps** (Scrutiny, Uptime Kuma) from **Apps → Installed** if you want a quieter shutdown — not required for a clean power-off.
+3. Confirm you can reach the NAS (next section) **before** calling `system.shutdown`.
+
+##### Reach the NAS
+
+| Path      | Host                             | HTTPS / WSS port                            |
+| --------- | -------------------------------- | ------------------------------------------- |
+| LAN       | `172.16.0.100`                   | `443`                                       |
+| Tailscale | `oldtimers-truenas-ha.<tailnet>` | `8443` (lab default on MagicDNS; not `443`) |
+
+Verify from the workstation:
+
+```bash
+# LAN (on-site or routed to 172.16.0.0/16)
+curl -sk --connect-timeout 5 -o /dev/null -w '%{http_code}\n' https://172.16.0.100/
+
+# Tailscale (remote; lab MagicDNS example)
+tailscale status | grep -E 'truenas|pfsense'
+curl -sk --connect-timeout 5 -o /dev/null -w '%{http_code}\n' \
+  https://oldtimers-truenas-ha.tailf1ad0d.ts.net:8443/
+```
+
+If pfSense and TrueNAS are **Tailscale-offline** and the workstation is not on LAN, shutdown requests will time out — use the WebUI on-site, IPMI/out-of-band power, or restore Tailscale/LAN routing first.
+
+API key: **Credentials → My API Keys** on TrueNAS (or reuse the key in `~/.cursor/mcp.json` under `truenas` — never commit keys). Setup: [`mcp/truenas-mcp/docs/API_KEY_SETUP.md`](../mcp/truenas-mcp/docs/API_KEY_SETUP.md).
+
+##### Option A — WebSocket API (repo client)
+
+From the repo root. Use **LAN** or **Tailscale** env block — port must match the path above.
+
+**LAN:**
+
+```bash
+export TRUENAS_HOST=172.16.0.100
+export TRUENAS_PORT=443
+export TRUENAS_VERIFY_SSL=false
+export TRUENAS_WS_PATH=/websocket
+export TRUENAS_API_KEY='your-key-here'
+
+poetry run python - <<'PY'
+import asyncio
+from truenas_mcp.config import TnasSettings
+from truenas_mcp.client.websocket import TnasClient
+from truenas_mcp.client.jobs import wait_for_job
+
+async def main():
+    c = TnasClient(TnasSettings())
+    info = await c.call("system.info")
+    print("Shutting down", info.get("hostname"))
+    job_id = await c.call("system.shutdown", ["Lab shutdown", {"delay": None}])
+    if isinstance(job_id, int):
+        await wait_for_job(c, job_id, timeout_sec=120.0)
+    await c.aclose()
+
+asyncio.run(main())
+PY
+```
+
+**Tailscale** (same script; only host/port change):
+
+```bash
+export TRUENAS_HOST=oldtimers-truenas-ha.tailf1ad0d.ts.net
+export TRUENAS_PORT=8443
+# TRUENAS_VERIFY_SSL, TRUENAS_WS_PATH, TRUENAS_API_KEY — same as LAN block
+```
+
+Optional delayed shutdown: pass `{"delay": 60}` instead of `{"delay": None}` (seconds).
+
+##### Option B — NAS shell (console or SSH)
+
+```bash
+midclt call system.shutdown 'Lab shutdown' '{}'
+```
+
+##### Option C — WebUI
+
+User menu (top-right) → **Shut Down**.
+
+#### Shutdown connectivity troubleshooting
+
+| Symptom                                    | Likely cause                                         | Fix                                                                   |
+| ------------------------------------------ | ---------------------------------------------------- | --------------------------------------------------------------------- |
+| `172.16.0.100` ping/HTTPS timeout from Mac | Not on LAN; no route to `172.16.0.0/16`              | Connect to LAN, or use Tailscale path below                           |
+| Tailscale host shows **offline**           | NAS or pfSense Tailscale not connected               | Power on pfSense/NAS; check `tailscale status` on each host           |
+| WebSocket handshake timeout on MagicDNS    | Wrong port (`443` vs `8443`) or relay-only peer down | Use `8443` for `oldtimers-truenas-ha`; prefer direct LAN when on-site |
+| `system.shutdown` permission error         | API key lacks FULL_ADMIN                             | Create key under an admin user with sufficient role                   |
+| Job times out but NAS powers off           | Expected — connection drops when middleware stops    | Confirm power LED / ping loss on-site                                 |
+
+---
+
 ## refresh vmbr0 ip address proxmox
 
 To refresh or change the vmbr0 IP address in Proxmox, edit /etc/network/interfaces to update the IP, subnet, and gateway, then update /etc/hosts to match. Apply changes by running ifdown vmbr0 && ifup vmbr0, or restart the network service/reboot. The GUI method (System > Network) is generally preferred.
@@ -716,6 +854,182 @@ Test with a **logged-in desktop session** (e.g. `gedit`, `kate`, or a terminal) 
 | Resolution does not auto-resize          | vdagent not running or low video memory    | Fix vdagent; increase Display memory (e.g. 32 MiB)                      |
 | Live migrate fails after noVNC clipboard | `qemu-vdagent` on old machine type         | Upgrade QEMU machine version to ≥ 10.1 or remove `clipboard=vnc`        |
 | Mouse offset / no absolute pointer       | USB tablet disabled                        | Ensure **VM → Options → USB Tablet** is enabled (default for SPICE/QXL) |
+
+---
+
+## Debian — apt and dpkg corruption (PVE nodes and LXC)
+
+Debian-based **Proxmox nodes** and **LXC containers** share the same package stack: **apt** downloads indexes and packages; **dpkg** tracks installed state. Corruption can appear in either layer. The symptoms look similar (“apt is broken”) but the fix depends on **which file** is damaged.
+
+This runbook applies to any Debian guest in the lab (CT, VM, or PVE host). Run commands **inside the affected system** as `root`, unless noted.
+
+### Quick diagnosis
+
+| Symptom / error                                                | Broken layer                                                        | Typical fix                                                                               |
+| -------------------------------------------------------------- | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `E: Unable to parse package file /var/lib/apt/lists/...`       | **apt index cache** (downloaded `Packages` / `Translation-*` files) | Delete bad files under `/var/lib/apt/lists/`, then `apt-get update`                       |
+| `E: The package cache file is corrupted`                       | Same as above                                                       | Same as above                                                                             |
+| `dpkg: error: parsing file '/var/lib/dpkg/available' ...`      | **dpkg metadata** (`available`, sometimes `status`)                 | Rebuild dpkg database (see below)                                                         |
+| `field name 'Archite' must be followed by colon`               | Truncated stanza in `/var/lib/dpkg/available`                       | Same as above                                                                             |
+| `Sub-process dpkg --set-selections returned an error code (2)` | dpkg metadata; apt cannot proceed                                   | Same as above                                                                             |
+| `Could not get lock /var/lib/dpkg/lock`                        | Another apt/dpkg process running (or stale lock)                    | Wait, or inspect with `fuser` / `lsof`; do **not** delete locks while a process is active |
+
+> [!NOTE]
+> **Two problems, two fixes.** Clearing `/var/lib/apt/lists/` does **not** repair a bad `/var/lib/dpkg/available`. If both errors appeared over time, work through **Fix 1** first, then **Fix 2** if dpkg errors remain.
+
+### Common causes (especially on LXC)
+
+- **`apt-get update` or `apt install` interrupted** — CT stop, node reboot, SSH drop, OOM kill
+- **Disk or inode exhaustion** during download or unpack
+- **Rootfs copied or restored mid-write** — ZFS snapshot rollback, `pct restore`, template clone, NFS glitch
+- **Concurrent apt** — two shells or automation running at once
+
+Before any repair, confirm the filesystem is healthy:
+
+```shell
+df -h /
+df -i /
+```
+
+Free space if `/` is full or inodes are exhausted; otherwise corruption may return immediately after repair.
+
+---
+
+### Fix 1 — Corrupted apt package lists (`/var/lib/apt/lists/`)
+
+**When:** `apt-get update` fails with _Unable to parse package file_ or _package cache file is corrupted_.
+
+These files are **re-downloadable caches**. Deleting them is safe; apt fetches fresh indexes on the next update.
+
+```shell
+# Optional: note which files apt complained about, then remove them.
+# Example paths from a typical error:
+#   /var/lib/apt/lists/deb.debian.org_debian_dists_trixie_main_binary-amd64_Packages
+#   /var/lib/apt/lists/deb.debian.org_debian_dists_trixie_main_i18n_Translation-en
+
+rm -f /var/lib/apt/lists/deb.debian.org_debian_dists_*_Packages*
+rm -f /var/lib/apt/lists/deb.debian.org_debian_dists_*_Translation-*
+
+# If errors mention security or third-party repos, remove those list files too, e.g.:
+# rm -f /var/lib/apt/lists/security.debian.org_*
+# rm -f /var/lib/apt/lists/repos.influxdata.com_*
+
+apt-get clean
+apt-get update
+```
+
+**Nuclear option** (still safe — only caches):
+
+```shell
+rm -rf /var/lib/apt/lists/*
+mkdir -p /var/lib/apt/lists/partial
+apt-get clean
+apt-get update
+```
+
+Then retry your original command (`apt-get upgrade`, `dist-upgrade`, or package install).
+
+---
+
+### Fix 2 — Corrupted dpkg database (`/var/lib/dpkg/`)
+
+**When:** `dpkg` or `apt` fails while parsing `/var/lib/dpkg/available` or `/var/lib/dpkg/status`, often with a truncated field name (e.g. `Archite` instead of `Architecture:`).
+
+**Always back up first:**
+
+```shell
+cp -a /var/lib/dpkg/status  /var/lib/dpkg/status.bak.$(date +%F)
+cp -a /var/lib/dpkg/available /var/lib/dpkg/available.bak.$(date +%F) 2>/dev/null || true
+```
+
+**Inspect** (replace package name if the error cites another):
+
+```shell
+grep -n '^Package: nss-tlsd' /var/lib/dpkg/available
+sed -n '917420,917430p' /var/lib/dpkg/available   # adjust line from error message
+```
+
+**Standard rebuild** (try in order; stop when `apt-get update` and a test install succeed):
+
+```shell
+# Step A — remove stale available file and reconfigure
+rm -f /var/lib/dpkg/available
+rm -f /var/lib/dpkg/status-old /var/lib/dpkg/status.dpkg-* 2>/dev/null
+dpkg --configure -a
+apt-get update
+apt-get install -f -y
+apt-get clean
+```
+
+If Step A still errors:
+
+```shell
+# Step B — regenerate available from package archives
+dpkg --clear-avail
+dpkg --update-avail
+apt-get update
+```
+
+If Step B still errors:
+
+```shell
+# Step C — reinstall core packaging tools
+apt-get update
+apt-get install --reinstall dpkg apt -y
+dpkg --configure -a
+apt-get install -f -y
+```
+
+After repair, retry the intended install (e.g. packages from `deploy/setup/apt-dependencies.list` on a new CT).
+
+---
+
+### From a Proxmox host (`pct exec`)
+
+When the guest is an LXC and you prefer to run repairs from the node:
+
+```shell
+# Replace <vmid> with the CT ID (e.g. 1003)
+pct exec <vmid> -- bash -c '
+  set -euo pipefail
+  df -h /; df -i /
+  rm -rf /var/lib/apt/lists/*
+  mkdir -p /var/lib/apt/lists/partial
+  apt-get clean
+  apt-get update -y
+'
+```
+
+For dpkg repair, use the same pattern but paste the **Fix 2** commands inside the quoted script. Ensure the CT is **running** (`pct status <vmid>`).
+
+---
+
+### Verification checklist
+
+After either fix:
+
+```shell
+apt-get update
+apt-get check          # reports broken dependencies, if any
+dpkg --audit           # lists broken packages
+```
+
+Optional smoke test:
+
+```shell
+apt-get install -y --dry-run curl
+```
+
+If all three succeed, proceed with `apt-get upgrade` or `dist-upgrade`.
+
+---
+
+### Prevention
+
+- Do not stop an LXC or reboot a node while apt is running; wait for the shell prompt to return.
+- Keep root filesystem headroom (aim for **>10%** free space and inodes).
+- After **restore / clone / snapshot rollback** of a CT rootfs, run `apt-get update` before installing packages.
+- On PVE nodes, prefer **`setup-pve-node.sh` step 1** (repos + deps) over ad-hoc partial installs during bootstrap.
 
 ---
 
@@ -1259,7 +1573,7 @@ In [Tailscale admin → DNS](https://login.tailscale.com/admin/dns):
 
 ## TrueNAS Scale — storage pools, Scrutiny, and Uptime Kuma
 
-This section covers **TrueNAS Scale** storage pool behaviour, the **Scrutiny** SMART app, and **Uptime Kuma** monitoring for a homelab with **pfSense** and a **3-node Proxmox VE** cluster (`pvenode-001` … `003`, LAN `172.16.0.0/16`, gateway `172.16.0.1`).
+This section covers **TrueNAS Scale** storage pool behaviour, the **Scrutiny** SMART app, and **Uptime Kuma** monitoring for a homelab with **pfSense** and a **3-node Proxmox VE** cluster (`pvenode-001` … `003`, LAN `172.16.0.0/16`, gateway `172.16.0.1`). Lab NAS: **`172.16.0.100`**. For API/WebUI shutdown, see **Lab shutdown and startup (`pvecm-oldtimers`)** above.
 
 **References:**
 
@@ -1631,21 +1945,22 @@ curl -fsS "http://<kuma-host>:31050/api/push/<TOKEN>?status=up&msg=scrub+ok"
 
 ### TrueNAS Scale monitoring — quick reference
 
-| Port / service          | Default port | Monitor type               |
-| ----------------------- | ------------ | -------------------------- |
-| TrueNAS WebUI           | 443          | HTTP(s)                    |
-| TrueNAS SSH             | 22           | TCP                        |
-| TrueNAS SMB             | 445          | TCP                        |
-| TrueNAS NFS             | 2049         | TCP                        |
-| Scrutiny WebUI          | 31054        | HTTP(s)                    |
-| Uptime Kuma             | 31050        | HTTP(s)                    |
-| pfSense GUI             | 443          | HTTP(s)                    |
-| pfSense DNS             | 53           | DNS                        |
-| Proxmox WebUI/API       | 8006         | HTTP(s)                    |
-| Proxmox SSH             | 22           | TCP                        |
-| Corosync                | 5405         | TCP                        |
-| Tailscale control plane | 443          | HTTP(s)                    |
-| Internet check          | —            | HTTP(s) → Cloudflare trace |
+| Port / service            | Default port | Monitor type               |
+| ------------------------- | ------------ | -------------------------- |
+| TrueNAS WebUI             | 443          | HTTP(s)                    |
+| TrueNAS WebUI (Tailscale) | 8443         | HTTP(s) — lab MagicDNS     |
+| TrueNAS SSH               | 22           | TCP                        |
+| TrueNAS SMB               | 445          | TCP                        |
+| TrueNAS NFS               | 2049         | TCP                        |
+| Scrutiny WebUI            | 31054        | HTTP(s)                    |
+| Uptime Kuma               | 31050        | HTTP(s)                    |
+| pfSense GUI               | 443          | HTTP(s)                    |
+| pfSense DNS               | 53           | DNS                        |
+| Proxmox WebUI/API         | 8006         | HTTP(s)                    |
+| Proxmox SSH               | 22           | TCP                        |
+| Corosync                  | 5405         | TCP                        |
+| Tailscale control plane   | 443          | HTTP(s)                    |
+| Internet check            | —            | HTTP(s) → Cloudflare trace |
 
 > [!NOTE]
 > Allow **LAN → monitored ports** on pfSense if rules are tightened beyond defaults. Kuma on TrueNAS must reach targets on `172.16.0.0/16` and Tailscale `100.x.x.x` addresses.

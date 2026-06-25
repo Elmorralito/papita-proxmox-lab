@@ -106,15 +106,15 @@ papita-proxmox-lab/
 
 ### Workstation prerequisites
 
-| Tool                            | Used for                                                                    |
-| ------------------------------- | --------------------------------------------------------------------------- |
-| **bash** 4+                     | All deploy scripts (`set -euo pipefail`)                                    |
-| **Poetry** 2.x                  | Dev venv, MCP packages, linter tooling                                      |
-| **Python** 3.11+                | MCP servers and pre-commit (3.14 in [`.python-version`](./.python-version)) |
-| **jq**                          | Proxmox JSON (`pvesh`, cluster discovery, `mcp.json` merge)                 |
-| **ssh**, **scp**                | `deploy/proxmox.sh`                                                         |
-| **pre-commit** (optional)       | `./deploy/toolkit.sh … --pre-commit` or local hooks                         |
-| **Cursor** (optional)           | MCP client for `proxmox-ve` and `pfsense` servers                           |
+| Tool                      | Used for                                                                    |
+| ------------------------- | --------------------------------------------------------------------------- |
+| **bash** 4+               | All deploy scripts (`set -euo pipefail`)                                    |
+| **Poetry** 2.x            | Dev venv, MCP packages, linter tooling                                      |
+| **Python** 3.11+          | MCP servers and pre-commit (3.14 in [`.python-version`](./.python-version)) |
+| **jq**                    | Proxmox JSON (`pvesh`, cluster discovery, `mcp.json` merge)                 |
+| **ssh**, **scp**          | `deploy/proxmox.sh`                                                         |
+| **pre-commit** (optional) | `./deploy/toolkit.sh … --pre-commit` or local hooks                         |
+| **Cursor** (optional)     | MCP client for `proxmox-ve` and `pfsense` servers                           |
 
 ### Clone and Python dev environment
 
@@ -195,13 +195,13 @@ All deploy commands assume the **repository root** as the current working direct
 ./deploy/toolkit.sh ACTION -e {dev|prod} [OPTIONS]
 ```
 
-| Action                           | Description                                                |
-| -------------------------------- | ---------------------------------------------------------- |
-| `build`                          | Build wheels from `libs/` → `dist/` (when `libs/` exists)  |
-| `devsync`                        | `build` + pip install wheels into the active env           |
-| `test`                           | `build` + pytest with coverage (when `tests/` exists)      |
-| `proxmox` / `deploy_proxmox`     | Delegate to [`deploy/proxmox.sh`](./deploy/proxmox.sh)     |
-| `none`                           | No-op; useful with `--pre-commit` only                     |
+| Action                       | Description                                               |
+| ---------------------------- | --------------------------------------------------------- |
+| `build`                      | Build wheels from `libs/` → `dist/` (when `libs/` exists) |
+| `devsync`                    | `build` + pip install wheels into the active env          |
+| `test`                       | `build` + pytest with coverage (when `tests/` exists)     |
+| `proxmox` / `deploy_proxmox` | Delegate to [`deploy/proxmox.sh`](./deploy/proxmox.sh)    |
+| `none`                       | No-op; useful with `--pre-commit` only                    |
 
 Common flags: `--env-file`, `--aws-sso` / `--aws-mfa`, `--pre-commit`, `--proxmox-action`, `--ip-address`, `--hostname`, `--profile`, `--region`.
 
@@ -385,3 +385,9 @@ Both MCP packages emit **structured JSON logs on stderr** (`PVE_LOG_LEVEL` / `PF
 ## License
 
 See [LICENSE](./LICENSE).
+
+---
+
+## Monitoring
+
+![](./docs/Diagrams-Monitoring.svg)

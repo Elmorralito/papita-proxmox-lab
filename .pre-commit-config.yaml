@@ -8,6 +8,7 @@ repos:
       - id: check-yaml
       - id: check-toml
       - id: detect-aws-credentials
+        args: ["--allow-missing-credentials"]
       - id: detect-private-key
 
   - repo: https://github.com/pre-commit/mirrors-prettier
