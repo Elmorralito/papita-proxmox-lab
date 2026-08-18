@@ -232,10 +232,22 @@ prompt_crontab_schedule() {
 # Interface must exist and support Wake-on-LAN per ethtool.
 prompt_existing_wol_interface() {
     local -n _out_if="$1"
+    # Show user the list of available network interfaces before prompting.
+    log INFO "Listing available network interfaces:"
+    ip -o link show | awk '{print $2}' | sed 's/://'
     local ifname check_wol
     while true; do
-        _prompt_read_line "3.1. QUESTION: Enter interface name: " ifname || return 1
+        _prompt_read_line "3.1. QUESTION: Enter interface name (q to quit): " ifname || return 1
         ifname="$(_str_trim "$ifname")"
+        # Allow user to abort interface selection by entering 'q'.
+        if [ "$ifname" = "q" ]; then
+            log INFO "User chose to quit interface selection. Returning to previous step."
+            return 1
+        fi
+        # Remove trailing colon that may be copied from the listing.
+        if [[ "${ifname}" =~ :$ ]]; then
+            ifname="${ifname%:}"
+        fi
         if [ -z "$ifname" ]; then
             log WARN "Interface name cannot be empty."
             continue
@@ -246,7 +258,10 @@ prompt_existing_wol_interface() {
         fi
         check_wol=$(ethtool "$ifname" 2>/dev/null | grep "Wake-on:" || true)
         if [ -z "$check_wol" ]; then
-            log WARN "Wake-on-LAN is not reported for ${ifname}. Choose another interface."
+            # Provide full ethtool output for debugging purposes.
+            local full_out
+            full_out=$(ethtool "$ifname" 2>&1)
+            log WARN "Wake‑on‑LAN is not reported for ${ifname}. Here is the ethtool output:\n${full_out}\nChoose another interface."
             continue
         fi
         _out_if="$ifname"
