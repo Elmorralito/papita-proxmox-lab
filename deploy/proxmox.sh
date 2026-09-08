@@ -557,8 +557,31 @@ _proxmox_ssh_cleanup() {
 }
 trap _proxmox_ssh_cleanup EXIT
 
-if ! ssh "${SSH_COMMON_OPTS[@]}" "$TARGET_USERNAME@$IP_ADDRESS" "true"; then
-    log "ERROR" "Failed to connect to $IP_ADDRESS using username $TARGET_USERNAME."
+_ensure_entry_ssh() {
+    local host="$IP_ADDRESS"
+    if ssh "${SSH_COMMON_OPTS[@]}" -o BatchMode=yes -o ConnectTimeout=15 "${TARGET_USERNAME}@${host}" "true" 2>/dev/null; then
+        return 0
+    fi
+    if ! command -v sshpass &>/dev/null; then
+        log "ERROR" "SSH to ${TARGET_USERNAME}@${host} failed (no key). Use --identity-file / PAPITA_SSH_IDENTITY_FILE, install sshpass(1) for password auth, set PAPITA_SSH_PASSWORD (or SSH_CLUSTER_PASSWORD), or add a public key on this host."
+        return 1
+    fi
+    if [[ -z "${SSH_CLUSTER_PASSWORD:-}" ]]; then
+        if [[ ! -t 0 ]]; then
+            log "ERROR" "Cannot prompt for SSH password (stdin is not a TTY). Set PAPITA_SSH_PASSWORD (or SSH_CLUSTER_PASSWORD), use --identity-file / PAPITA_SSH_IDENTITY_FILE, or use SSH keys for ${TARGET_USERNAME}@${host}."
+            return 1
+        fi
+        read -r -s -p "SSH password for ${TARGET_USERNAME}@${host}: " SSH_CLUSTER_PASSWORD || return 1
+        echo
+    fi
+    if SSHPASS="${SSH_CLUSTER_PASSWORD}" sshpass -e ssh "${SSH_COMMON_OPTS[@]}" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 "${TARGET_USERNAME}@${host}" "true"; then
+        return 0
+    fi
+    log "ERROR" "Failed to connect to ${host} using username ${TARGET_USERNAME}."
+    return 1
+}
+
+if ! _ensure_entry_ssh; then
     usage_proxmox
 fi
 

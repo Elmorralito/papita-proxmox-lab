@@ -85,8 +85,15 @@ Failure behavior
   - deploy/proxmox.sh --ip-address 172.16.0.101 — cluster ops via main node LAN IP.
 
 --- Step 10 — Post-startup ---
-  Ceph osd unset noout after boot; optional quorum wait (10.3, /etc/default/papita-post-startup);
+  Ceph osd unset noout after boot; quorum wait (10.3, /etc/default/papita-post-startup);
   main-node WoL peers (10.2 → /etc/default/pve-main-node).
+  Isolated-node recovery (10.4–10.5 → FORCE_QUORUM_IF_ISOLATED / FORCE_QUORUM_GUESTS):
+  a lone node of a 3+ node cluster never reaches quorum, so /etc/pve is read-only and
+  "onboot: 1" guests cannot start. When the 10.3 wait times out AND every corosync peer
+  is unreachable, expected votes drop to 1 (runtime only) and the listed guests start.
+  Any reachable peer aborts it — that is a corosync partition, and forcing votes on both
+  sides would split-brain /etc/pve. Note a QDevice does NOT solve this on an even-numbered
+  cluster (it adds a single vote), and PVE does not support corosync last_man_standing.
 
 --- Step 11 — Pre-shutdown ---
   Optional pvesh stopall (11.2–11.3 → /etc/default/papita-pre-shutdown); Ceph osd set noout.

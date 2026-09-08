@@ -11,8 +11,8 @@
         "TRUENAS_VERIFY_SSL": "false",
         "TRUENAS_WS_PATH": "/websocket",
         "TRUENAS_WS_PING_INTERVAL_SEC": "30",
-        "TRUENAS_LAB_HA_POOL_NAME": "pve-cluster-oldtimers-ha-storage",
-        "TRUENAS_LAB_NFS_EXPORT": "/mnt/pve-cluster-oldtimers-ha-storage/pve-nfs",
+        "TRUENAS_LAB_HA_POOL_NAME": "main_data_storage",
+        "TRUENAS_LAB_NFS_EXPORT": "/mnt/main_data_storage",
         "TRUENAS_LAB_SCRUTINY_APP_NAME": "scrutiny",
         "TRUENAS_LOG_LEVEL": "INFO"
       }

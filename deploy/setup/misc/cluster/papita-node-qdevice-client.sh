@@ -32,14 +32,20 @@ else
 fi
 
 if command -v systemctl >/dev/null 2>&1; then
-    systemctl enable watchdog-mux 2>/dev/null || true
-    if ! systemctl is-active watchdog-mux >/dev/null 2>&1; then
-        systemctl start watchdog-mux 2>/dev/null || echo "[WARN] watchdog-mux not running; install pve-ha-manager or reboot."
+    for svc in watchdog-mux pve-ha-lrm pve-ha-crm; do
+        systemctl enable "$svc" 2>/dev/null || true
+        if ! systemctl is-active "$svc" >/dev/null 2>&1; then
+            systemctl start "$svc" 2>/dev/null || echo "[WARN] ${svc} not running."
+        fi
+        echo "[INFO] ${svc}: $(systemctl is-active "$svc" 2>/dev/null || echo unknown)"
+    done
+    # Do not enable corosync-qdevice until pvecm qdevice setup has registered a server.
+    if [[ -f /etc/corosync/qdevice/net/nssdb/cert9.db ]] || grep -q qdevice /etc/corosync/corosync.conf 2>/dev/null; then
+        systemctl enable --now corosync-qdevice 2>/dev/null || true
+        echo "[INFO] corosync-qdevice: $(systemctl is-active corosync-qdevice 2>/dev/null || echo unknown)"
+    else
+        echo "[INFO] corosync-qdevice installed but not started (no qdevice in corosync.conf yet)."
     fi
-    if systemctl is-active watchdog-mux >/dev/null 2>&1; then
-        echo "[INFO] watchdog-mux active (HA fencing multiplexer)."
-    fi
-    systemctl is-enabled corosync-qdevice 2>/dev/null || true
 fi
 
 echo "[INFO] Node QDevice client + watchdog prep done on $(hostname -s)."

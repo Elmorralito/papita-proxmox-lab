@@ -62,6 +62,7 @@ DEFAULT_SMART_CRON_SCHEDULE="0 3 1 * *"
 DEFAULT_VZDUMP_CRON_SCHEDULE="0 2 * * 0"
 DEFAULT_STOPALL_TIMEOUT="120"
 DEFAULT_QUORUM_WAIT_SEC="120"
+DEFAULT_FORCE_QUORUM_IF_ISOLATED="0"
 TAILSCALE_GATEWAYS_LIST="${SCRIPT_DIR}/misc/tailscale/default.gateways.list"
 TAILSCALE_LAN_ROUTES_LIST="${SCRIPT_DIR}/misc/tailscale/default.lan.routes.list"
 TAILSCALE_TAGS_LIST="${SCRIPT_DIR}/misc/tailscale/default.tags.list"
@@ -930,19 +931,34 @@ setup_post_startup_procedure() {
         log INFO "Setting up /etc/default/pve-main-node..."
         echo "$HOSTNAME" > /etc/default/pve-main-node
         log INFO "/etc/default/pve-main-node set to $HOSTNAME"
-        local quorum_wait=""
-        prompt_line_trimmed "10.3. QUESTION: Seconds to wait for cluster quorum at boot (empty = ${DEFAULT_QUORUM_WAIT_SEC}): " quorum_wait
-        if [ -z "$quorum_wait" ]; then
-            quorum_wait="$DEFAULT_QUORUM_WAIT_SEC"
-        fi
-        cat <<EOF >/etc/default/papita-post-startup
-# Papita post-startup (step 10)
-QUORUM_WAIT_SEC=${quorum_wait}
-EOF
-        log INFO "Wrote /etc/default/papita-post-startup (QUORUM_WAIT_SEC=${quorum_wait})."
     else
         log INFO "Skipping /etc/default/pve-main-node setup."
     fi
+
+    local quorum_wait=""
+    prompt_line_trimmed "10.3. QUESTION: Seconds to wait for cluster quorum at boot (empty = ${DEFAULT_QUORUM_WAIT_SEC}): " quorum_wait
+    if [ -z "$quorum_wait" ]; then
+        quorum_wait="$DEFAULT_QUORUM_WAIT_SEC"
+    fi
+
+    local force_quorum="$DEFAULT_FORCE_QUORUM_IF_ISOLATED"
+    local force_quorum_guests=""
+    local confirm_force=""
+    log INFO "A single node of a 3+ node cluster can never reach quorum alone, so /etc/pve stays read-only and 'onboot: 1' guests cannot start."
+    log INFO "Lowering expected votes is only attempted when every corosync peer is verified unreachable; a reachable peer aborts it to avoid a split-brain /etc/pve."
+    prompt_until_yn "10.4. QUESTION: If quorum times out and NO peer answers, lower expected votes to 1 so this node can boot alone? (y/n): " confirm_force
+    if [ "$confirm_force" == "y" ]; then
+        force_quorum="1"
+        prompt_line_trimmed "10.5. QUESTION: Guest IDs to start after lowering expected votes, comma separated (e.g. the firewall VM; empty = none): " force_quorum_guests
+    fi
+
+    cat <<EOF >/etc/default/papita-post-startup
+# Papita post-startup (step 10)
+QUORUM_WAIT_SEC=${quorum_wait}
+FORCE_QUORUM_IF_ISOLATED=${force_quorum}
+FORCE_QUORUM_GUESTS="${force_quorum_guests}"
+EOF
+    log INFO "Wrote /etc/default/papita-post-startup (QUORUM_WAIT_SEC=${quorum_wait}, FORCE_QUORUM_IF_ISOLATED=${force_quorum}, FORCE_QUORUM_GUESTS='${force_quorum_guests}')."
 
     log INFO "Reloading systemd daemon..."
     systemctl daemon-reload
