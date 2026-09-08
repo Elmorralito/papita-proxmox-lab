@@ -86,7 +86,8 @@ usage_proxmox() {
     setup-cluster-ha
                    Deploy misc/cluster bundle; on every online member install corosync-qdevice
                    + softdog (papita-node-qdevice-client.sh); on the SSH entry host register
-                   QDevice, add TrueNAS NFS (172.16.0.100), create HA group, verify quorum.
+                   QDevice (if qnetd host is up), add TrueNAS NFS, create PVE 9 HA
+                   node-affinity rules when resources exist, verify quorum.
                    Prerequisite: corosync-qnetd on the host in misc/cluster/default.qdevice.host
                    (NOT TrueNAS). Edit misc/cluster/default.truenas.nfs.env for export path.
 

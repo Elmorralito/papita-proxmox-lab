@@ -405,15 +405,17 @@ pvecm status && echo && pvecm nodes && echo && corosync-cfgtool -s
 
 ### Quorum, QDevice, TrueNAS NFS, and HA (Path B)
 
-This lab runs a **3-node** cluster (`pvenode-001` … `003`) on LAN `172.16.0.0/16`. Default quorum is **2 of 3** (one node may be offline). To stay quorate with **two nodes deliberately offline** (or to prepare for a 4th node later), use a **QDevice** tie-breaker plus **HA fencing** before shared-storage HA.
+This lab runs a **4-node** cluster (`pve-001` … `004`) on LAN `172.16.0.0/16`. Without a QDevice, quorum is **3 of 4** (one node may be offline). A **QDevice** tie-breaker plus **HA fencing** is required before shared-storage HA can survive two node losses.
 
 | Component    | Lab default                                                       | Role                                                        |
 | ------------ | ----------------------------------------------------------------- | ----------------------------------------------------------- |
-| QDevice host | `172.16.0.102` (`deploy/setup/misc/cluster/default.qdevice.host`) | Runs `corosync-qnetd` — **not** a PVE node, **not** TrueNAS |
-| TrueNAS NFS  | `172.16.0.100` (`default.truenas.nfs.env`)                        | Shared storage for HA VMs (`truenas-nfs` storage ID)        |
+| QDevice host | `172.16.0.105` (`deploy/setup/misc/cluster/default.qdevice.host`) | Runs `corosync-qnetd` — **not** a PVE node, **not** TrueNAS |
+| TrueNAS NFS  | `172.16.0.100` (`default.truenas.nfs.env`)                        | Shared storage (`truenas-nfs-main` + misc content IDs)      |
 | PVE nodes    | `corosync-qdevice` + `softdog`                                    | QDevice client + watchdog fencing                           |
 
-**Quorum math (3 PVE + QDevice):** 4 votes total → quorum **3** → cluster stays quorate with **2 PVE nodes + QDevice**.
+**Do not** point QDevice at `172.16.0.102` — that is `pve-002`. **Do not** enroll guests whose disks are on `local` / `local-lvm` (pfSense included).
+
+**Quorum math (4 PVE + QDevice):** 5 votes total → quorum **3** → cluster stays quorate with **2 PVE nodes + QDevice**.
 
 #### One-time: QDevice server
 
@@ -440,7 +442,7 @@ bash /root/deploy/misc/cluster/papita-node-qdevice-client.sh
 
 Installs `corosync-qdevice` and loads **softdog** (`/dev/watchdog*`) for HA fencing.
 
-#### Cluster-wide: QDevice + NFS + HA group
+#### Cluster-wide: QDevice + NFS + HA rules
 
 1. Edit `deploy/setup/misc/cluster/default.truenas.nfs.env` — set `TRUENAS_NFS_EXPORT` to your TrueNAS NFS path (TrueNAS **Sharing → NFS** on `172.16.0.100`).
 2. Ensure the NFS export allows all PVE node LAN IPs.
@@ -453,16 +455,20 @@ Installs `corosync-qdevice` and loads **softdog** (`/dev/watchdog*`) for HA fenc
 This deploys `misc/cluster/`, runs the node client on **every online member**, then on the entry host:
 
 - Adds cluster firewall allow for TrueNAS (if `cluster.fw` exists)
-- `pvesm add nfs truenas-nfs` → `172.16.0.100`
-- `pvecm qdevice setup <QDEVICE_IP>`
-- `ha-manager add group papita-ha` with all cluster nodes
+- `pvesm add nfs` for `truenas-nfs-main` and misc content exports → `172.16.0.100`
+- `pvecm qdevice setup <QDEVICE_IP>` when `172.16.0.105` is up with `corosync-qnetd`
+- PVE 9: `ha-manager rules add node-affinity papita-ha` (HA groups are gone; rules require `--resources`)
 
 #### Add a VM to HA
 
-Storage must be on **`truenas-nfs`** (or another shared store). Then:
+Storage must be on **`truenas-nfs-main`** (or another shared store). Then:
 
 ```bash
-ha-manager add vm:<VMID> --group papita-ha --state started
+ha-manager add vm:<VMID> --state started
+ha-manager rules add node-affinity papita-ha \
+  --resources vm:<VMID> \
+  --nodes pve-001:1,pve-002:1,pve-003:1,pve-004:1 \
+  --strict 1
 ha-manager status
 ```
 
@@ -471,7 +477,7 @@ ha-manager status
 ```bash
 pvecm status
 corosync-quorumtool -s
-pvesm status -storage truenas-nfs
+pvesm status -storage truenas-nfs-main
 ha-manager status
 ha-manager crm-command status
 ```
@@ -482,8 +488,8 @@ Healthy QDevice: `pvecm status` lists Qdevice votes; with two PVE nodes online, 
 
 ```bash
 ha-manager remove vm:<VMID>    # per resource
-ha-manager remove group papita-ha
-pvesm remove truenas-nfs
+ha-manager rules remove papita-ha
+pvesm remove truenas-nfs-main
 pvecm qdevice remove
 ```
 

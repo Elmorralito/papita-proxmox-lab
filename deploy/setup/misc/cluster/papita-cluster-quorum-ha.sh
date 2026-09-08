@@ -29,6 +29,7 @@ _load_lab_defaults() {
     PVE_NFS_STORAGE_ID="${PVE_NFS_STORAGE_ID:-truenas-nfs}"
     PVE_NFS_CONTENT="${PVE_NFS_CONTENT:-images,rootdir,vzdump}"
     PVE_NFS_OPTIONS="${PVE_NFS_OPTIONS:-vers=4.1,hard,nconnect=4}"
+    PVE_NFS_SHARE_TABLE="${PVE_NFS_SHARE_TABLE:-}"
     HA_GROUP_NAME="${HA_GROUP_NAME:-papita-ha}"
     HA_NODES="${HA_NODES:-}"
     HA_AUTO_ENROLL_NFS_GUESTS="${HA_AUTO_ENROLL_NFS_GUESTS:-0}"
@@ -95,34 +96,70 @@ EOF
     _log INFO "Added cluster firewall rule: accept IN from TrueNAS ${TRUENAS_NFS_SERVER}."
 }
 
+_nfs_share_rows() {
+    local line
+    if [[ -n "${PVE_NFS_SHARE_TABLE:-}" ]]; then
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            line="${line#"${line%%[![:space:]]*}"}"
+            line="${line%"${line##*[![:space:]]}"}"
+            [[ -z "$line" || "$line" == \#* ]] && continue
+            printf '%s\n' "$line"
+        done <<<"$PVE_NFS_SHARE_TABLE"
+        return 0
+    fi
+    printf '%s|%s|%s\n' "$PVE_NFS_STORAGE_ID" "$TRUENAS_NFS_EXPORT" "$PVE_NFS_CONTENT"
+}
+
+_ensure_one_nfs_storage() {
+    local storage_id="$1"
+    local export_path="$2"
+    local content="$3"
+
+    if pvesm status -storage "$storage_id" &>/dev/null; then
+        _log INFO "NFS storage '${storage_id}' already configured."
+        return 0
+    fi
+
+    _log INFO "Adding NFS storage '${storage_id}' ${TRUENAS_NFS_SERVER}:${export_path} (${content})..."
+    pvesm add nfs "$storage_id" \
+        --server "$TRUENAS_NFS_SERVER" \
+        --export "$export_path" \
+        --content "$content" \
+        --options "$PVE_NFS_OPTIONS"
+    _log INFO "Added NFS storage '${storage_id}'."
+}
+
 _ensure_nfs_storage() {
     if ! command -v pvesm >/dev/null 2>&1; then
         _log ERROR "pvesm not found."
         exit 1
     fi
 
-    if pvesm status -storage "$PVE_NFS_STORAGE_ID" &>/dev/null; then
-        _log INFO "NFS storage '${PVE_NFS_STORAGE_ID}' already configured."
-        return 0
-    fi
-
-    _log INFO "Probing NFS export ${TRUENAS_NFS_SERVER}:${TRUENAS_NFS_EXPORT}..."
     if ! ping -c1 -W2 "$TRUENAS_NFS_SERVER" >/dev/null 2>&1; then
         _log WARN "Cannot ping ${TRUENAS_NFS_SERVER}; continuing (NFS may still work)."
     fi
 
-    pvesm add nfs "$PVE_NFS_STORAGE_ID" \
-        --server "$TRUENAS_NFS_SERVER" \
-        --export "$TRUENAS_NFS_EXPORT" \
-        --content "$PVE_NFS_CONTENT" \
-        --options "$PVE_NFS_OPTIONS"
-    _log INFO "Added NFS storage '${PVE_NFS_STORAGE_ID}' (${TRUENAS_NFS_SERVER}:${TRUENAS_NFS_EXPORT})."
+    local line storage_id export_path content
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        IFS='|' read -r storage_id export_path content <<<"$line"
+        storage_id="${storage_id//[[:space:]]/}"
+        export_path="${export_path#"${export_path%%[![:space:]]*}"}"
+        export_path="${export_path%"${export_path##*[![:space:]]}"}"
+        content="${content#"${content%%[![:space:]]*}"}"
+        content="${content%"${content##*[![:space:]]}"}"
+        if [[ -z "$storage_id" || -z "$export_path" || -z "$content" ]]; then
+            _log WARN "Skipping malformed NFS share row: ${line}"
+            continue
+        fi
+        _ensure_one_nfs_storage "$storage_id" "$export_path" "$content"
+    done < <(_nfs_share_rows)
 }
 
 _ensure_qdevice() {
     if [[ -z "$QDEVICE_HOST" ]]; then
-        _log ERROR "QDEVICE_HOST empty. Set misc/cluster/default.qdevice.host or PAPITA_QDEVICE_HOST."
-        exit 1
+        _log WARN "QDEVICE_HOST empty. Set misc/cluster/default.qdevice.host or PAPITA_QDEVICE_HOST. Skipping qdevice setup."
+        return 0
     fi
 
     if pvecm status 2>/dev/null | grep -qi 'Qdevice'; then
@@ -131,12 +168,18 @@ _ensure_qdevice() {
     fi
 
     if ! ping -c1 -W3 "$QDEVICE_HOST" >/dev/null 2>&1; then
-        _log WARN "Cannot ping QDevice host ${QDEVICE_HOST}. Ensure corosync-qnetd is running there."
+        _log WARN "QDevice host ${QDEVICE_HOST} is unreachable. Skipping pvecm qdevice setup."
+        _log WARN "Bring up a dedicated corosync-qnetd host (not TrueNAS, not a PVE node), then re-run setup-cluster-ha."
+        return 0
     fi
 
     _log INFO "Registering QDevice at ${QDEVICE_HOST} (requires corosync-qdevice on all PVE nodes)..."
-    pvecm qdevice setup "$QDEVICE_HOST"
-    _log INFO "QDevice setup completed."
+    if pvecm qdevice setup "$QDEVICE_HOST"; then
+        _log INFO "QDevice setup completed."
+        return 0
+    fi
+    _log WARN "pvecm qdevice setup failed for ${QDEVICE_HOST}; NFS/HA prep continues."
+    return 0
 }
 
 _ha_nodes_csv() {
@@ -145,6 +188,22 @@ _ha_nodes_csv() {
         return 0
     fi
     pvecm nodes 2>/dev/null | awk '/^[[:space:]]+[0-9]+/ { gsub(/\(local\)/, "", $3); print $3 }' | paste -sd, -
+}
+
+# PVE 9 node-affinity expects node:priority pairs.
+_ha_nodes_priority_csv() {
+    local csv node out=""
+    csv="$(_ha_nodes_csv)"
+    IFS=',' read -ra parts <<<"$csv"
+    for node in "${parts[@]}"; do
+        node="${node//[[:space:]]/}"
+        [[ -z "$node" ]] && continue
+        if [[ "$node" != *:* ]]; then
+            node="${node}:1"
+        fi
+        out="${out:+$out,}$node"
+    done
+    printf '%s' "$out"
 }
 
 _ha_resource_ids_csv() {
@@ -239,7 +298,7 @@ _ensure_ha_rule() {
     fi
 
     local nodes_csv resources_csv
-    nodes_csv="$(_ha_nodes_csv)"
+    nodes_csv="$(_ha_nodes_priority_csv)"
     if [[ -z "$nodes_csv" ]]; then
         _log WARN "Could not determine HA node list (set HA_NODES or join a cluster)."
         return 0
@@ -247,8 +306,10 @@ _ensure_ha_rule() {
 
     resources_csv="$(_ha_resource_ids_csv)"
     if [[ -z "$resources_csv" ]]; then
-        _log INFO "No HA resources in /etc/pve/ha/resources.cfg yet."
-        _log INFO "Add guests with: ha-manager add vm:<VMID> --state started"
+        _log INFO "No HA resources yet (PVE 9 rules require --resources; fencing stays CRM watchdog standby)."
+        _log INFO "Do not enroll local-lvm guests. After disks live on ${PVE_NFS_STORAGE_ID}:"
+        _log INFO "  ha-manager add vm:<VMID> --state started"
+        _log INFO "  ha-manager rules add node-affinity ${HA_GROUP_NAME} --resources vm:<VMID> --nodes ${nodes_csv} --strict 1"
         return 0
     fi
 
@@ -305,8 +366,15 @@ _verify_quorum_ha() {
         ha-manager status || true
     fi
     if command -v pvesm >/dev/null 2>&1; then
-        _log INFO "=== pvesm status (${PVE_NFS_STORAGE_ID}) ==="
-        pvesm status -storage "$PVE_NFS_STORAGE_ID" 2>/dev/null || pvesm status || true
+        local line storage_id
+        while IFS= read -r line; do
+            [[ -z "$line" ]] && continue
+            IFS='|' read -r storage_id _ <<<"$line"
+            storage_id="${storage_id//[[:space:]]/}"
+            [[ -z "$storage_id" ]] && continue
+            _log INFO "=== pvesm status (${storage_id}) ==="
+            pvesm status -storage "$storage_id" 2>/dev/null || true
+        done < <(_nfs_share_rows)
     fi
 }
 
@@ -317,6 +385,9 @@ main() {
     _log INFO "Papita cluster quorum + HA setup"
     _log INFO "  QDevice host: ${QDEVICE_HOST:-<unset>}"
     _log INFO "  TrueNAS NFS:  ${TRUENAS_NFS_SERVER}:${TRUENAS_NFS_EXPORT} → ${PVE_NFS_STORAGE_ID}"
+    if [[ -n "${PVE_NFS_SHARE_TABLE:-}" ]]; then
+        _log INFO "  NFS share table configured (multiple exports)."
+    fi
     _log INFO "  HA group:       ${HA_GROUP_NAME}"
     _log INFO "  HA nodes:       ${HA_NODES:-<all cluster members>}"
 
