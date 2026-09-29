@@ -8,7 +8,7 @@ from proxmox_ve_mcp.client.tasks import node_states
 from proxmox_ve_mcp.constants import API_LOST_ERROR_CODES, HA_REQUIRED_SHUTDOWN_POLICY
 from proxmox_ve_mcp.context import get_client, get_settings
 from proxmox_ve_mcp.tools.cluster import qdevice_status
-from proxmox_ve_mcp.tools.ha import parse_shutdown_policy
+from proxmox_ve_mcp.tools.ha import ha_placement, parse_shutdown_policy
 from proxmox_ve_mcp.tools.helpers import normalize_list, parse_model, require_confirm
 from proxmox_ve_mcp.tools.response import ok_response, write_tool_handler
 from proxmox_ve_mcp.tools.schemas import ShutdownNodeInput, WakeOnLanInput
@@ -28,11 +28,26 @@ async def _cluster_members(client: Any) -> tuple[dict[str, str], str | None, boo
     return node_states(entries), (local.get("name") if local else None), quorate
 
 
-def quorum_impact(members: dict[str, str], target: str, qdevice_votes: int) -> dict[str, Any]:
-    """Estimate votes before/after powering off *target* (one vote per node, QDevice assumed up)."""
-    expected = len(members) + qdevice_votes
+def qdevice_votes(qdevice: dict[str, Any], warnings: list[str]) -> tuple[int, int]:
+    """Return ``(expected, live)`` QDevice votes; a configured but disconnected QDevice is not live."""
+    if not qdevice.get("configured"):
+        return 0, 0
+    status = qdevice.get("status")
+    state = str(status.get("State", "")) if isinstance(status, dict) else ""
+    if state.lower() == "connected":
+        return 1, 1
+    warnings.append(f"QDevice state is {state or 'unknown'!r}; its vote is not counted as live.")
+    return 1, 0
+
+
+def quorum_impact(
+    members: dict[str, str], target: str, qdevice_expected: int, qdevice_live: int | None = None
+) -> dict[str, Any]:
+    """Estimate votes before/after powering off *target* (one vote per node plus the QDevice)."""
+    live = qdevice_expected if qdevice_live is None else qdevice_live
+    expected = len(members) + qdevice_expected
     needed = expected // 2 + 1
-    online_now = sum(1 for state in members.values() if state == "online") + qdevice_votes
+    online_now = sum(1 for state in members.values() if state == "online") + live
     online_after = online_now - (1 if members.get(target) == "online" else 0)
     return {
         "expected_votes": expected,
@@ -110,13 +125,22 @@ async def pve_shutdown_node_impl(  # noqa: C901
         warnings.append(f"Peers still online {peers_online}; the entry node should go last.")
 
     qdevice = await qdevice_status(client, warnings)
-    impact = quorum_impact(members, parsed.node, 1 if qdevice.get("configured") else 0)
+    impact = quorum_impact(members, parsed.node, *qdevice_votes(qdevice, warnings))
     if quorate and not impact["quorate_after"]:
         warnings.append(
             f"Cluster loses quorum after this {parsed.command} "
             + f"({impact['online_votes_after']}/{impact['quorum_votes']} votes): /etc/pve becomes "
             + "read-only; only node-local operations work afterwards."
         )
+        ha = await ha_placement(client, warnings)
+        at_risk = ha.fence_risk(peers_online) if ha is not None else []
+        if ha is None:
+            refusals.append("Quorum would be lost and HA status is unreadable, so self-fencing cannot be ruled out.")
+        elif at_risk:
+            refusals.append(
+                f"Quorum would be lost and {at_risk} have HA resources or an active LRM: they self-fence "
+                + "(watchdog reset after 60 s). Move their HA resources away and wait for the LRM to go idle."
+            )
 
     running: list[dict[str, Any]] = []
     if target_online:

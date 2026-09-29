@@ -2,6 +2,7 @@
 
 import re
 import time
+from dataclasses import dataclass, field
 from typing import Any
 
 from proxmox_ve_mcp.constants import HA_DEFAULT_SHUTDOWN_POLICY, HA_REQUIRED_SHUTDOWN_POLICY
@@ -28,6 +29,62 @@ def parse_shutdown_policy(options: Any) -> str:
 def _lrm_mode(status: str) -> str:
     lowered = status.lower()
     return next((mode for mode in _LRM_MODES if mode in lowered), "unknown")
+
+
+@dataclass(frozen=True)
+class HaPlacement:
+    """HA-managed guests and LRM modes from ``/cluster/ha/status/current``."""
+
+    vmid_nodes: dict[int, str] = field(default_factory=dict)
+    active_lrm_nodes: frozenset[str] = frozenset()
+
+    @property
+    def vmids(self) -> frozenset[int]:
+        """HA-managed VMIDs."""
+        return frozenset(self.vmid_nodes)
+
+    def fence_risk(self, nodes: list[str]) -> list[str]:
+        """Nodes that would self-fence (watchdog reset) if they lost quorum."""
+        placed = set(self.vmid_nodes.values())
+        return sorted(n for n in nodes if n in placed or n in self.active_lrm_nodes)
+
+
+def parse_ha_placement(current: list[dict[str, Any]]) -> HaPlacement:
+    """Build :class:`HaPlacement`; ``ignored`` services are not HA-managed."""
+    vmid_nodes: dict[int, str] = {}
+    for entry in current:
+        if entry.get("type") != "service" or entry.get("state") == "ignored":
+            continue
+        _, _, raw_id = str(entry.get("sid", "")).partition(":")
+        if raw_id.isdigit():
+            vmid_nodes[int(raw_id)] = str(entry.get("node") or "")
+    active = {
+        str(e.get("node"))
+        for e in current
+        if e.get("type") == "lrm" and _lrm_mode(str(e.get("status", ""))) == "active"
+    }
+    return HaPlacement(vmid_nodes, frozenset(active))
+
+
+async def ha_placement(client: Any, warnings: list[str]) -> HaPlacement | None:
+    """Read HA placement; ``None`` (with a warning) when the HA status is unreadable."""
+    try:
+        return parse_ha_placement(normalize_list(await client.get("/cluster/ha/status/current")))
+    except Exception as exc:
+        warnings.append(f"Could not read /cluster/ha/status/current: {exc}")
+        return None
+
+
+async def ha_stop_warning(client: Any, vmid: int, guest_type: str, warnings: list[str]) -> None:
+    """Warn when stopping *vmid* flips its HA requested state to ``stopped``."""
+    placement = await ha_placement(client, warnings)
+    if placement is None or vmid not in placement.vmids:
+        return
+    sid = f"{'ct' if guest_type == 'lxc' else 'vm'}:{vmid}"
+    warnings.append(
+        f"{sid} is HA-managed: this sets its HA requested state to 'stopped', so it stays off after "
+        + f"reboots/cold start until pve_start_guest or `ha-manager set {sid} --state started`."
+    )
 
 
 async def _optional_get(client: Any, path: str, warnings: list[str]) -> Any:

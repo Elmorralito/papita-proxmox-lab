@@ -1,6 +1,7 @@
 """Tests for node power tools and the hard guest stop."""
 
 import json
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
@@ -9,7 +10,7 @@ import respx
 from proxmox_ve_mcp.config import PveSettings
 from proxmox_ve_mcp.context import init_context
 from proxmox_ve_mcp.tools.guests import pve_stop_guest_impl
-from proxmox_ve_mcp.tools.power import pve_shutdown_node_impl, pve_wake_on_lan_impl, quorum_impact
+from proxmox_ve_mcp.tools.power import pve_shutdown_node_impl, pve_wake_on_lan_impl, qdevice_votes, quorum_impact
 
 BASE = "https://pve.local:8006/api2/json"
 FOUR_UP = {"pve-001": 1, "pve-002": 1, "pve-003": 1, "pve-004": 1}
@@ -31,10 +32,15 @@ def _status(nodes: dict[str, int], entry: str = "pve-001", quorate: int = 1) -> 
     return httpx.Response(200, json={"data": entries})
 
 
-def _mock_cluster(nodes: dict[str, int], *, policy: str = "freeze", qdevice: bool = True) -> None:
+def _mock_cluster(
+    nodes: dict[str, int], *, policy: str = "freeze", qdevice: bool = True, ha_current: list[dict] | None = None
+) -> None:
     respx.get(f"{BASE}/cluster/status").mock(return_value=_status(nodes))
     respx.get(f"{BASE}/cluster/options").mock(
         return_value=httpx.Response(200, json={"data": {"ha": f"shutdown_policy={policy}"}})
+    )
+    respx.get(f"{BASE}/cluster/ha/status/current").mock(
+        return_value=httpx.Response(200, json={"data": ha_current or []})
     )
     respx.get(f"{BASE}/cluster/config/qdevice").mock(
         return_value=httpx.Response(200, json={"data": {"State": "Connected"} if qdevice else None})
@@ -48,11 +54,22 @@ def _mock_guests(node: str, qemu: list[dict] | None = None, lxc: list[dict] | No
 
 def test_quorum_impact_four_nodes_plus_qdevice() -> None:
     members = {"pve-001": "online", "pve-002": "online", "pve-003": "offline", "pve-004": "offline"}
-    impact = quorum_impact(members, "pve-002", qdevice_votes=1)
+    impact = quorum_impact(members, "pve-002", qdevice_expected=1)
     assert impact["expected_votes"] == 5
     assert impact["quorum_votes"] == 3
     assert impact["online_votes_now"] == 3
     assert impact["quorate_after"] is False
+
+
+def test_disconnected_qdevice_vote_not_counted() -> None:
+    warnings: list[str] = []
+    expected, live = qdevice_votes({"configured": True, "status": {"State": "Disconnected"}}, warnings)
+    members = dict.fromkeys(("pve-001", "pve-002", "pve-003", "pve-004"), "online")
+    impact = quorum_impact(members, "pve-004", expected, live)
+    assert (expected, live) == (1, 0)
+    assert impact["online_votes_now"] == 4
+    assert impact["online_votes_after"] == 3
+    assert any("Disconnected" in w for w in warnings)
 
 
 @respx.mock
@@ -110,6 +127,24 @@ async def test_shutdown_plan_only_reports_without_confirm(init_pve) -> None:
     assert payload["data"]["running_guests"][0]["vmid"] == 200
     assert any("loses quorum" in w for w in payload["warnings"])
     assert any("still running" in w for w in payload["warnings"])
+    assert not route.called
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_shutdown_refuses_when_survivor_would_self_fence(init_pve) -> None:
+    _mock_cluster(
+        {"pve-001": 1, "pve-002": 1, "pve-003": 0, "pve-004": 0},
+        ha_current=[{"type": "lrm", "node": "pve-001", "status": "active"}],
+    )
+    _mock_guests("pve-002")
+    route = respx.post(f"{BASE}/nodes/pve-002/status")
+
+    payload = json.loads(await pve_shutdown_node_impl(node="pve-002", reason="maintenance", confirm=True))
+
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "PVE_POWER_GUARD"
+    assert "self-fence" in payload["error"]["message"]
     assert not route.called
 
 
@@ -195,6 +230,37 @@ async def test_stop_guest_warns_for_infra_vmid(init_pve) -> None:
     assert payload["ok"] is True
     assert b"overrule-shutdown=1" in route.calls.last.request.content
     assert any("LAN router" in w for w in payload["warnings"])
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_stop_guest_ha_warning_and_wait_timeout_keeps_upid(init_pve) -> None:
+    upid = "UPID:pve-002:1:2:3:hastop:200:root@pam:"
+    respx.get(f"{BASE}/cluster/ha/status/current").mock(
+        return_value=httpx.Response(
+            200, json={"data": [{"type": "service", "sid": "vm:200", "node": "pve-002", "state": "started"}]}
+        )
+    )
+    respx.post(f"{BASE}/nodes/pve-002/qemu/200/status/stop").mock(
+        return_value=httpx.Response(200, json={"data": upid})
+    )
+
+    with patch("proxmox_ve_mcp.tools.guests.wait_for_task", AsyncMock(side_effect=TimeoutError("slow"))):
+        payload = json.loads(
+            await pve_stop_guest_impl(
+                node="pve-002",
+                vmid=200,
+                guest_type="qemu",
+                confirm=True,
+                reason="hung guest",
+                wait_for_completion=True,
+            )
+        )
+
+    assert payload["ok"] is True, payload
+    assert payload["data"]["task"] == {"upid": upid, "finished": False}
+    assert any("vm:200 is HA-managed" in w for w in payload["warnings"])
+    assert any("pve_wait_for_task" in w for w in payload["warnings"])
 
 
 @pytest.mark.asyncio

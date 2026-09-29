@@ -66,9 +66,11 @@ def _strip_address(raw: Any) -> str | None:
         return None
     value = raw.strip().strip('"')
     if value.startswith("["):
-        return value[1:].split("]", 1)[0]
-    if value.count(":") == 1:
-        return value.split(":", 1)[0]
+        value = value[1:].split("]", 1)[0]
+    elif value.count(":") == 1:
+        value = value.split(":", 1)[0]
+    if value.lower().startswith("::ffff:") and "." in value:
+        value = value[7:]
     return value
 
 
@@ -149,6 +151,9 @@ async def collect_nfs_clients(client: Any, settings: Any, warnings: list[str]) -
     unknown_ips = sorted({c["ip"] for c in active if c["ip"] and not c["node"]})
     if unknown_ips:
         warnings.append("Active NFS clients outside the PVE node map: " + ", ".join(unknown_ips))
+    unidentified = sum(1 for c in active if not c["ip"])
+    if unidentified:
+        warnings.append(f"{unidentified} active NFS client(s) without a parsable address.")
     stale = [c for c in clients if c["stale"]]
     if stale:
         warnings.append(f"{len(stale)} stale NFSv4 lease(s) (client gone; expires after the lease time).")
@@ -156,6 +161,8 @@ async def collect_nfs_clients(client: Any, settings: Any, warnings: list[str]) -
     return {
         "count": len(clients),
         "active_count": len(active),
+        "unidentified_active": unidentified,
+        "source_errors": errors,
         "nodes_connected": sorted({c["node"] for c in active if c["node"]}),
         "active_ips": sorted({c["ip"] for c in active if c["ip"]}),
         "unknown_ips": unknown_ips,

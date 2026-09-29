@@ -19,7 +19,12 @@ NFS4_PVE002 = {"id": "2", "info": {"address": "172.16.0.102:781", "status": "con
 
 
 def _fake_client(
-    *, nfs4: list[dict] | None = None, jobs: list[dict] | None = None, power: Any = 42
+    *,
+    nfs4: list[dict] | None = None,
+    jobs: list[dict] | None = None,
+    power: Any = 42,
+    pending: list[dict] | None = None,
+    reachable_after_drop: bool = True,
 ) -> AsyncMock:
     calls: list[tuple[str, Any]] = []
 
@@ -30,6 +35,10 @@ def _fake_client(
         if method == "nfs.get_nfs4_clients":
             return nfs4 or []
         if method == "core.get_jobs":
+            if any(f[0] == "method" for f in (params or [[]])[0]):
+                if not reachable_after_drop:
+                    raise TnasApiError("refused", code="CONNECTION_ERROR", method=method)
+                return pending or []
             return jobs or []
         if method.startswith("system."):
             if isinstance(power, Exception):
@@ -113,14 +122,108 @@ async def test_plan_only_needs_no_confirm_and_submits_nothing(patched) -> None:
     assert not _power_calls(client)
 
 
+DROPPED = TnasApiError("closed", code="CONNECTION_ERROR", method="system.shutdown")
+
+
 @pytest.mark.asyncio
 async def test_connection_drop_during_shutdown_is_success(patched) -> None:
-    client = _fake_client(power=TnasApiError("closed", code="CONNECTION_ERROR", method="system.shutdown"))
+    client = _fake_client(power=DROPPED)
     p1, p2 = patched(client)
     with p1, p2:
         payload = json.loads(await truenas_shutdown_impl("lab off", confirm=True))
     assert payload["ok"] is True
     assert payload["data"]["connection_dropped"] is True
+    assert payload["data"]["verified"] is False
+
+
+@pytest.mark.asyncio
+async def test_connection_drop_with_delay_verifies_pending_job(patched) -> None:
+    client = _fake_client(power=DROPPED, pending=[{"id": 77, "method": "system.shutdown", "state": "RUNNING"}])
+    p1, p2 = patched(client)
+    with p1, p2:
+        payload = json.loads(await truenas_shutdown_impl("lab off", confirm=True, delay_s=300))
+    assert payload["ok"] is True
+    assert payload["data"]["verified"] is True
+    assert payload["data"]["job_id"] == 77
+
+
+@pytest.mark.asyncio
+async def test_connection_drop_with_delay_and_no_job_is_not_submitted(patched) -> None:
+    client = _fake_client(power=DROPPED)
+    p1, p2 = patched(client)
+    with p1, p2:
+        payload = json.loads(await truenas_shutdown_impl("lab off", confirm=True, delay_s=300))
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "POWER_NOT_SUBMITTED"
+
+
+@pytest.mark.asyncio
+async def test_connection_drop_with_delay_and_nas_unreachable_is_unverified(patched) -> None:
+    client = _fake_client(power=DROPPED, reachable_after_drop=False)
+    p1, p2 = patched(client)
+    with p1, p2:
+        payload = json.loads(await truenas_shutdown_impl("lab off", confirm=True, delay_s=300))
+    assert payload["ok"] is True
+    assert payload["data"]["verified"] is False
+    assert any("unreachable" in w for w in payload["warnings"])
+
+
+@pytest.mark.asyncio
+async def test_only_long_running_jobs_block(patched) -> None:
+    jobs = [
+        {"id": 1, "method": "sharing.nfs.update", "state": "RUNNING"},
+        {"id": 2, "method": "update.update", "state": "RUNNING"},
+    ]
+    client = _fake_client(jobs=jobs)
+    p1, p2 = patched(client)
+    with p1, p2:
+        payload = json.loads(await truenas_shutdown_impl("lab off", plan_only=True))
+    assert [j["method"] for j in payload["data"]["blocking_jobs"]] == ["update.update"]
+
+
+@pytest.mark.asyncio
+async def test_refuses_when_nfs4_listing_fails_or_client_unidentified(patched) -> None:
+    client = _fake_client()
+    original = client.call.side_effect
+
+    async def nfs4_down(method: str, params: list[Any] | None = None) -> Any:
+        if method == "nfs.get_nfs4_clients":
+            raise TnasApiError("denied", code="TRUENAS_API_ERROR", method=method)
+        return await original(method, params)
+
+    client.call.side_effect = nfs4_down
+    p1, p2 = patched(client)
+    with p1, p2:
+        incomplete = json.loads(await truenas_shutdown_impl("lab off", plan_only=True))
+    assert any("incomplete" in r for r in incomplete["data"]["refusals"])
+
+    client = _fake_client(nfs4=[{"id": "3", "info": {"status": "confirmed"}}])
+    p1, p2 = patched(client)
+    with p1, p2:
+        unidentified = json.loads(await truenas_shutdown_impl("lab off", plan_only=True))
+    assert any("no parsable address" in r for r in unidentified["data"]["refusals"])
+
+
+@pytest.mark.asyncio
+async def test_ipv4_mapped_client_matches_expected(patched) -> None:
+    mapped = {"id": "4", "info": {"address": "[::ffff:172.16.0.101]:780", "status": "confirmed"}}
+    client = _fake_client(nfs4=[mapped])
+    p1, p2 = patched(client)
+    with p1, p2:
+        payload = json.loads(
+            await truenas_shutdown_impl("lab off", plan_only=True, expected_clients=["172.16.0.101"])
+        )
+    assert payload["data"]["would_execute"] is True
+
+
+@pytest.mark.asyncio
+async def test_audit_log_includes_positional_reason(patched) -> None:
+    client = _fake_client()
+    p1, p2 = patched(client)
+    with p1, p2, patch("truenas_mcp.tools.response.log_tool_event") as log_event:
+        await truenas_shutdown_impl("lab off", confirm=True, delay_s=60)
+    assert log_event.call_args.kwargs["reason"] == "lab off"
+    assert log_event.call_args.kwargs["delay_s"] == 60
 
 
 @pytest.mark.asyncio

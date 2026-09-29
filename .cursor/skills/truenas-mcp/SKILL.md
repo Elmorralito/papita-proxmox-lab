@@ -6,13 +6,13 @@ description: >-
   "${CURSOR_HOME:-${HOME}/.cursor}/mcp.json"
   (mcpServers.truenas.env). Use when checking NAS health, ZFS pools/datasets,
   disks/SMART, NFS HA export, alerts, apps (Scrutiny), jobs/scrubs, smoke
-  tests, or gated dataset/NFS-share/alert writes. Do not use for NIC/IP
-  changes, reboot/shutdown, app catalog install, SMB, QDevice, or Uptime Kuma.
+  tests, gated dataset/NFS-share/alert writes, or guarded NAS shutdown/reboot.
+  Do not use for NIC/IP changes, app catalog install, SMB, QDevice, or Uptime Kuma.
 ---
 
 # truenas MCP
 
-Package: `mcp/truenas-mcp` · Cursor server name: **`truenas`** · 19 tools (16 read, 3 write). Spec: [README](../../../mcp/truenas-mcp/README.md). Do not paste the README into context.
+Package: `mcp/truenas-mcp` · Cursor server name: **`truenas`** · 21 tools (16 read, 3 write, 2 destructive). Spec: [README](../../../mcp/truenas-mcp/README.md). Do not paste the README into context.
 
 Token design: call **1–3 tools**, summarize, never dump envelopes. Unload unused MCP servers; this skill does not load proxmox-ve/pfSense.
 
@@ -72,26 +72,27 @@ Usage:
 
 ## Pick tools (do not list all)
 
-| Need               | Tool                                                                |
-| ------------------ | ------------------------------------------------------------------- |
-| Alive / auth       | `truenas_check_api_key` or `truenas_get_system_info`                |
-| Operator dashboard | `truenas_system_summary`                                            |
-| Post-install       | `truenas_run_smoke_tests` (`extended=true` only if basic pass)      |
-| Alerts             | `truenas_list_alerts`                                               |
-| ZFS pools          | `truenas_list_pools`                                                |
-| Datasets           | `truenas_list_datasets`                                             |
-| Disks / temps      | `truenas_list_disks`                                                |
-| SMART              | `truenas_list_smart_results`                                        |
-| NFS HA export      | `truenas_list_nfs_shares`                                           |
-| NFS clients        | `truenas_list_nfs_clients` (PVE nodes mounted; gate before NAS off) |
-| Apps (Scrutiny)    | `truenas_list_apps`                                                 |
-| Jobs / scrubs      | `truenas_list_jobs` / `truenas_list_scrub_tasks`                    |
-| Graphs             | `truenas_get_reporting_data` (`graph`: `cpu`\|`memory`\|`disk`\|…)  |
-| Create dataset     | `truenas_create_dataset`                                            |
-| Enable/disable NFS | `truenas_update_nfs_share` (`share_id`)                             |
-| Dismiss alert      | `truenas_dismiss_alert`                                             |
+| Need               | Tool                                                                            |
+| ------------------ | ------------------------------------------------------------------------------- |
+| Alive / auth       | `truenas_check_api_key` or `truenas_get_system_info`                            |
+| Operator dashboard | `truenas_system_summary`                                                        |
+| Post-install       | `truenas_run_smoke_tests` (`extended=true` only if basic pass)                  |
+| Alerts             | `truenas_list_alerts`                                                           |
+| ZFS pools          | `truenas_list_pools`                                                            |
+| Datasets           | `truenas_list_datasets`                                                         |
+| Disks / temps      | `truenas_list_disks`                                                            |
+| SMART              | `truenas_list_smart_results`                                                    |
+| NFS HA export      | `truenas_list_nfs_shares`                                                       |
+| NFS clients        | `truenas_list_nfs_clients` (PVE nodes mounted; gate before NAS off)             |
+| Apps (Scrutiny)    | `truenas_list_apps`                                                             |
+| Jobs / scrubs      | `truenas_list_jobs` / `truenas_list_scrub_tasks`                                |
+| Graphs             | `truenas_get_reporting_data` (`graph`: `cpu`\|`memory`\|`disk`\|…)              |
+| Create dataset     | `truenas_create_dataset`                                                        |
+| Enable/disable NFS | `truenas_update_nfs_share` (`share_id`)                                         |
+| Dismiss alert      | `truenas_dismiss_alert`                                                         |
+| NAS power          | `truenas_shutdown` / `truenas_reboot` (**destructive**; `plan_only=true` first) |
 
-Writes: **`confirm=true` required**. Optional `wait_for_job=true` on dataset/NFS updates. No reboot, interface, or catalog tools in v1/v2.
+Writes: **`confirm=true` required**. Optional `wait_for_job=true` on dataset/NFS updates. No interface or catalog tools. Power tools need `confirm=true` + `reason`; never auto-run them. They refuse while NFS clients outside `expected_clients` are connected or a scrub/replication/update runs (`force=true` overrides). Full-lab order: PVE peers off → `truenas_shutdown(delay_s≈300, expected_clients=["172.16.0.101"])` → entry PVE node last (the NAS is only reachable through its router guest). Drive the PVE side with `pve_shutdown_cluster` (stops at `ready_for_nas`, whose `next_steps` names this call); runbook: `docs/TIPSNTRICKS.md` → "Full-lab shutdown / startup via MCP".
 
 Envelope: `{ok, data, warnings, meta}` — report `ok`, counts, names, pool/NFS warnings; skip raw permission dumps.
 
@@ -102,7 +103,6 @@ Lab NFS/pool mismatch shows as **warnings** on `truenas_list_nfs_shares` / summa
 - **WebSocket JSON-RPC only.** No SSH, no `midclt`, no TrueNAS UI automation via this MCP.
 - **Not in MCP** — use TrueNAS WebUI / [TIPSNTRICKS.md](../../../docs/TIPSNTRICKS.md) / `deploy/setup/misc/cluster/`:
   - NIC / IP / gateway / `interface.update` + commit/checkin
-  - `system.reboot` / `system.shutdown`
   - App catalog install/upgrade (Scrutiny/Tailscale apps)
   - SMB shares, snapshot tasks (backlog)
   - QDevice host (must **not** be this NAS)
@@ -119,10 +119,10 @@ MCP tools missing this session:
 1. Read `"${CURSOR_HOME:-"${HOME}/.cursor}"}/mcp.json` → `mcpServers.truenas.env`.
 2. Export those `TRUENAS_*` keys into the process (do not print the secret).
 3. From repo root, call package impls (`truenas_get_system_info_impl`, `truenas_check_api_key_impl`, `truenas_system_summary_impl`) with `sys.path` = `mcp/truenas-mcp/src`, or `poetry run` equivalent (`truenas-mcp-smoke`).
-4. WebUI / SSH only for work that is not in the tool catalog (network, reboot, catalog).
+4. WebUI / SSH only for work that is not in the tool catalog (network, catalog).
 
 ## Docs (read on demand)
 
 - API key: [API_KEY_SETUP.md](../../../mcp/truenas-mcp/docs/API_KEY_SETUP.md)
 - Smoke catalog: [SMOKE_TESTS.md](../../../mcp/truenas-mcp/docs/SMOKE_TESTS.md)
-- Traceability: [REQUIREMENTS.md](../../../mcp/truenas-mcp/docs/REQUIREMENTS.md) (FR-900–FR-906: no catalog install, no NAS VMs, no reboot, no QDevice on TrueNAS)
+- Traceability: [REQUIREMENTS.md](../../../mcp/truenas-mcp/docs/REQUIREMENTS.md) (FR-900–FR-906: no catalog install, no NAS VMs, no QDevice on TrueNAS; FR-902 reboot/shutdown reversed)

@@ -13,17 +13,25 @@ from truenas_mcp.tools.response import ok_response, write_tool_handler
 from truenas_mcp.tools.schemas import PowerInput
 from truenas_mcp.tools.sharing import collect_nfs_clients
 
-BLOCKING_JOB_KEYWORDS = ("scrub", "replication", "resilver", "update")
+BLOCKING_JOB_PREFIXES = (
+    "pool.scrub",
+    "zfs.pool.scrub",
+    "pool.replace",
+    "pool.resilver",
+    "replication.",
+    "zettarepl.",
+    "update.",
+)
 _SIGNATURE_ERROR_HINTS = ("argument", "parameter", "positional", "too many")
 
 
 async def _blocking_jobs(client: Any) -> list[dict[str, Any]]:
-    """Running middleware jobs that must not be interrupted (scrub, replication, update)."""
+    """Running middleware jobs that must not be interrupted (scrub, resilver, replication, OS update)."""
     jobs = normalize_list(await client.call("core.get_jobs", [[["state", "=", "RUNNING"]]]))
     return [
         {"id": job.get("id"), "method": job.get("method"), "progress": (job.get("progress") or {}).get("percent")}
         for job in jobs
-        if any(key in str(job.get("method", "")).lower() for key in BLOCKING_JOB_KEYWORDS)
+        if str(job.get("method", "")).lower().startswith(BLOCKING_JOB_PREFIXES)
     ]
 
 
@@ -36,6 +44,36 @@ async def _submit(client: Any, method: str, reason: str, delay_s: int, warnings:
             raise
     warnings.append(f"{method} rejected the reason argument (pre-24.10 SCALE); retried without it.")
     return await client.call(method, [{"delay": delay_s}])
+
+
+async def _verify_submitted(client: Any, method: str, delay_s: int, warnings: list[str]) -> tuple[Any, bool]:
+    """After a dropped connection, reconnect and look for the pending power job.
+
+    Returns ``(job_id, verified)``. Raises when the NAS answers without the job and
+    ``delay_s > 0`` (nothing was scheduled, so a retry is safe).
+    """
+    try:
+        jobs = normalize_list(
+            await client.call("core.get_jobs", [[["method", "=", method], ["state", "in", ["RUNNING", "WAITING"]]]])
+        )
+    except TnasApiError as exc:
+        warnings.append(
+            f"Connection dropped during {method} and the NAS is unreachable ({exc.code}); "
+            + "expected when delay_s=0, otherwise confirm it is down or shutting down."
+        )
+        return None, False
+    if jobs:
+        warnings.append(f"Connection dropped during {method}; reconnected and found the pending job.")
+        return jobs[0].get("id"), True
+    if delay_s > 0:
+        raise TnasApiError(
+            f"{method} was not scheduled: the connection dropped and no pending {method} job exists.",
+            code="POWER_NOT_SUBMITTED",
+            method=method,
+            hint="Nothing is pending on the NAS; it is safe to retry the call.",
+        )
+    warnings.append(f"Connection dropped during {method}; no pending job visible, verify the NAS is going down.")
+    return None, False
 
 
 async def _power(  # noqa: C901
@@ -66,6 +104,10 @@ async def _power(  # noqa: C901
         unexpected = sorted(set(nfs["active_ips"]) - set(parsed.expected_clients))
     except Exception as exc:
         refusals.append(f"Could not verify NFS clients ({exc}).")
+    if nfs.get("source_errors"):
+        refusals.append(f"NFS client list is incomplete ({'; '.join(nfs['source_errors'])}).")
+    if nfs.get("unidentified_active"):
+        refusals.append(f"{nfs['unidentified_active']} active NFS client(s) have no parsable address.")
     if unexpected:
         refusals.append(
             f"Active NFS clients not in expected_clients: {unexpected}; guests on NFS disks hang if the NAS "
@@ -104,6 +146,7 @@ async def _power(  # noqa: C901
         )
 
     connection_dropped = False
+    verified = True
     job_id: Any = None
     try:
         job_id = await _submit(client, method, parsed.reason, parsed.delay_s, warnings)
@@ -111,12 +154,13 @@ async def _power(  # noqa: C901
         if exc.code != "CONNECTION_ERROR":
             raise
         connection_dropped = True
-        warnings.append(f"Connection dropped during {method} (expected when delay_s=0); verify the NAS is down.")
+        job_id, verified = await _verify_submitted(client, method, parsed.delay_s, warnings)
 
     warnings.append("The MCP connection to TrueNAS will drop; later calls fail until the NAS is back.")
     plan.update(
         {
             "submitted": True,
+            "verified": verified,
             "job_id": job_id if isinstance(job_id, int) else None,
             "connection_dropped": connection_dropped,
             "power_off_at": (datetime.now(UTC) + timedelta(seconds=parsed.delay_s)).isoformat(timespec="seconds"),

@@ -156,15 +156,15 @@ Workstation (Cursor / deploy scripts)
 
 ### 4.7 Out of scope (v1)
 
-| ID     | Requirement                         | Rationale                        | Status                                                             |
-| ------ | ----------------------------------- | -------------------------------- | ------------------------------------------------------------------ |
-| FR-900 | App catalog install/upgrade         | Destructive; official MCP covers | **N/A**                                                            |
-| FR-901 | VM management                       | Out of lab MCP scope             | **N/A**                                                            |
+| ID     | Requirement                         | Rationale                                                      | Status                                                                 |
+| ------ | ----------------------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| FR-900 | App catalog install/upgrade         | Destructive; official MCP covers                               | **N/A**                                                                |
+| FR-901 | VM management                       | Out of lab MCP scope                                           | **N/A**                                                                |
 | FR-902 | `system.reboot` / `system.shutdown` | Reversed (2026-09): NAS could not be powered off on 2026-09-25 | **Met** — `truenas_shutdown` / `truenas_reboot` (destructive, guarded) |
-| FR-903 | Dataset/share mutations             | Data integrity                   | **Met** — v2 gated writes (`confirm=true`)                         |
-| FR-904 | Real-time event subscriptions       | Complexity                       | **N/A** — won't                                                    |
-| FR-905 | Scrutiny / Uptime Kuma app health   | No stable middleware API         | **Partial** — Scrutiny via `app.query`; Uptime Kuma on PVE cluster |
-| FR-906 | QDevice host operations             | Separate host, not TrueNAS       | **N/A**                                                            |
+| FR-903 | Dataset/share mutations             | Data integrity                                                 | **Met** — v2 gated writes (`confirm=true`)                             |
+| FR-904 | Real-time event subscriptions       | Complexity                                                     | **N/A** — won't                                                        |
+| FR-905 | Scrutiny / Uptime Kuma app health   | No stable middleware API                                       | **Partial** — Scrutiny via `app.query`; Uptime Kuma on PVE cluster     |
+| FR-906 | QDevice host operations             | Separate host, not TrueNAS                                     | **N/A**                                                                |
 
 Documented in `BASH_ONLY_WORKFLOWS` (`constants.py`).
 
@@ -245,10 +245,10 @@ Documented in `BASH_ONLY_WORKFLOWS` (`constants.py`).
 
 #### Destructive power tools (FR-902)
 
-| Tool               | Class       | Method            | Safety gate                                                                                           |
-| ------------------ | ----------- | ----------------- | ----------------------------------------------------------------------------------------------------- |
-| `truenas_shutdown` | destructive | `system.shutdown` | `confirm` + `reason`; refuses on NFS clients outside `expected_clients` or running scrub/replication/update (`force` overrides); `delay_s`; `plan_only` |
-| `truenas_reboot`   | destructive | `system.reboot`   | Same guards as `truenas_shutdown`                                                                     |
+| Tool               | Class       | Method            | Safety gate                                                                                                                                                                                                                                                         |
+| ------------------ | ----------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `truenas_shutdown` | destructive | `system.shutdown` | `confirm` + `reason`; refuses on NFS clients outside `expected_clients` or running scrub/resilver/replication/OS update (`force` overrides); `delay_s`; `plan_only`; dropped connection → reconnect and confirm the pending job (`verified`, `POWER_NOT_SUBMITTED`) |
+| `truenas_reboot`   | destructive | `system.reboot`   | Same guards as `truenas_shutdown`                                                                                                                                                                                                                                   |
 
 ---
 

@@ -10,7 +10,7 @@ Implementation plan for the backlog in [TODO.md](./TODO.md), checked against [AR
 | LAN router                 | pfSense will be replaced by **OpenWrt**. Nothing may hard-code "pfSense" or VMID 100; use `PVE_LAB_INFRA_VMIDS` (default `100`). The router guest stays on `local-lvm` on the entry node (never on NFS / HA: circular dependency with the NAS). |
 | HA during shutdown         | `ha.shutdown_policy=freeze` is **required**. Set by `papita-cluster-quorum-ha.sh` (`HA_SHUTDOWN_POLICY`); PVE power tools refuse to run if it is not `freeze`.                                                                                  |
 | Ceph                       | Not used. `pve_set_ceph_noout` is dropped (Won't); no FR-903 exception; no `PveClient.put()` needed for now.                                                                                                                                    |
-| Cold start                 | QDevice host `172.16.0.99` (always on) sends WoL to TrueNAS, then `pve-001`.                                                                                                                                                                    |
+| Cold start                 | QDevice host `172.16.0.99` (always on) sends WoL to TrueNAS, then `pve-001`, then the peers.                                                                                                                                                    |
 | Cross-server orchestration | Agent-driven runbook (skills + TIPSNTRICKS). `pve_shutdown_cluster` returns `next_steps` naming the TrueNAS call; MCP servers never call each other.                                                                                            |
 
 ## Shutdown sequence
@@ -27,7 +27,7 @@ Tune `delay_s` from measured entry-node shutdown time: if the entry node is stil
 
 ## Startup sequence
 
-1. **Cold start:** `./deploy/proxmox.sh wake-lab --ip-address 172.16.0.99` → SSH to QDevice host → WoL TrueNAS, wait for NFS (`:2049`), then WoL `pve-001`.
+1. **Cold start:** `./deploy/proxmox.sh wake-lab --ip-address 172.16.0.99` → SSH to QDevice host → WoL TrueNAS, wait for NFS (`:2049`), then WoL `pve-001` and the peers (`pve-001` alone has no quorum, so its guests wait for the peers).
 2. **Automatic:** `post-startup-proc` on `pve-001` waits for quorum and wakes peers.
 3. **MCP:** `pve_wait_nodes_state(online)` → `pve_wake_on_lan(nodes=all_offline)` for stragglers → `pve_cluster_health` quorate.
 4. **MCP (after router guest is up):** `truenas_run_smoke_tests`, `truenas_list_nfs_clients` shows all four nodes.
@@ -69,17 +69,19 @@ Tune `delay_s` from measured entry-node shutdown time: if the entry node is stil
 
 ### Phase 2 — single-target writes
 
-- [ ] `pve_shutdown_node` (entry-node guard, quorum-impact warning, freeze gate, `plan_only`).
-- [ ] `pve_stop_guest`.
-- [ ] `pve_wake_on_lan` (+ missing-MAC hint).
-- [ ] `truenas_shutdown` / `truenas_reboot` (reachability check, `expected_clients`, `delay_s`, `reason`; socket drop = ok).
-- [ ] `deploy/proxmox.sh wake-lab` (QDevice-host WoL; MACs in `deploy/setup/misc/cluster/default.wol.macs`).
-- [ ] REQUIREMENTS: reverse TrueNAS FR-902, correct PVE FR-904 / OQ-2.
+- [x] `pve_shutdown_node` (entry-node guard, quorum-impact warning, freeze gate, `plan_only`).
+- [x] `pve_stop_guest`.
+- [x] `pve_wake_on_lan` (+ missing-MAC hint).
+- [x] `truenas_shutdown` / `truenas_reboot` (NFS-client + running-job guards, `expected_clients`, `delay_s`, `reason`, `plan_only`; socket drop = ok).
+- [x] `deploy/proxmox.sh wake-lab` (QDevice-host WoL; MACs in `deploy/setup/misc/cluster/default.wol.macs`; `wakeonlan` added to `qdevice-server-bootstrap.sh`).
+- [x] REQUIREMENTS: reverse TrueNAS FR-902, correct PVE FR-904 / OQ-2.
+- [x] Privileges: `MCPAgentPower` (`Sys.PowerMgmt`) in `PVE_TOKEN_SETUP.md`; TrueNAS key role in `API_KEY_SETUP.md`; smoke `node_power_permissions`.
+- [ ] Live: fill real MACs in `default.wol.macs`; grant power roles; staged validation (hard-stop disposable guest → reboot `pve-004` → peer shutdown + `pve_wake_on_lan` → `truenas_reboot` with PVE off).
 
 ### Phase 3 — orchestration
 
-- [ ] `pve_shutdown_cluster` (`keep_running_vmids` from `PVE_LAB_INFRA_VMIDS`, `plan_only`, `continue_on_error`, `next_steps`).
-- [ ] Runbook in both skill copies (`.cursor/skills/*-mcp/` and `~/.cursor/skills/*-mcp/`) and TIPSNTRICKS.
+- [x] `pve_shutdown_cluster` (`keep_running_vmids` from `PVE_LAB_INFRA_VMIDS`, `plan_only`, `continue_on_error`, `next_steps`); resumable stage machine, ≤120 s per call, in-flight tasks reused on re-call.
+- [x] Runbook in both skill copies (`.cursor/skills/*-mcp/` and `~/.cursor/skills/*-mcp/`) and TIPSNTRICKS ("Full-lab shutdown / startup via MCP").
 - [ ] Done when the 2026-09-25 shutdown is reproduced from Cursor with no SSH.
 
 ### Phase 4 — backlog

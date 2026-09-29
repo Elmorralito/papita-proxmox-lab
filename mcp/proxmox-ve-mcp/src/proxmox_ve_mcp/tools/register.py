@@ -15,6 +15,7 @@ from proxmox_ve_mcp.tools.cluster import (
     pve_list_resources_impl,
     pve_list_tasks_impl,
 )
+from proxmox_ve_mcp.tools.cluster_power import pve_shutdown_cluster_impl
 from proxmox_ve_mcp.tools.diagnostics import pve_check_token_impl, pve_list_node_addresses_impl
 from proxmox_ve_mcp.tools.guests import (
     pve_get_guest_config_impl,
@@ -297,6 +298,39 @@ def register_tools(mcp: FastMCP) -> None:  # noqa: C901
             command=command,
             allow_entry_host=allow_entry_host,
             plan_only=plan_only,
+        )
+
+    @mcp.tool(name="pve_shutdown_cluster")
+    @_track("pve_shutdown_cluster", ToolClass.DESTRUCTIVE)
+    async def pve_shutdown_cluster(  # pylint: disable=too-many-arguments
+        reason: str,
+        confirm: bool = False,
+        plan_only: bool = False,
+        include_entry_node: bool = False,
+        keep_running_vmids: list[int] | None = None,
+        guest_timeout_s: int = 120,
+        continue_on_error: bool = False,
+        wait_for_completion: bool = True,
+        timeout_s: float = 120.0,
+    ) -> str:
+        """DESTRUCTIVE: ordered full-cluster shutdown; resumable, ≤timeout_s (120) per call.
+
+        Stages: stop guests (peers via stopall; entry node per guest except keep_running_vmids,
+        default PVE_LAB_INFRA_VMIDS) → shut down peers while quorate → ready_for_nas (run the
+        delayed truenas_shutdown from next_steps) → entry node when include_entry_node=true.
+        Re-call with the same args while done=false. Refuses unless ha.shutdown_policy=freeze.
+        plan_only=true projects every stage without confirm.
+        """
+        return await pve_shutdown_cluster_impl(
+            reason=reason,
+            confirm=confirm,
+            plan_only=plan_only,
+            include_entry_node=include_entry_node,
+            keep_running_vmids=keep_running_vmids,
+            guest_timeout_s=guest_timeout_s,
+            continue_on_error=continue_on_error,
+            wait_for_completion=wait_for_completion,
+            timeout_s=timeout_s,
         )
 
     @mcp.tool(name="pve_wake_on_lan")

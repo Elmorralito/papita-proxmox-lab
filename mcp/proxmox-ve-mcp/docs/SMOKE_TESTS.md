@@ -49,22 +49,23 @@ Exit code `0` = all required tests for the selected mode passed; `1` = one or mo
 
 ### Tier 3 — Read extended (`extended=true`)
 
-| ID                     | Checks                        | Privilege                      | Pass criteria                        |
-| ---------------------- | ----------------------------- | ------------------------------ | ------------------------------------ |
-| `cluster_config_nodes` | Corosync `ring0_addr`         | `Sys.Audit` on `/`             | Config nodes returned                |
-| `node_network_detail`  | Interface CIDR on sample node | `Sys.Audit` on `/nodes/{node}` | At least one address                 |
-| `node_status`          | CPU / memory / uptime         | `Sys.Audit` on `/nodes/{node}` | Status payload returned              |
-| `guest_inventory`      | VM + CT list                  | `VM.Audit` on `/`              | Guest list returned                  |
-| `storage_list`         | Storage definitions           | `Sys.Audit` on `/`             | Storage list returned                |
-| `cluster_quorum`       | `quorate` from cluster status | `Sys.Audit` on `/`             | Quorate (fail if not)                |
-| `ha_shutdown_policy`   | `ha.shutdown_policy`          | `Sys.Audit` on `/`             | `freeze` (warn otherwise)            |
-| `ceph_status`          | Ceph health (optional)        | Ceph present                   | Pass, skip if Ceph N/A, warn on deny |
+| ID                     | Checks                        | Privilege                      | Pass criteria                                                                                |
+| ---------------------- | ----------------------------- | ------------------------------ | -------------------------------------------------------------------------------------------- |
+| `cluster_config_nodes` | Corosync `ring0_addr`         | `Sys.Audit` on `/`             | Config nodes returned                                                                        |
+| `node_network_detail`  | Interface CIDR on sample node | `Sys.Audit` on `/nodes/{node}` | At least one address                                                                         |
+| `node_status`          | CPU / memory / uptime         | `Sys.Audit` on `/nodes/{node}` | Status payload returned                                                                      |
+| `guest_inventory`      | VM + CT list                  | `VM.Audit` on `/`              | Guest list returned                                                                          |
+| `storage_list`         | Storage definitions           | `Sys.Audit` on `/`             | Storage list returned                                                                        |
+| `cluster_quorum`       | `quorate` from cluster status | `Sys.Audit` on `/`             | Quorate (fail if not)                                                                        |
+| `ha_shutdown_policy`   | `ha.shutdown_policy`          | `Sys.Audit` on `/`             | `freeze` (warn otherwise)                                                                    |
+| `ha_fence_readiness`   | `/cluster/ha/status/current`  | `Sys.Audit` on `/`             | Entry node has no HA resources / active LRM (warn otherwise; `pve_shutdown_cluster` refuses) |
+| `ceph_status`          | Ceph health (optional)        | Ceph present                   | Pass, skip if Ceph N/A, warn on deny                                                         |
 
 ### Tier 4 — Write capability (informational, `extended=true`)
 
-| ID                  | Checks                                   | Meaning                                                           |
-| ------------------- | ---------------------------------------- | ----------------------------------------------------------------- |
-| `write_permissions` | `/access/permissions` for `VM.PowerMgmt` | Reports whether write tools _may_ work (does not mutate anything) |
+| ID                       | Checks                                    | Meaning                                                              |
+| ------------------------ | ----------------------------------------- | -------------------------------------------------------------------- |
+| `write_permissions`      | `/access/permissions` for `VM.PowerMgmt`  | Reports whether write tools _may_ work (does not mutate anything)    |
 | `node_power_permissions` | `/access/permissions` for `Sys.PowerMgmt` | Whether `pve_shutdown_node` / `pve_wake_on_lan` may work (warn only) |
 
 ## Access levels
@@ -89,6 +90,7 @@ The smoke test runner assigns one label based on results:
 | `cluster_config_nodes` / `node_network_detail` | Assign `Sys.Audit` to the **API token** at `/` — see [PVE_TOKEN_SETUP.md](./PVE_TOKEN_SETUP.md) |
 | `guest_inventory`                              | Assign `VM.Audit` to the token at `/`                                                           |
 | `write_permissions`                            | Expected for read-only tokens; add `VM.PowerMgmt` only if write tools are needed                |
+| `node_power_permissions`                       | Add `Sys.PowerMgmt` (role `MCPAgentPower`) only if node power tools are needed                  |
 
 For a quick permission matrix without the full suite, call **`pve_check_token`**.
 

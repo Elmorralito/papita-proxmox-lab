@@ -5,11 +5,13 @@ import pytest
 import respx
 
 from proxmox_ve_mcp.config import PveSettings
-from proxmox_ve_mcp.context import init_context
+from proxmox_ve_mcp.context import get_client, init_context
 from proxmox_ve_mcp.tools.smoke_test import (
+    SMOKE_TEST_CATALOG,
     AccessLevel,
-    run_smoke_tests,
+    _run_single_test,
     pve_run_smoke_tests_impl,
+    run_smoke_tests,
 )
 
 
@@ -90,6 +92,9 @@ async def test_smoke_tests_extended_full_access(init_pve) -> None:
     respx.get("https://pve.local:8006/api2/json/cluster/options").mock(
         return_value=httpx.Response(200, json={"data": {"ha": "shutdown_policy=conditional"}})
     )
+    respx.get("https://pve.local:8006/api2/json/cluster/ha/status/current").mock(
+        return_value=httpx.Response(200, json={"data": [{"type": "quorum", "quorate": "1"}]})
+    )
 
     report = await run_smoke_tests(extended=True)
     assert report["summary"]["failed"] == 0
@@ -99,6 +104,22 @@ async def test_smoke_tests_extended_full_access(init_pve) -> None:
     assert "ceph_status" in by_id
     assert by_id["cluster_quorum"]["status"] == "pass"
     assert by_id["ha_shutdown_policy"]["status"] == "warn"
+    assert by_id["ha_fence_readiness"]["status"] == "pass"
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_ha_fence_readiness_warns_for_active_entry_lrm(init_pve) -> None:
+    respx.get("https://pve.local:8006/api2/json/cluster/ha/status/current").mock(
+        return_value=httpx.Response(200, json={"data": [{"type": "lrm", "node": "pvenode-001", "status": "active"}]})
+    )
+    respx.get("https://pve.local:8006/api2/json/cluster/status").mock(
+        return_value=httpx.Response(200, json={"data": [{"type": "node", "name": "pvenode-001", "local": 1}]})
+    )
+    spec = next(s for s in SMOKE_TEST_CATALOG if s.test_id == "ha_fence_readiness")
+    result = await _run_single_test(spec, get_client(), {})
+    assert result.status == "warn"
+    assert "pvenode-001" in (result.detail or "")
 
 
 @respx.mock

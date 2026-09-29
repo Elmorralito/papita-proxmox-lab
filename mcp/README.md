@@ -29,19 +29,19 @@ Reload **Cursor** after install. In Settings → MCP, confirm servers are green.
 
 Python packages always land in the **repo Poetry venv** (`poetry run …` with `cwd` = repo root). `--scope` chooses which Cursor config file(s) get `command` / `args` / `cwd` merges (existing `env` secrets are preserved) and whether agent skills are copied to the user skills directory:
 
-| Scope | Cursor config | Skills |
-| ----- | ------------- | ------ |
-| `user` | `~/.cursor/mcp.json` | Copy → `~/.cursor/skills/` |
-| `project` | `.cursor/mcp.json` | Use in-repo `.cursor/skills/` only |
-| `both` (default for install/update) | user + project | project source + user copies |
+| Scope                               | Cursor config        | Skills                             |
+| ----------------------------------- | -------------------- | ---------------------------------- |
+| `user`                              | `~/.cursor/mcp.json` | Copy → `~/.cursor/skills/`         |
+| `project`                           | `.cursor/mcp.json`   | Use in-repo `.cursor/skills/` only |
+| `both` (default for install/update) | user + project       | project source + user copies       |
 
 Bundled skills (teach agents when to invoke MCPs):
 
-| Skill | Role |
-| ----- | ---- |
+| Skill                    | Role                      |
+| ------------------------ | ------------------------- |
 | `papita-proxmox-lab-map` | Repo map / file inventory |
-| `proxmox-ve-mcp` | Invoke `proxmox-ve` MCP |
-| `truenas-mcp` | Invoke `truenas` MCP |
+| `proxmox-ve-mcp`         | Invoke `proxmox-ve` MCP   |
+| `truenas-mcp`            | Invoke `truenas` MCP      |
 
 ```bash
 ./deploy/mcp.sh install --scope user
@@ -56,14 +56,14 @@ Bundled skills (teach agents when to invoke MCPs):
 
 ## `deploy/mcp.sh` actions
 
-| Action        | What it does                                                                                            |
-| ------------- | ------------------------------------------------------------------------------------------------------- |
-| `list`        | Show packages under `mcp/`, Cursor server names, and bundled skills                         |
+| Action        | What it does                                                                                           |
+| ------------- | ------------------------------------------------------------------------------------------------------ |
+| `list`        | Show packages under `mcp/`, Cursor server names, and bundled skills                                    |
 | `install`     | `poetry lock` + `poetry install --with test`; `pip install -e` each MCP; sync mcp.json; install skills |
-| `update`      | Same reinstall as install, then refresh mcp.json + skills for `--scope` (run after `git pull`) |
-| `test`        | `pytest` for MCP test suites                                                                            |
-| `smoke`       | Run post-install smoke tests (loads creds from `~/.cursor/mcp.json`)                                    |
-| `cursor-sync` | Merge each `mcp/*/mcp.json.example` into Cursor MCP configs (preserves existing `env` secrets)          |
+| `update`      | Same reinstall as install, then refresh mcp.json + skills for `--scope` (run after `git pull`)         |
+| `test`        | `pytest` for MCP test suites                                                                           |
+| `smoke`       | Run post-install smoke tests (loads creds from `~/.cursor/mcp.json`)                                   |
+| `cursor-sync` | Merge each `mcp/*/mcp.json.example` into Cursor MCP configs (preserves existing `env` secrets)         |
 | `skills-sync` | Install/refresh `.cursor/skills/{papita-proxmox-lab-map,proxmox-ve-mcp,truenas-mcp}` for `--scope`     |
 
 **Auto-sync (recommended once per clone):**
@@ -79,10 +79,10 @@ This installs:
 
 Both run `./deploy/mcp.sh cursor-sync --all-targets --if-changed --enable-agent` (`--all-targets` ≡ `--scope both`), which updates:
 
-| Target | Used by |
-| ------ | ------- |
-| `~/.cursor/mcp.json` | cursor-agent CLI, Cursor IDE (user-level) |
-| `.cursor/mcp.json` | cursor-agent when `--workspace` is this repo (project-level) |
+| Target               | Used by                                                      |
+| -------------------- | ------------------------------------------------------------ |
+| `~/.cursor/mcp.json` | cursor-agent CLI, Cursor IDE (user-level)                    |
+| `.cursor/mcp.json`   | cursor-agent when `--workspace` is this repo (project-level) |
 
 The first project sync seeds `.cursor/mcp.json` from your user config so secrets carry over. Edit API tokens once in `~/.cursor/mcp.json`; later syncs preserve them.
 
@@ -129,7 +129,7 @@ cp mcp/proxmox-ve-mcp/mcp.json.example ~/.cursor/mcp.json
 
 ```bash
 ./deploy/mcp.sh smoke              # basic (6 checks)
-./deploy/mcp.sh smoke --extended   # full (13 checks)
+./deploy/mcp.sh smoke --extended   # full (17 checks)
 ```
 
 Or directly (with `PVE_*` exported):

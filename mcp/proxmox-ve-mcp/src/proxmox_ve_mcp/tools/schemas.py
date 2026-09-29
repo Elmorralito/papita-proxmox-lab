@@ -226,6 +226,30 @@ class ShutdownNodeInput(BaseModel):
         return validate_node_name(value)
 
 
+class ShutdownClusterInput(BaseModel):
+    """Ordered full-cluster shutdown request.
+
+    Attributes:
+        reason: Operator reason recorded in the audit log.
+        keep_running_vmids: Guests left running on the entry node; ``None`` uses ``PVE_LAB_INFRA_VMIDS``.
+        guest_timeout_s: Per-guest shutdown timeout passed to ``stopall`` / guest shutdown.
+        timeout_s: Seconds this call may spend waiting before returning ``in_progress``.
+    """
+
+    reason: str = Field(min_length=3, max_length=200)
+    keep_running_vmids: list[int] | None = Field(default=None, description="VMIDs kept running on the entry node")
+    guest_timeout_s: int = Field(default=120, ge=10, le=600)
+    timeout_s: float = Field(default=MAX_WAIT_CALL_SEC, ge=1.0, le=MAX_WAIT_CALL_SEC)
+
+    @field_validator("keep_running_vmids")
+    @classmethod
+    def check_vmids(cls, value: list[int] | None) -> list[int] | None:
+        """Require guest VMIDs (>= 100)."""
+        if value is not None and any(vmid < 100 for vmid in value):
+            raise ValueError("keep_running_vmids entries must be VMIDs >= 100")
+        return value
+
+
 class WakeOnLanInput(BaseModel):
     """Wake-on-LAN targets: explicit node names or every offline member.
 

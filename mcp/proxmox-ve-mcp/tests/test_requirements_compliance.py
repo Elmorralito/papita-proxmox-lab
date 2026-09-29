@@ -35,10 +35,11 @@ REQUIRED_V1_TOOLS: dict[str, ToolClass] = {
     "pve_wake_on_lan": ToolClass.WRITE,
     "pve_stop_guest": ToolClass.DESTRUCTIVE,
     "pve_shutdown_node": ToolClass.DESTRUCTIVE,
+    "pve_shutdown_cluster": ToolClass.DESTRUCTIVE,
 }
 
 # FR-903 exceptions: only these power tools may be destructive (docs/MCP_POWER_PLAN.md).
-APPROVED_DESTRUCTIVE_TOOLS = {"pve_stop_guest", "pve_shutdown_node"}
+APPROVED_DESTRUCTIVE_TOOLS = {"pve_stop_guest", "pve_shutdown_node", "pve_shutdown_cluster"}
 
 
 @pytest.fixture(scope="module", autouse=True)

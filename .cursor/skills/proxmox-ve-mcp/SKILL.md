@@ -5,14 +5,14 @@ description: >-
   REST on :8006. Loads creds from
   "${CURSOR_HOME:-${HOME}/.cursor}/mcp.json"
   (mcpServers.proxmox-ve.env). Use when listing cluster nodes, guests, storage,
-  Ceph read, token/smoke checks, or gated guest start/shutdown/stopall. Do not
-  use for pvecm, WoL, sensors, node bootstrap, Ceph mutations, or node
-  decommission.
+  Ceph read, token/smoke checks, gated guest start/shutdown/stopall, or guarded
+  node power (shutdown/reboot, WoL, hard stop). Do not use for pvecm, sensors,
+  node bootstrap, Ceph mutations, or node decommission.
 ---
 
 # proxmox-ve MCP
 
-Package: `mcp/proxmox-ve-mcp` · Cursor server name: **`proxmox-ve`** · 24 tools (21 read, 3 write). Spec: [README](../../../mcp/proxmox-ve-mcp/README.md). Do not paste the README into context.
+Package: `mcp/proxmox-ve-mcp` · Cursor server name: **`proxmox-ve`** · 28 tools (21 read, 4 write, 3 destructive). Spec: [README](../../../mcp/proxmox-ve-mcp/README.md). Do not paste the README into context.
 
 Token design: call **1–3 tools**, summarize, never dump envelopes. Unload unused MCP servers; this skill does not load pfSense/TrueNAS.
 
@@ -66,37 +66,51 @@ Usage:
 
 ## Pick tools (do not list all)
 
-| Need         | Tool                                                                            |
-| ------------ | ------------------------------------------------------------------------------- |
-| Alive / TLS  | `pve_get_version`                                                               |
-| 403 / ACL    | `pve_check_token`                                                               |
-| Post-install | `pve_run_smoke_tests` (`extended=true` only if basic pass and Sys.Audit needed) |
-| Members      | `pve_list_nodes`                                                                |
-| ring0 / IPs  | `pve_get_cluster_config_nodes` or `pve_list_node_addresses`                     |
-| Quorum       | `pve_cluster_health` (`quorate`, `entry_node`, QDevice)                         |
-| HA / freeze  | `pve_get_ha_status` (`shutdown_policy` must be `freeze`)                        |
-| Wait         | `pve_wait_for_task` (UPID) / `pve_wait_nodes_state` (online/offline), ≤120 s    |
-| VMs/CTs      | `pve_list_guests` (`node` optional)                                             |
-| One guest    | `pve_get_guest_status` / `pve_get_guest_config` (`guest_type`: `qemu`\|`lxc`)   |
-| Storage      | `pve_list_storage`                                                              |
-| Ceph read    | `pve_get_ceph_status` / `pve_list_ceph_osds`                                    |
-| Power        | `pve_start_guest` / `pve_shutdown_guest` / `pve_stopall_guests`                 |
+| Need         | Tool                                                                              |
+| ------------ | --------------------------------------------------------------------------------- |
+| Alive / TLS  | `pve_get_version`                                                                 |
+| 403 / ACL    | `pve_check_token`                                                                 |
+| Post-install | `pve_run_smoke_tests` (`extended=true` only if basic pass and Sys.Audit needed)   |
+| Members      | `pve_list_nodes`                                                                  |
+| ring0 / IPs  | `pve_get_cluster_config_nodes` or `pve_list_node_addresses`                       |
+| Quorum       | `pve_cluster_health` (`quorate`, `entry_node`, QDevice)                           |
+| HA / freeze  | `pve_get_ha_status` (`shutdown_policy` must be `freeze`)                          |
+| Wait         | `pve_wait_for_task` (UPID) / `pve_wait_nodes_state` (online/offline), ≤120 s      |
+| VMs/CTs      | `pve_list_guests` (`node` optional)                                               |
+| One guest    | `pve_get_guest_status` / `pve_get_guest_config` (`guest_type`: `qemu`\|`lxc`)     |
+| Storage      | `pve_list_storage`                                                                |
+| Ceph read    | `pve_get_ceph_status` / `pve_list_ceph_osds`                                      |
+| Power        | `pve_start_guest` / `pve_shutdown_guest` / `pve_stopall_guests`                   |
+| Hung guest   | `pve_stop_guest` (**destructive**, `reason`, `overrule_shutdown`)                 |
+| Node power   | `pve_shutdown_node` (**destructive**; `plan_only=true` first) / `pve_wake_on_lan` |
+| Full lab off | `pve_shutdown_cluster` (**destructive**; runbook below)                           |
 
-Writes: **`confirm=true` required**. Optional `wait_for_completion=true` (UPID poll). No destructive tools in v1.
+Writes: **`confirm=true` required**. Optional `wait_for_completion=true` (UPID poll). Destructive tools also need a `reason`; never auto-run them. Run `pve_shutdown_node(plan_only=true)` and show refusals/warnings before the real call. Entry node goes **last** (`allow_entry_host=true`), after the delayed `truenas_shutdown` — see `docs/MCP_POWER_PLAN.md`.
 
 `pve_list_resources` `type` at API: `vm` \| `storage` \| `node` \| `sdn` (not `haresource`; use `pve_get_ha_status`). Prefer `pve_list_guests` for qemu/lxc.
 
 Envelope: `{ok, data, warnings, meta}` — report `ok`, counts, names; skip permission dumps.
+
+## Full-lab shutdown runbook (with the `truenas` MCP)
+
+1. `pve_cluster_health` (quorate) → `pve_get_ha_status` (`shutdown_policy_ok`) → `truenas_list_nfs_clients`.
+2. `pve_shutdown_cluster(reason, plan_only=true)` → show stages/warnings; get the user's go-ahead.
+3. `pve_shutdown_cluster(reason, confirm=true)`; re-call with the same args while `done=false` → `stage=ready_for_nas`. It refuses if the entry node would self-fence (HA resources or an active LRM there), and leaves HA-managed guests to the `freeze` node shutdown.
+4. `truenas_shutdown(reason, delay_s=300, expected_clients=[entry IP], confirm=true)` (copy from `next_steps`).
+5. `pve_shutdown_cluster(reason, include_entry_node=true, confirm=true)` → `entry_shutdown_submitted` (API loss = success).
+6. Startup is Bash: `./deploy/proxmox.sh wake-lab --ip-address 172.16.0.99`, then `pve_wake_on_lan(all_offline=true)` for stragglers.
+
+Full runbook: `docs/TIPSNTRICKS.md` → "Full-lab shutdown / startup via MCP".
 
 ## Caveats (v1)
 
 - **REST only.** No SSH, no `pvesh`/`pvecm`/`pvenode`/`ceph` CLI via MCP.
 - **Not in MCP** — use Bash / [TIPSNTRICKS.md](../../../docs/TIPSNTRICKS.md) / `deploy/proxmox.sh`:
   - `pvecm add`/`delnode`, corosync edits, `/etc/hosts`
-  - WoL / `start-cluster`, node shutdown / `stop-cluster`
+  - Cold start with the lab fully off (`deploy/proxmox.sh wake-lab` via the QDevice host)
   - `setup-node`, `get-temp` (sensors)
   - Ceph `noout`, OSD start/destroy
-  - migrate, hard stop, HA group CRUD
+  - migrate, HA group CRUD
 - `pve_cluster_health` returns true `quorate` (from `/cluster/status`), `entry_node` (node answering the API), and best-effort `qdevice` status. Per-vote detail still needs SSH `pvecm status`.
 - Ceph HTTP 500 `ceph-mon` binary missing = Ceph not installed, not a bad token.
 - `pve_stopall_guests` does **not** set Ceph `noout`.

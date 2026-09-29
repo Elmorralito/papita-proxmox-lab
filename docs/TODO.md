@@ -29,7 +29,7 @@ Conventions for every new tool:
 
 ### High — full shutdown/startup via MCP
 
-#### [ ] `pve_shutdown_node`
+#### [x] `pve_shutdown_node`
 
 - **Why:** node power-off is the one step of `stop-cluster` MCP cannot do today. Already listed in the v2 backlog (§7.3) as `destructive`.
 - **API:** `POST /nodes/{node}/status` with `command=shutdown` or `command=reboot`. Plain REST — the backlog note implying SSH is unnecessary.
@@ -42,7 +42,7 @@ Conventions for every new tool:
 - **Files:** `tools/nodes.py`, `schemas.py`.
 - **Done when:** a single node can be rebooted from Cursor and comes back in `pve_list_nodes`.
 
-#### [ ] `pve_shutdown_cluster`
+#### [x] `pve_shutdown_cluster`
 
 - **Why:** an agent composing node shutdowns by hand can easily power off the entry node first and strand the rest. One tool should encode the order used by `deploy/proxmox.sh stop_cluster`.
 - **Sequence:**
@@ -54,7 +54,7 @@ Conventions for every new tool:
 - **Token privilege:** `VM.PowerMgmt` + `Sys.PowerMgmt` on `/`.
 - **Done when:** the 2026-09-25 shutdown can be reproduced from Cursor with one call.
 
-#### [ ] `pve_wake_on_lan`
+#### [x] `pve_wake_on_lan`
 
 - **Why:** the startup counterpart; today only `./deploy/proxmox.sh start-cluster`.
 - **API:** `POST /nodes/{node}/wakeonlan` — sent from an online node to wake `{node}` using the MAC configured in the node config (`pvenode config set -wakeonlan <MAC>`).
@@ -64,7 +64,7 @@ Conventions for every new tool:
 - **Token privilege:** `Sys.PowerMgmt` on `/nodes/{via_node}`.
 - **Done when:** a powered-off node comes back online via the tool and shows up in `pve_cluster_health`.
 
-#### [ ] `pve_stop_guest`
+#### [x] `pve_stop_guest`
 
 - **Why:** FR-022 (v2). `pve_shutdown_guest` is ACPI/graceful; a hung guest blocks `stopall` until timeout and leaves no MCP way to finish the job.
 - **API:** `POST /nodes/{node}/{qemu|lxc}/{vmid}/status/stop`.
@@ -162,7 +162,7 @@ Conventions for every new tool:
 
 ### High
 
-#### [ ] `truenas_shutdown` / `truenas_reboot`
+#### [x] `truenas_shutdown` / `truenas_reboot`
 
 - **Why:** the NAS could not be powered off on 2026-09-25 through any automated path. Reverses FR-902 (currently Won't) — record the decision and new guardrails in `REQUIREMENTS.md`.
 - **API:** `system.shutdown` / `system.reboot` (SCALE 24.10+ take a `reason` string and optional `{"delay": seconds}`). Both return a job — poll with `wait_for_job` only until the socket drops.

@@ -102,6 +102,7 @@ async def wait_for_nodes_state(
     *,
     timeout_sec: float = MAX_WAIT_CALL_SEC,
     poll_interval_sec: float = 5.0,
+    assume_offline_on_api_loss: bool = True,
 ) -> dict[str, Any]:
     """Poll ``GET /cluster/status`` until *nodes* reach *target* (``online``/``offline``).
 
@@ -115,6 +116,8 @@ async def wait_for_nodes_state(
         target: ``online`` or ``offline``.
         timeout_sec: Maximum seconds to wait (does not raise on timeout).
         poll_interval_sec: Seconds between polls.
+        assume_offline_on_api_loss: When ``False``, API loss raises instead (the watched
+            nodes are not the API host, so losing it says nothing about them).
 
     Returns:
         ``reached``, ``api_lost``, per-node ``states``, ``pending`` nodes, and ``elapsed_s``.
@@ -129,7 +132,7 @@ async def wait_for_nodes_state(
         try:
             raw = await client.get("/cluster/status")
         except PveApiError as exc:
-            if target == "offline" and exc.code in API_LOST_ERROR_CODES:
+            if target == "offline" and assume_offline_on_api_loss and exc.code in API_LOST_ERROR_CODES:
                 for name in watched:
                     if states.get(name) != "offline":
                         states[name] = "offline_assumed"

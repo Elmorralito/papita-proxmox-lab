@@ -89,6 +89,7 @@ Required: `-e dev|prod`. Optional: `--env-file`, AWS SSO/MFA flags, `--pre-commi
 | `setup-cluster-ha` | QDevice client on all nodes + TrueNAS NFS + HA group on entry host |
 | `get-temp` | Cluster-wide temperature via `sensors -j` (requires step 5) |
 | `start-cluster` | WoL peer nodes via `pvenode wakeonlan` |
+| `wake-lab` | Cold start via QDevice host (`-ip 172.16.0.99`): WoL TrueNAS, wait NFS, then entry node (`misc/cluster/default.wol.macs`) |
 | `stop-cluster` | Per-node `pvesh stopall` + hypervisor shutdown |
 | `cluster-nodes` / `local-node` | Discovery helpers |
 

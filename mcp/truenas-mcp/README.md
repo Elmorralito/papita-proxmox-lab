@@ -78,6 +78,15 @@ All write tools require **`confirm=true`**.
 | `truenas_update_nfs_share` | `sharing.nfs.update`  | Enable/disable NFS share |
 | `truenas_dismiss_alert`    | `alert.dismiss`       | Dismiss active alert     |
 
+## Power tools (destructive — [MCP_POWER_PLAN.md](../../docs/MCP_POWER_PLAN.md))
+
+| Tool               | TrueNAS method    | Guards                                                                                                                                                                                                                                                   |
+| ------------------ | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `truenas_shutdown` | `system.shutdown` | `confirm` + `reason`; refuses on NFS clients outside `expected_clients` or a running scrub/resilver/replication/OS-update job (`force` overrides); `delay_s`; `plan_only`; on a dropped connection it reconnects to confirm the pending job (`verified`) |
+| `truenas_reboot`   | `system.reboot`   | Same as `truenas_shutdown`                                                                                                                                                                                                                               |
+
+TrueNAS is reachable only through the LAN router guest on the entry PVE node, so in a full-lab shutdown call `truenas_shutdown(delay_s≈300, expected_clients=["172.16.0.101"])` **before** `pve_shutdown_node(<entry>, allow_entry_host=true)`. A dropped connection during the call is reported as success (`connection_dropped=true`). The API key needs a role that allows `system.shutdown` ([API_KEY_SETUP.md](./docs/API_KEY_SETUP.md)).
+
 ## Lab monitoring split
 
 | Service         | Host                      | MCP / automation                                                                 |

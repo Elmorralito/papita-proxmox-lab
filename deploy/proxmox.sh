@@ -218,9 +218,9 @@ wake_lab() {
         log "ERROR" "WoL targets file not readable: ${WOL_MACS_FILE}"
         return 255
     fi
-    while read -r name mac ip port _; do
+    while read -r name mac ip port _ || [[ -n "${name:-}" ]]; do
         [[ -z "${name:-}" || "$name" == \#* ]] && continue
-        if [[ ! "${mac:-}" =~ ^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$ ]] || [[ -z "${ip:-}" ]] || [[ ! "${port:-}" =~ ^[0-9]+$ ]]; then
+        if [[ ! "${mac:-}" =~ ^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$ ]] || [[ ! "${ip:-}" =~ ^[A-Za-z0-9._-]+$ ]] || [[ ! "${port:-}" =~ ^[0-9]+$ ]]; then
             log "ERROR" "Invalid line in ${WOL_MACS_FILE}: '${name} ${mac:-} ${ip:-} ${port:-}' (want <name> <MAC> <ip> <port>)."
             return 255
         fi
@@ -235,11 +235,13 @@ wake_lab() {
         return 255
     fi
 
+    local rc
     for entry in "${entries[@]}"; do
         read -r name mac ip port <<<"$entry"
         log "INFO" "Waking ${name} (${mac}); waiting for ${ip}:${port} (up to ${WOL_WAIT_SEC}s)..."
-        if ! ssh "${SSH_COMMON_OPTS[@]}" "$TARGET_USERNAME@$IP_ADDRESS" \
-            bash -s -- "$mac" "$ip" "$port" "$WOL_WAIT_SEC" "$WOL_BROADCAST" <<'REMOTE'
+        rc=0
+        ssh "${SSH_COMMON_OPTS[@]}" "$TARGET_USERNAME@$IP_ADDRESS" \
+            bash -s -- "$mac" "$ip" "$port" "$WOL_WAIT_SEC" "$WOL_BROADCAST" <<'REMOTE' || rc=$?
 set -euo pipefail
 mac=$1 ip=$2 port=$3 wait_s=$4 bcast=$5
 up() { timeout 3 bash -c "</dev/tcp/${ip}/${port}" 2>/dev/null; }
@@ -251,7 +253,7 @@ deadline=$((SECONDS + wait_s))
 next_packet=0
 while ((SECONDS < deadline)); do
     if ((SECONDS >= next_packet)); then
-        wakeonlan -i "$bcast" "$mac" >/dev/null
+        wakeonlan -i "$bcast" "$mac" >/dev/null || exit 2
         next_packet=$((SECONDS + 60))
     fi
     if up; then
@@ -262,13 +264,19 @@ while ((SECONDS < deadline)); do
 done
 exit 1
 REMOTE
-        then
-            log "ERROR" "${name} did not answer on ${ip}:${port} within ${WOL_WAIT_SEC}s; aborting (later targets depend on it)."
+        case "$rc" in
+        0) log "INFO" "${name} is up." ;;
+        2)
+            log "ERROR" "wakeonlan failed on ${IP_ADDRESS} for ${name} (${mac}, broadcast ${WOL_BROADCAST}); aborting."
             return 1
-        fi
-        log "INFO" "${name} is up."
+            ;;
+        *)
+            log "ERROR" "${name} did not answer on ${ip}:${port} within ${WOL_WAIT_SEC}s (exit ${rc}); aborting (later targets depend on it)."
+            return 1
+            ;;
+        esac
     done
-    log "INFO" "Lab core is up. post-startup-proc on the entry node wakes the other PVE nodes; then check pve_cluster_health and truenas_run_smoke_tests."
+    log "INFO" "All WoL targets are up. Next: pve_cluster_health (quorate, router guest running), then truenas_run_smoke_tests."
 }
 
 stop_cluster() {

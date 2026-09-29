@@ -4,8 +4,10 @@
 #
 # Format: <name> <MAC> <ip> <port>
 #   1. TrueNAS first (NFS :2049) — PVE mounts the HA export at boot.
-#   2. Entry PVE node next (API :8006) — it hosts the LAN router guest; its post-startup-proc
-#      wakes the remaining PVE nodes once it has quorum.
+#   2. Entry PVE node next (API :8006) — it hosts the LAN router guest.
+#   3. Remaining PVE nodes (API :8006) — pve-001 alone holds 2/5 votes, so no guest (router
+#      included) starts until peers join; its post-startup-proc only wakes them after a 120 s
+#      quorum wait, so list them here.
 #
 # MACs: PVE nodes — `pvenode config get --property wakeonlan` (set in setup step 3);
 #       TrueNAS — Network → Interfaces (BIOS/NIC WoL must be enabled).
@@ -14,3 +16,6 @@
 #
 # truenas  aa:bb:cc:dd:ee:00  172.16.0.100  2049
 # pve-001  aa:bb:cc:dd:ee:01  172.16.0.101  8006
+# pve-002  aa:bb:cc:dd:ee:02  172.16.0.102  8006
+# pve-003  aa:bb:cc:dd:ee:03  172.16.0.103  8006
+# pve-004  aa:bb:cc:dd:ee:04  172.16.0.104  8006

@@ -144,11 +144,11 @@ flowchart TB
 
 ### Safety model
 
-| Class           | v1 behavior                                                    |
-| --------------- | -------------------------------------------------------------- |
-| **Read**        | GET-only API calls; no confirmation required                   |
-| **Write**       | POST with mandatory `confirm=true`; audit log on stderr        |
-| **Destructive** | Power tools only (`pve_shutdown_node`, `pve_stop_guest`): `confirm=true` + `reason`; keep off auto-run allowlists |
+| Class           | v1 behavior                                                                                                                               |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| **Read**        | GET-only API calls; no confirmation required                                                                                              |
+| **Write**       | POST with mandatory `confirm=true`; audit log on stderr                                                                                   |
+| **Destructive** | Power tools only (`pve_shutdown_node`, `pve_shutdown_cluster`, `pve_stop_guest`): `confirm=true` + `reason`; keep off auto-run allowlists |
 
 Additional safeguards:
 
@@ -198,13 +198,14 @@ Many responses include `meta.runbook_ref` pointing to the relevant repo path (se
 
 Write tools return a UPID; set `wait_for_completion=true` to poll task status.
 
-### Power (1 write + 2 destructive — [MCP_POWER_PLAN.md](../../docs/MCP_POWER_PLAN.md))
+### Power (1 write + 3 destructive — [MCP_POWER_PLAN.md](../../docs/MCP_POWER_PLAN.md))
 
-| Tool                | Class       | Purpose                                                                 | Guards                                                                                         |
-| ------------------- | ----------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `pve_wake_on_lan`   | write       | WoL from the API entry node (`nodes=[...]` or `all_offline=true`)       | `confirm`; online targets skipped; missing-MAC hint                                            |
-| `pve_shutdown_node` | destructive | Node `shutdown` / `reboot`                                              | `confirm` + `reason`; `ha.shutdown_policy=freeze`; entry node needs `allow_entry_host`; quorum / running-guest / router warnings; `plan_only` |
-| `pve_stop_guest`    | destructive | Hard stop a hung VM/CT (`overrule_shutdown` aborts a running shutdown) | `confirm` + `reason`; warns for `PVE_LAB_INFRA_VMIDS`                                          |
+| Tool                   | Class       | Purpose                                                                                | Guards                                                                                                                                                                                                                                                  |
+| ---------------------- | ----------- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pve_wake_on_lan`      | write       | WoL from the API entry node (`nodes=[...]` or `all_offline=true`)                      | `confirm`; online targets skipped; missing-MAC hint                                                                                                                                                                                                     |
+| `pve_shutdown_node`    | destructive | Node `shutdown` / `reboot`                                                             | `confirm` + `reason`; `ha.shutdown_policy=freeze`; entry node needs `allow_entry_host`; quorum / running-guest / router warnings; `plan_only`                                                                                                           |
+| `pve_stop_guest`       | destructive | Hard stop a hung VM/CT (`overrule_shutdown` aborts a running shutdown)                 | `confirm` + `reason`; warns for `PVE_LAB_INFRA_VMIDS`                                                                                                                                                                                                   |
+| `pve_shutdown_cluster` | destructive | Ordered full-cluster shutdown, resumable (≤120 s per call; re-call while `done=false`) | `confirm` + `reason`; `freeze`; stages stop guests → peers off → `ready_for_nas` → entry node (`include_entry_node`, only once peers are off); HA guests left to `freeze`; refuses if the entry node would self-fence; `plan_only`, `continue_on_error` |
 
 `PVE_LAB_INFRA_VMIDS` (default `100`) lists the LAN router guest(s); tools warn before stopping them because TrueNAS is only reachable through the router. Token needs `Sys.PowerMgmt` ([PVE_TOKEN_SETUP.md](./docs/PVE_TOKEN_SETUP.md)).
 
@@ -248,18 +249,18 @@ Deferred to **v2**: SSH proxy tool, hard guest stop, migration, MCP resources fo
 
 ### Environment variables
 
-| Variable           | Required | Default | Description                                                  |
-| ------------------ | -------- | ------- | ------------------------------------------------------------ |
-| `PVE_HOST`         | Yes      | —       | Any online cluster member (hostname or IP, no scheme)        |
-| `PVE_PORT`         | No       | `8006`  | Proxmox API port                                             |
-| `PVE_USER`         | Yes\*    | —       | API user, e.g. `mcp-agent@pam`                               |
-| `PVE_TOKEN_ID`     | Yes\*    | —       | Token identifier, e.g. `mcp-cursor`                          |
-| `PVE_TOKEN_SECRET` | Yes\*    | —       | Token secret (shown once at creation)                        |
-| `PVE_API_TOKEN`    | Yes\*    | —       | Alternative: full `USER@REALM!TOKENID=SECRET` string         |
-| `PVE_VERIFY_SSL`   | No       | `true`  | Set `false` only for default self-signed cert before step 17 |
-| `PVE_LOG_LEVEL`    | No       | `INFO`  | stderr JSON log level: `DEBUG`, `INFO`, `WARNING`, `ERROR`   |
-| `PVE_LAB_INFRA_VMIDS` | No    | `100`   | Comma-separated LAN router guest VMIDs (power-tool warnings) |
-| `PVE_INTEGRATION`  | No       | —       | Set to `1` to run live-cluster integration tests             |
+| Variable              | Required | Default | Description                                                  |
+| --------------------- | -------- | ------- | ------------------------------------------------------------ |
+| `PVE_HOST`            | Yes      | —       | Any online cluster member (hostname or IP, no scheme)        |
+| `PVE_PORT`            | No       | `8006`  | Proxmox API port                                             |
+| `PVE_USER`            | Yes\*    | —       | API user, e.g. `mcp-agent@pam`                               |
+| `PVE_TOKEN_ID`        | Yes\*    | —       | Token identifier, e.g. `mcp-cursor`                          |
+| `PVE_TOKEN_SECRET`    | Yes\*    | —       | Token secret (shown once at creation)                        |
+| `PVE_API_TOKEN`       | Yes\*    | —       | Alternative: full `USER@REALM!TOKENID=SECRET` string         |
+| `PVE_VERIFY_SSL`      | No       | `true`  | Set `false` only for default self-signed cert before step 17 |
+| `PVE_LOG_LEVEL`       | No       | `INFO`  | stderr JSON log level: `DEBUG`, `INFO`, `WARNING`, `ERROR`   |
+| `PVE_LAB_INFRA_VMIDS` | No       | `100`   | Comma-separated LAN router guest VMIDs (power-tool warnings) |
+| `PVE_INTEGRATION`     | No       | —       | Set to `1` to run live-cluster integration tests             |
 
 \* Provide either `PVE_API_TOKEN` or all three split fields.
 
@@ -340,7 +341,7 @@ After configuring MCP, run the optional smoke test suite to verify connectivity 
 ```bash
 cd /path/to/papita-proxmox-lab
 poetry run proxmox-ve-mcp-smoke              # basic (6 tests)
-poetry run proxmox-ve-mcp-smoke --extended   # full (13 tests)
+poetry run proxmox-ve-mcp-smoke --extended   # full (17 tests)
 poetry run proxmox-ve-mcp-smoke --json       # machine-readable report
 ```
 

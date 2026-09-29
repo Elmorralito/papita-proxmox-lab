@@ -107,15 +107,15 @@ papita-proxmox-lab/
 
 ### Workstation prerequisites
 
-| Tool                            | Used for                                                                    |
-| ------------------------------- | --------------------------------------------------------------------------- |
-| **bash** 4+                     | All deploy scripts (`set -euo pipefail`)                                    |
-| **Poetry** 2.x                  | Dev venv, MCP packages, linter tooling                                      |
-| **Python** 3.11+                | MCP servers and pre-commit (3.14 in [`.python-version`](./.python-version)) |
-| **jq**                          | Proxmox JSON (`pvesh`, cluster discovery, `mcp.json` merge)                 |
-| **ssh**, **scp**                | `deploy/proxmox.sh`                                                         |
-| **pre-commit** (optional)       | `./deploy/toolkit.sh … --pre-commit` or local hooks                         |
-| **Cursor** (optional)           | MCP client for `proxmox-ve`, `pfsense`, and `truenas` servers                |
+| Tool                      | Used for                                                                    |
+| ------------------------- | --------------------------------------------------------------------------- |
+| **bash** 4+               | All deploy scripts (`set -euo pipefail`)                                    |
+| **Poetry** 2.x            | Dev venv, MCP packages, linter tooling                                      |
+| **Python** 3.11+          | MCP servers and pre-commit (3.14 in [`.python-version`](./.python-version)) |
+| **jq**                    | Proxmox JSON (`pvesh`, cluster discovery, `mcp.json` merge)                 |
+| **ssh**, **scp**          | `deploy/proxmox.sh`                                                         |
+| **pre-commit** (optional) | `./deploy/toolkit.sh … --pre-commit` or local hooks                         |
+| **Cursor** (optional)     | MCP client for `proxmox-ve`, `pfsense`, and `truenas` servers               |
 
 ### Clone and Python dev environment
 
@@ -174,11 +174,11 @@ Used by `deploy/tailscale-pfsense-lan.sh` and as optional **Tailscale Admin API*
 
 `install` / `update` (default `--scope both`) and `cursor-sync` merge each package's `mcp.json.example` into Cursor configs while **preserving existing `env` secrets**:
 
-| Scope | Path | Used by |
-| ----- | ---- | ------- |
-| `user` | `~/.cursor/mcp.json` | Cursor IDE + cursor-agent (user-wide) |
-| `project` | `.cursor/mcp.json` | This workspace |
-| `both` | both (default for install/update) | Recommended |
+| Scope     | Path                              | Used by                               |
+| --------- | --------------------------------- | ------------------------------------- |
+| `user`    | `~/.cursor/mcp.json`              | Cursor IDE + cursor-agent (user-wide) |
+| `project` | `.cursor/mcp.json`                | This workspace                        |
+| `both`    | both (default for install/update) | Recommended                           |
 
 Run `./deploy/install-git-hooks.sh` once to keep both configs updated after `git pull` and on each agent session. Set **`cwd`** to the **repo root** so Poetry reuses `.venv/`.
 
@@ -208,13 +208,13 @@ All deploy commands assume the **repository root** as the current working direct
 ./deploy/toolkit.sh ACTION -e {dev|prod} [OPTIONS]
 ```
 
-| Action                           | Description                                                |
-| -------------------------------- | ---------------------------------------------------------- |
-| `build`                          | Build wheels from `libs/` → `dist/` (when `libs/` exists)  |
-| `devsync`                        | `build` + pip install wheels into the active env           |
-| `test`                           | `build` + pytest with coverage (when `tests/` exists)      |
-| `proxmox` / `deploy_proxmox`     | Delegate to [`deploy/proxmox.sh`](./deploy/proxmox.sh)     |
-| `none`                           | No-op; useful with `--pre-commit` only                     |
+| Action                       | Description                                               |
+| ---------------------------- | --------------------------------------------------------- |
+| `build`                      | Build wheels from `libs/` → `dist/` (when `libs/` exists) |
+| `devsync`                    | `build` + pip install wheels into the active env          |
+| `test`                       | `build` + pytest with coverage (when `tests/` exists)     |
+| `proxmox` / `deploy_proxmox` | Delegate to [`deploy/proxmox.sh`](./deploy/proxmox.sh)    |
+| `none`                       | No-op; useful with `--pre-commit` only                    |
 
 Common flags: `--env-file`, `--aws-sso` / `--aws-mfa`, `--pre-commit`, `--proxmox-action`, `--ip-address`, `--hostname`, `--profile`, `--region`.
 
@@ -233,15 +233,15 @@ Common flags: `--env-file`, `--aws-sso` / `--aws-mfa`, `--pre-commit`, `--proxmo
 
 Prepares the repo Poetry venv, Cursor launch configs, and agent skills that teach when to invoke each MCP. Cursor spawns servers at session time; it does not re-run install.
 
-| Action        | Description                                                                                          |
-| ------------- | ---------------------------------------------------------------------------------------------------- |
-| `list`        | Show packages under `mcp/`, Cursor server ids, and bundled skills                                    |
+| Action        | Description                                                                                             |
+| ------------- | ------------------------------------------------------------------------------------------------------- |
+| `list`        | Show packages under `mcp/`, Cursor server ids, and bundled skills                                       |
 | `install`     | Poetry install + register console scripts; sync mcp.json; install skills for `--scope` (default `both`) |
-| `update`      | Re-lock/reinstall + refresh mcp.json + skills for `--scope` — run after `git pull`                   |
-| `test`        | `pytest` for all MCP test suites                                                                     |
-| `smoke`       | Live connectivity smoke (loads credentials from `~/.cursor/mcp.json`)                                |
-| `cursor-sync` | Merge `mcp.json.example` into user and/or project mcp.json (keeps existing secrets)                  |
-| `skills-sync` | Copy/refresh bundled skills for `--scope` (no Poetry)                                                |
+| `update`      | Re-lock/reinstall + refresh mcp.json + skills for `--scope` — run after `git pull`                      |
+| `test`        | `pytest` for all MCP test suites                                                                        |
+| `smoke`       | Live connectivity smoke (loads credentials from `~/.cursor/mcp.json`)                                   |
+| `cursor-sync` | Merge `mcp.json.example` into user and/or project mcp.json (keeps existing secrets)                     |
+| `skills-sync` | Copy/refresh bundled skills for `--scope` (no Poetry)                                                   |
 
 Bundled skills (source `.cursor/skills/`): `papita-proxmox-lab-map`, `proxmox-ve-mcp`, `truenas-mcp`. With `--scope user` or `both`, copies land in `~/.cursor/skills/` (repo-relative links rewritten to absolute paths).
 
@@ -253,7 +253,7 @@ Options: `--scope user|project|both`, `--no-sync`, `--no-skills`, `--server NAME
 ./deploy/mcp.sh update                                     # after git pull
 ./deploy/mcp.sh skills-sync --scope both                   # skills only
 ./deploy/mcp.sh smoke --server proxmox-ve-mcp              # 6 basic checks
-./deploy/mcp.sh smoke --server proxmox-ve-mcp --extended   # 13 checks (guests, storage, Ceph)
+./deploy/mcp.sh smoke --server proxmox-ve-mcp --extended   # 17 checks (guests, storage, HA, power permissions)
 ./deploy/mcp.sh smoke --server pfsense-mcp                 # 9 checks (core + lab policy)
 ./deploy/mcp.sh smoke --server truenas-mcp
 ```
@@ -341,14 +341,14 @@ Actions: `configure`, `approve-routes`, `patch-acl`, `verify`, `pfsense-steps`. 
 
 ## Python tooling
 
-| Component                                                                                        | Role                                                   |
-| ------------------------------------------------------------------------------------------------ | ------------------------------------------------------ |
-| [`mcp/proxmox-ve-mcp/`](./mcp/proxmox-ve-mcp/)                                                   | Proxmox VE MCP server (FastMCP, httpx, Pydantic)       |
-| [`mcp/pfsense-mcp/`](./mcp/pfsense-mcp/)                                                         | pfSense pfREST MCP server + lab policy framework       |
+| Component                                                                                        | Role                                                     |
+| ------------------------------------------------------------------------------------------------ | -------------------------------------------------------- |
+| [`mcp/proxmox-ve-mcp/`](./mcp/proxmox-ve-mcp/)                                                   | Proxmox VE MCP server (FastMCP, httpx, Pydantic)         |
+| [`mcp/pfsense-mcp/`](./mcp/pfsense-mcp/)                                                         | pfSense pfREST MCP server + lab policy framework         |
 | [`mcp/truenas-mcp/`](./mcp/truenas-mcp/)                                                         | TrueNAS WebSocket MCP server (storage, Scrutiny, writes) |
-| [`deploy/python/misc/cluster/discover_hosts.py`](./deploy/python/misc/cluster/discover_hosts.py) | Step 7: DNS peer discovery → `/etc/hosts` lines        |
-| [`deploy/python/misc/cluster/domain_pattern.py`](./deploy/python/misc/cluster/domain_pattern.py) | Wildcard domain suffix expansion (`oldtimers.*`, etc.) |
-| [`deploy/python/datafiles/`](./deploy/python/datafiles/)                                         | Default host lists, regex, domain suffix labels        |
+| [`deploy/python/misc/cluster/discover_hosts.py`](./deploy/python/misc/cluster/discover_hosts.py) | Step 7: DNS peer discovery → `/etc/hosts` lines          |
+| [`deploy/python/misc/cluster/domain_pattern.py`](./deploy/python/misc/cluster/domain_pattern.py) | Wildcard domain suffix expansion (`oldtimers.*`, etc.)   |
+| [`deploy/python/datafiles/`](./deploy/python/datafiles/)                                         | Default host lists, regex, domain suffix labels          |
 
 On PVE nodes, Python is **runtime-only** (no Poetry). On the workstation, Poetry manages MCP packages as **path dependencies** and dev linters (black, isort, flake8, pylint, mypy, interrogate) via [`pyproject.toml`](./pyproject.toml) and [`.pre-commit-config.yaml`](./.pre-commit-config.yaml).
 

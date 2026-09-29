@@ -496,6 +496,31 @@ pvecm qdevice remove
 > [!WARNING]
 > Do **not** use TrueNAS (`172.16.0.100`) as the QDevice host. Do **not** leave `pvecm expected 1` as a permanent quorum workaround. Enable **softdog on all nodes before** adding HA resources.
 
+### Full-lab shutdown / startup via MCP
+
+Design and caveats: [MCP_POWER_PLAN.md](./MCP_POWER_PLAN.md). The LAN router guest (`PVE_LAB_INFRA_VMIDS`, today pfSense VM 100 on `pve-001`) is the **only** path to TrueNAS, so the NAS is shut down (delayed) **before** the entry node. Destructive MCP tools need `confirm=true` + `reason`; never put them on auto-run.
+
+**Prerequisites (once):** `ha.shutdown_policy=freeze` (`./deploy/proxmox.sh setup-cluster-ha`); PVE token role `MCPAgentPower` (`Sys.PowerMgmt`); TrueNAS key allowed to call `system.shutdown`; real MACs in `deploy/setup/misc/cluster/default.wol.macs`; `wakeonlan` on the QDevice host.
+
+**Shutdown (agent, Cursor):**
+
+1. Preflight: `pve_cluster_health` (`quorate=true`, `entry_node`), `pve_get_ha_status` (`shutdown_policy_ok=true`; the entry node must not be in `active_lrm_nodes` or host HA resources, otherwise it self-fences once the peers are down and the tool refuses), `truenas_system_summary`, `truenas_list_nfs_clients`.
+2. Dry run: `pve_shutdown_cluster(reason=…, plan_only=true)` — review stages, refusals, warnings.
+3. `pve_shutdown_cluster(reason=…, confirm=true)` — re-call with the same args while `done=false` (each call ≤120 s). Ends at `stage=ready_for_nas`: peers off, entry node up with only the router guest. HA-managed guests are not stopped individually (that would set their HA requested state to `stopped` and keep them off after the cold start); peer shutdown with `freeze` stops them and restores them on boot. `include_entry_node=true` is deferred while peers are online, so the NAS step can't be skipped.
+4. `truenas_shutdown(reason=…, delay_s=300, expected_clients=["172.16.0.101"], confirm=true)` (exact call is in `next_steps`). `plan_only=true` first if unsure.
+5. `pve_shutdown_cluster(reason=…, include_entry_node=true, confirm=true)` — entry node powers off; the API connection drop is reported as success.
+
+If a guest hangs: `pve_stop_guest(…, reason=…, confirm=true)`, or re-run with `continue_on_error=true` (node shutdown stops remaining guests). Tune `delay_s` to the measured entry-node shutdown time: if the entry node is still up when the NAS goes away, its `hard` NFS mounts stall until the systemd umount timeout (~90 s).
+
+**Startup:**
+
+```bash
+# From a workstation that can reach the QDevice host (router is down):
+./deploy/proxmox.sh wake-lab --ip-address 172.16.0.99
+```
+
+`wake-lab` wakes the hosts listed in `default.wol.macs` in order, waiting for each one's port: TrueNAS (NFS `:2049`), `pve-001`, then the peers (`:8006`). List the peers too: `pve-001` alone holds 2 of 5 votes, so its guests (including the router) can't start until the peers join, and `post-startup-proc` only wakes them after its 120 s quorum wait. Verify on the first cold start that the router guest comes up once quorum forms. Then in Cursor: `pve_wait_nodes_state(target="online")` → `pve_wake_on_lan(all_offline=true, confirm=true)` for stragglers → `pve_cluster_health` → `truenas_run_smoke_tests` and `truenas_list_nfs_clients` (all four nodes).
+
 ---
 
 ## refresh vmbr0 ip address proxmox

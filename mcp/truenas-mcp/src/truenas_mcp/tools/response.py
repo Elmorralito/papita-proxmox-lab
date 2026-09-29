@@ -1,5 +1,6 @@
 """Standard JSON responses for MCP tools."""
 
+import inspect
 import json
 import time
 from collections.abc import Awaitable, Callable
@@ -92,6 +93,17 @@ def tool_handler(tool_name: str) -> Callable[[F], F]:
     return decorator
 
 
+def audit_values(
+    signature: inspect.Signature, fields: tuple[str, ...], args: tuple[Any, ...], kwargs: dict[str, Any]
+) -> dict[str, Any]:
+    """Pick *fields* from a call, whether they were passed positionally or by keyword."""
+    try:
+        bound: dict[str, Any] = dict(signature.bind_partial(*args, **kwargs).arguments)
+    except TypeError:
+        bound = kwargs
+    return {field: bound[field] for field in fields if field in bound}
+
+
 def write_tool_handler(
     tool_name: str,
     *,
@@ -100,10 +112,12 @@ def write_tool_handler(
     """Wrap mutating tools with audit logging."""
 
     def decorator(func: F) -> F:
+        signature = inspect.signature(func)
+
         @wraps(func)
         async def wrapper(*args: Any, **kwargs: Any) -> str:
             started = time.perf_counter()
-            audit = {field: kwargs.get(field) for field in audit_fields if field in kwargs}
+            audit = audit_values(signature, audit_fields, args, kwargs)
             try:
                 result = await func(*args, **kwargs)
                 duration_ms = int((time.perf_counter() - started) * 1000)

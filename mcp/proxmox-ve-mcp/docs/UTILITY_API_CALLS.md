@@ -102,6 +102,18 @@ Legend: **R** = read, **W** = write (requires `confirm=true` in MCP).
 
 API viewer: [status/start](https://pve.proxmox.com/pve-docs/api-viewer/#/nodes/{node}/qemu/{vmid}/status/start), [status/shutdown](https://pve.proxmox.com/pve-docs/api-viewer/#/nodes/{node}/qemu/{vmid}/status/shutdown), [stopall](https://pve.proxmox.com/pve-docs/api-viewer/#/nodes/{node}/stopall).
 
+### Node power (write / destructive)
+
+| MCP tool                  | HTTP | REST path                                       | Body                             | Privilege       |
+| ------------------------- | ---- | ----------------------------------------------- | -------------------------------- | --------------- |
+| `pve_stop_guest` **D**    | POST | `/nodes/{node}/{guest_type}/{vmid}/status/stop` | `overrule-shutdown=1` (optional) | `VM.PowerMgmt`  |
+| `pve_shutdown_node` **D** | POST | `/nodes/{node}/status`                          | `command=shutdown` \| `reboot`   | `Sys.PowerMgmt` |
+| `pve_wake_on_lan` **W**   | POST | `/nodes/{node}/wakeonlan`                       | — (returns the MAC sent)         | `Sys.PowerMgmt` |
+
+`pve_shutdown_cluster` **D** composes these calls: `GET /cluster/status`, `/cluster/resources?type=vm`, `/cluster/ha/status/current` (HA-managed guests, entry-node fence risk), `/cluster/tasks` (reuses in-flight `stopall` / `qmshutdown` tasks on re-call), then `POST /nodes/{peer}/stopall` (or per-guest `status/shutdown forceStop=1` for the non-HA guests on a peer that also hosts HA guests), `POST .../status/shutdown` per entry-node guest, `POST /nodes/{peer}/status command=shutdown`, and finally the entry node.
+
+`pve_shutdown_node` pre-reads `/cluster/status` (entry node, members), `/cluster/options` (`ha.shutdown_policy`), `/cluster/config/qdevice` (vote counted only when `State=Connected`), `/cluster/ha/status/current` (only when quorum would be lost), and `/nodes/{node}/{qemu,lxc}` before posting. `pve_shutdown_guest`, `pve_stop_guest`, and `pve_stopall_guests` also read `/cluster/ha/status/current` to warn about HA-managed guests. The WoL packet is sent by the node serving the API (entry node) using the MAC in the target's node config (`pvenode config set -wakeonlan`).
+
 ---
 
 ## Copy-paste examples

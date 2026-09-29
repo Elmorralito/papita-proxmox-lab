@@ -11,7 +11,7 @@ from proxmox_ve_mcp.client.errors import PveApiError
 from proxmox_ve_mcp.client.permissions import TOKEN_ACL_HINT
 from proxmox_ve_mcp.constants import HA_REQUIRED_SHUTDOWN_POLICY
 from proxmox_ve_mcp.context import get_client, get_settings
-from proxmox_ve_mcp.tools.ha import parse_shutdown_policy
+from proxmox_ve_mcp.tools.ha import parse_ha_placement, parse_shutdown_policy
 from proxmox_ve_mcp.tools.helpers import normalize_list
 from proxmox_ve_mcp.tools.response import ok_response, tool_handler
 
@@ -132,6 +132,14 @@ SMOKE_TEST_CATALOG: tuple[SmokeTestSpec, ...] = (
         "read_extended",
         "HA shutdown policy",
         "ha.shutdown_policy is freeze (required by power tools)",
+        extended_only=True,
+        required_privilege="Sys.Audit on /",
+    ),
+    SmokeTestSpec(
+        "ha_fence_readiness",
+        "read_extended",
+        "HA fence readiness",
+        "HA status readable and the entry node has no HA resources / active LRM (pve_shutdown_cluster guard)",
         extended_only=True,
         required_privilege="Sys.Audit on /",
     ),
@@ -396,6 +404,26 @@ async def _run_single_test(  # noqa: C901
                     shutdown_policy=policy,
                 )
             return _result(spec, "pass", detail=f"shutdown_policy={policy}", shutdown_policy=policy)
+
+        if spec.test_id == "ha_fence_readiness":
+            placement = parse_ha_placement(normalize_list(await client.get("/cluster/ha/status/current")))
+            entries = normalize_list(await client.get("/cluster/status"))
+            local = next((e for e in entries if e.get("type") == "node" and e.get("local")), None)
+            entry = str(local.get("name")) if local else None
+            if entry and placement.fence_risk([entry]):
+                return _result(
+                    spec,
+                    "warn",
+                    detail=f"Entry node {entry} has HA resources or an active LRM; pve_shutdown_cluster will refuse",
+                    entry_node=entry,
+                )
+            return _result(
+                spec,
+                "pass",
+                detail="HA status readable; entry node safe",
+                entry_node=entry,
+                ha_vmids=sorted(placement.vmids),
+            )
 
         if spec.test_id == "ceph_status":
             node = await _find_sample_node(client, cache)

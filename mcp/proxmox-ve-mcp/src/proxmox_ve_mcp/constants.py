@@ -63,6 +63,7 @@ RUNBOOK_REFS: dict[str, str] = {
     "pve_wait_for_task": "docs/MCP_POWER_PLAN.md — poll UPIDs in ≤120 s calls",
     "pve_wait_nodes_state": "docs/MCP_POWER_PLAN.md — shutdown/startup sequences",
     "pve_shutdown_node": "docs/MCP_POWER_PLAN.md — shutdown sequence (entry node last)",
+    "pve_shutdown_cluster": "docs/TIPSNTRICKS.md — full-lab shutdown / startup via MCP",
     "pve_stop_guest": "docs/TIPSNTRICKS.md — hung guest blocking stopall",
     "pve_wake_on_lan": "docs/MCP_POWER_PLAN.md — startup sequence; pvenode config set -wakeonlan <MAC>",
 }
