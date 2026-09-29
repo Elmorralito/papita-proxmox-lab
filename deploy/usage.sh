@@ -227,31 +227,54 @@ usage_mcp() {
   echo -e "${GREEN_TEXT}Usage:${NC_TEXT} deploy/mcp.sh ACTION [OPTIONS]"
   cat << EOF
 
-  Install and maintain Cursor MCP servers under mcp/.
+  Install and maintain Cursor MCP servers under mcp/ and their agent skills.
 
   ACTION (required, position 1):
-    list          List MCP packages and Cursor server names
-    install       poetry install + register console scripts (all or --server)
-    update        Same as install (re-lock and reinstall)
+    list          List MCP packages, Cursor server names, and bundled skills
+    install       poetry install + register scripts; sync mcp.json; install skills
+    update        Re-lock/reinstall packages; refresh mcp.json + skills (scope)
     test          Run pytest for MCP package test suites
-    smoke         Post-install connectivity smoke test (proxmox-ve-mcp)
+    smoke         Post-install connectivity smoke test
     cursor-sync   Merge mcp.json.example into Cursor MCP configs (keeps env secrets)
+    skills-sync   Install/refresh bundled Cursor skills for --scope (no Poetry)
+
+  Bundled skills (source: .cursor/skills/):
+    papita-proxmox-lab-map   Repo map / inventory
+    proxmox-ve-mcp           When/how to invoke proxmox-ve MCP
+    truenas-mcp              When/how to invoke truenas MCP
 
   Options:
     -s, --server NAME     MCP package or server id (e.g. proxmox-ve-mcp or proxmox-ve)
+    --scope SCOPE         Cursor config + skills target: user | project | both
+                          install/update/skills-sync default: both
+                          cursor-sync default: user (unless --all-targets)
+    --no-sync             install/update: skip Cursor mcp.json merge
+    --no-skills           install/update: skip Cursor skills install
     --extended            Pass --extended to smoke test (full access matrix)
-    -c, --cursor-config   Single target mcp.json path (default: ~/.cursor/mcp.json)
-    --all-targets         Sync ~/.cursor/mcp.json and .cursor/mcp.json (cursor-agent + IDE)
+    -c, --cursor-config   Single target mcp.json path (cursor-sync without --scope)
+    --all-targets         Alias for --scope both
     --if-changed          Skip when mcp.json.example files are unchanged
     --enable-agent        Run cursor-agent mcp enable for each repo MCP server
     -h, --help            Show this message
 
+  Scope targets:
+    user      ~/.cursor/mcp.json + copy skills → ~/.cursor/skills/
+    project   .cursor/mcp.json + use .cursor/skills/ in-repo (no user copy)
+    both      user + project
+
+  Note: Python packages always install into the repo Poetry venv. Scope selects
+  which Cursor mcp.json file(s) and whether skills are copied to ~/.cursor/skills.
+
   Quick start:
-    ./deploy/mcp.sh install
-    ./deploy/mcp.sh cursor-sync --all-targets    # edit secrets in ~/.cursor/mcp.json once
-    ./deploy/install-git-hooks.sh                # auto-sync on git pull + agent session
+    ./deploy/mcp.sh install                     # venv + mcp.json + skills (both)
+    ./deploy/mcp.sh install --scope user        # user mcp.json + ~/.cursor/skills
+    ./deploy/mcp.sh install --scope project     # project mcp.json; skills stay in-repo
+    ./deploy/mcp.sh update                      # after git pull when MCP/skills changed
+    ./deploy/mcp.sh skills-sync                 # skills only
+    ./deploy/mcp.sh install --no-sync --no-skills
+    ./deploy/install-git-hooks.sh               # auto-sync on git pull + agent session
     ./deploy/mcp.sh smoke --extended
-    # Reload Cursor → Settings → MCP → proxmox-ve connected
+    # Reload Cursor → Settings → MCP → servers connected
 
   See mcp/README.md for full installation guide.
 

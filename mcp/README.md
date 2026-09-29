@@ -18,13 +18,39 @@ From the **repo root**:
 
 ```bash
 chmod +x deploy/mcp.sh   # once
-./deploy/mcp.sh install
-./deploy/mcp.sh cursor-sync
-# Edit ~/.cursor/mcp.json → set PVE_TOKEN_SECRET (and host/user if needed)
+./deploy/mcp.sh install                 # Poetry venv + sync user + project mcp.json + skills
+# Edit ~/.cursor/mcp.json → set API secrets (project .cursor/mcp.json is seeded from user)
 ./deploy/mcp.sh smoke --extended
 ```
 
-Reload **Cursor** after `cursor-sync`. In Settings → MCP, confirm `proxmox-ve` is green.
+Reload **Cursor** after install. In Settings → MCP, confirm servers are green.
+
+### Project vs user scope
+
+Python packages always land in the **repo Poetry venv** (`poetry run …` with `cwd` = repo root). `--scope` chooses which Cursor config file(s) get `command` / `args` / `cwd` merges (existing `env` secrets are preserved) and whether agent skills are copied to the user skills directory:
+
+| Scope | Cursor config | Skills |
+| ----- | ------------- | ------ |
+| `user` | `~/.cursor/mcp.json` | Copy → `~/.cursor/skills/` |
+| `project` | `.cursor/mcp.json` | Use in-repo `.cursor/skills/` only |
+| `both` (default for install/update) | user + project | project source + user copies |
+
+Bundled skills (teach agents when to invoke MCPs):
+
+| Skill | Role |
+| ----- | ---- |
+| `papita-proxmox-lab-map` | Repo map / file inventory |
+| `proxmox-ve-mcp` | Invoke `proxmox-ve` MCP |
+| `truenas-mcp` | Invoke `truenas` MCP |
+
+```bash
+./deploy/mcp.sh install --scope user
+./deploy/mcp.sh install --scope project
+./deploy/mcp.sh install --scope both      # default
+./deploy/mcp.sh install --no-sync         # packages only; sync mcp.json later
+./deploy/mcp.sh install --no-skills       # skip skill copies
+./deploy/mcp.sh skills-sync               # refresh skills only
+```
 
 ---
 
@@ -32,12 +58,13 @@ Reload **Cursor** after `cursor-sync`. In Settings → MCP, confirm `proxmox-ve`
 
 | Action        | What it does                                                                                            |
 | ------------- | ------------------------------------------------------------------------------------------------------- |
-| `list`        | Show packages under `mcp/` and their Cursor server names                                                |
-| `install`     | `poetry lock` + `poetry install --with test`; `pip install -e` each MCP package (registers CLI scripts) |
-| `update`      | Same as `install` — run after `git pull` when MCP code changed                                          |
+| `list`        | Show packages under `mcp/`, Cursor server names, and bundled skills                         |
+| `install`     | `poetry lock` + `poetry install --with test`; `pip install -e` each MCP; sync mcp.json; install skills |
+| `update`      | Same reinstall as install, then refresh mcp.json + skills for `--scope` (run after `git pull`) |
 | `test`        | `pytest` for MCP test suites                                                                            |
-| `smoke`       | Run post-install smoke tests (loads `PVE_*` from `~/.cursor/mcp.json`)                                  |
-| `cursor-sync` | Merge each `mcp/*/mcp.json.example` into Cursor MCP configs (preserves existing `env` secrets) |
+| `smoke`       | Run post-install smoke tests (loads creds from `~/.cursor/mcp.json`)                                    |
+| `cursor-sync` | Merge each `mcp/*/mcp.json.example` into Cursor MCP configs (preserves existing `env` secrets)          |
+| `skills-sync` | Install/refresh `.cursor/skills/{papita-proxmox-lab-map,proxmox-ve-mcp,truenas-mcp}` for `--scope`     |
 
 **Auto-sync (recommended once per clone):**
 
@@ -50,7 +77,7 @@ This installs:
 - **Git hooks** (`post-merge`, `post-checkout`) — refresh MCP configs after `git pull`
 - **Cursor `sessionStart` hook** — sync when an agent session opens in this repo
 
-Both run `./deploy/mcp.sh cursor-sync --all-targets --if-changed --enable-agent`, which updates:
+Both run `./deploy/mcp.sh cursor-sync --all-targets --if-changed --enable-agent` (`--all-targets` ≡ `--scope both`), which updates:
 
 | Target | Used by |
 | ------ | ------- |
@@ -63,11 +90,14 @@ The first project sync seeds `.cursor/mcp.json` from your user config so secrets
 
 ```bash
 ./deploy/mcp.sh install --server proxmox-ve-mcp   # one package only
+./deploy/mcp.sh update --scope user               # refresh packages + user mcp.json + skills
+./deploy/mcp.sh skills-sync --scope both          # skills only
 ./deploy/mcp.sh smoke --extended                   # proxmox-ve full matrix
 ./deploy/mcp.sh smoke --server truenas-mcp         # TrueNAS WebSocket auth
-./deploy/mcp.sh cursor-sync --all-targets
+./deploy/mcp.sh cursor-sync --scope both
+./deploy/mcp.sh cursor-sync --all-targets          # same as --scope both
 ./deploy/mcp.sh cursor-sync --cursor-config ~/.cursor/mcp.json
-./deploy/mcp.sh cursor-sync --all-targets --if-changed --enable-agent
+./deploy/mcp.sh cursor-sync --scope both --if-changed --enable-agent
 ```
 
 ---
@@ -120,7 +150,8 @@ See [proxmox-ve-mcp/docs/SMOKE_TESTS.md](./proxmox-ve-mcp/docs/SMOKE_TESTS.md) f
 
 ```bash
 git pull
-./deploy/mcp.sh update
+./deploy/mcp.sh update            # reinstall + sync user+project mcp.json
+# Or: ./deploy/mcp.sh update --scope project
 # Reload Cursor if pyproject.toml or entry points changed
 ./deploy/mcp.sh smoke --extended
 ```
@@ -140,7 +171,7 @@ git pull
 
 - **Never commit** API tokens or `~/.cursor/mcp.json` with real secrets.
 - Proxmox: follow [proxmox-ve-mcp/docs/PVE_TOKEN_SETUP.md](./proxmox-ve-mcp/docs/PVE_TOKEN_SETUP.md) — assign roles to the **API token**, not only the user.
-- `cursor-sync` updates `command`, `args`, and `cwd` but **keeps existing `env`** values when a server is already configured.
+- `cursor-sync` / install sync updates `command`, `args`, and `cwd` but **keeps existing `env`** values when a server is already configured.
 
 ---
 
@@ -149,7 +180,7 @@ git pull
 | Issue                                     | Fix                                                             |
 | ----------------------------------------- | --------------------------------------------------------------- |
 | `Command not found: proxmox-ve-mcp-smoke` | `./deploy/mcp.sh install`                                       |
-| MCP not visible in Cursor                 | Reload Cursor; check `~/.cursor/mcp.json` syntax                |
+| MCP not visible in Cursor                 | Reload Cursor; check `~/.cursor/mcp.json` / `.cursor/mcp.json`  |
 | Poetry wrong Python                       | Requires 3.11+; run from repo root                              |
 | Smoke test 403                            | Fix token ACL — run `pve_check_token` or see PVE_TOKEN_SETUP.md |
 | `ModuleNotFoundError`                     | `./deploy/mcp.sh update`                                        |

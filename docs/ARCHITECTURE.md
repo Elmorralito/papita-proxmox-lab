@@ -160,12 +160,12 @@ Server: **`172.16.0.100`**. Options (PVE): `vers=4.1,hard,nconnect=4`.
 | Export path | PVE storage ID | Content | Purpose |
 |-------------|----------------|---------|---------|
 | `/mnt/main_data_storage` | `truenas-nfs-main` | `images,rootdir` | VM / LXC disks (HA-capable) |
-| `/mnt/main_data_storage/ct-templates` | `truenas-nfs-media` | `iso,vztmpl,import` | ISOs, CT templates, OCI import |
+| `/mnt/main_data_storage/ct-templates` | `truenas-nfs-media` | `iso,vztmpl,import,snippets` | ISOs, CT templates, OCI import, cloud-init snippets |
 | `/mnt/main_data_storage/logs` | `truenas-nfs-logs` | `backup` | Backup / dump target |
 
 Source of truth for IDs and content types: `deploy/setup/misc/cluster/default.truenas.nfs.env`.
 
-**NFS client ACL (live):** exports allow network `172.16.0.0/16` and hosts **`172.16.0.101`, `.102`, `.104`**. Host **`172.16.0.103` (`pve-003`) is not listed** — if `pve-003` must mount these shares, add it on TrueNAS (Sharing → NFS) before relying on that node for NFS-backed guests.
+**NFS client ACL (live 2026-09-23):** `pve-003` (`172.16.0.103`) can mount and write `truenas-nfs-main` (verified). Prefer allowing the full LAN `172.16.0.0/16` (or explicit `.101`–`.104`) on TrueNAS NFS shares.
 
 ### 6.3 Node-local storage
 
@@ -228,7 +228,7 @@ True `pvecm` / QDevice vote detail still requires SSH (`pvecm status`) — not f
 | Pool size | ≈5.44 TiB raw (API `size` ≈ 5.98×10¹² bytes) |
 | Datasets | `ct-templates` (~124 MiB), `logs`, `oci-images` (empty placeholder) |
 | NFS exports | `/mnt/main_data_storage`, `…/ct-templates`, `…/logs` |
-| NFS hosts ACL | `.101`, `.102`, `.104` only — **`.103` (`pve-003`) still missing** |
+| NFS hosts ACL | `.101`–`.104` usable (write verified on `.103` 2026-09-23) |
 
 Repo overlay matches live IDs: `deploy/setup/misc/cluster/default.truenas.nfs.env`.
 
@@ -268,7 +268,8 @@ Work performed to reach the state in §8. Guests **100/101 were not migrated**; 
 - pfSense / Fedora disk placement (`local-lvm`).
 - `HA_AUTO_ENROLL_NFS_GUESTS=0`.
 - QDevice host file (`172.16.0.99`).
-- NFS host ACL still omitting `172.16.0.103` (open follow-up if `pve-003` must serve NFS-backed guests).
+- NFS host ACL: `.103` (`pve-003`) write-verified on `truenas-nfs-main` (2026-09-23).
+- Cloud-init QEMU template: VMID **9000** `ubuntu-2404-cloud` on `truenas-nfs-main`; snippets enabled on `truenas-nfs-media`.
 
 ---
 

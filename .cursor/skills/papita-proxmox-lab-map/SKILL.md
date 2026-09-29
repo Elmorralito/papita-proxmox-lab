@@ -42,7 +42,7 @@ Repo context:
 ```
 Local workstation
   deploy/toolkit.sh ──► deploy/proxmox.sh ──SSH──► PVE nodes (deploy/setup/setup-pve-node.sh)
-  deploy/mcp.sh     ──► Cursor MCP servers
+  deploy/mcp.sh     ──► Cursor MCP servers + skills (.cursor/skills/)
 ```
 
 ## Exploration workflow
@@ -54,6 +54,7 @@ When you need to locate or understand a component:
 3. **Read the entrypoint** — don't start in submodules; follow the call chain:
    - `deploy/toolkit.sh` → `proxmox.sh`
    - `deploy/proxmox.sh setup-node` → SCP `deploy/setup/`, `deploy/python/`, `utils.sh`, `usage.sh`, `docs/setup-pve-node.usage.txt` → `bash setup-pve-node.sh`
+   - `deploy/mcp.sh install` → Poetry MCP packages + `mcp.json` sync + skills (`papita-proxmox-lab-map`, `proxmox-ve-mcp`, `truenas-mcp`)
 4. **Check untracked config** — `.env` (gitignored), `~/.cursor/mcp.json`
 5. **Note absent dirs** — `libs/`, `tests/` referenced by toolkit but not yet in repo
 

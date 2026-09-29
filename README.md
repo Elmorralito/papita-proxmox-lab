@@ -15,7 +15,7 @@ Network diagram source: [`docs/Diagrams.drawio`](./docs/Diagrams.drawio) (export
 | **Cluster ops**     | [`deploy/proxmox.sh`](./deploy/proxmox.sh)                                                                                                                  | SSH to nodes: `setup-node`, `setup-cluster-ha`, `get-temp`, `start-cluster`, `stop-cluster`               |
 | **Tailnet + LAN**   | [`deploy/tailscale-pfsense-lan.sh`](./deploy/tailscale-pfsense-lan.sh)                                                                                      | Approve pfSense routes, patch Tailscale ACLs, verify admin path to main PVE                               |
 | **pfSense pfREST**  | [`deploy/pfsense-restapi-access.sh`](./deploy/pfsense-restapi-access.sh) · [`deploy/pfsense-firewall-tailscale.sh`](./deploy/pfsense-firewall-tailscale.sh) | Bootstrap REST API access and apply agreed Tailscale-tab firewall rules via pfREST                        |
-| **Cursor MCP**      | [`mcp/`](./mcp/) · [`deploy/mcp.sh`](./deploy/mcp.sh)                                                                                                       | Install, test, and sync MCP servers for Proxmox VE and pfSense                                            |
+| **Cursor MCP**      | [`mcp/`](./mcp/) · [`deploy/mcp.sh`](./deploy/mcp.sh)                                                                                                       | Pre-install MCP packages, sync Cursor configs, install agent skills (user/project)                        |
 | **Runbooks**        | [`docs/TIPSNTRICKS.md`](./docs/TIPSNTRICKS.md)                                                                                                              | Ceph, cluster join, pfSense, Tailscale, VM clipboard, MCP smoke, maintenance                              |
 
 **Lab topology (default):**
@@ -24,7 +24,7 @@ Network diagram source: [`docs/Diagrams.drawio`](./docs/Diagrams.drawio) (export
 - **Main PVE admin node:** `172.16.0.101` (LAN + optional MagicDNS TLS on step 17)
 - **Tailscale:** all PVE nodes join the tailnet for remote admin; pfSense is the **subnet router** for LAN; workers do not advertise routes
 - **Remote admin:** reach Proxmox via pfSense subnet route and/or main-node Tailscale TLS — not worker `:8006` on the tailnet
-- **AI agents (Cursor):** MCP over stdio to `proxmox-ve-mcp` (`:8006`) and `pfsense-mcp` (pfREST `:443`)
+- **AI agents (Cursor):** MCP over stdio to `proxmox-ve-mcp` (`:8006`), `pfsense-mcp` (pfREST `:443`), and `truenas-mcp` — run `./deploy/mcp.sh install` once so Cursor can spawn them; agents do not install packages at runtime
 
 ---
 
@@ -34,7 +34,7 @@ Network diagram source: [`docs/Diagrams.drawio`](./docs/Diagrams.drawio) (export
                     ┌─────────────────────────────────────────┐
                     │  Workstation (this repo)                 │
                     │  deploy/toolkit.sh · deploy/mcp.sh       │
-                    │  Cursor ──► proxmox-ve-mcp / pfsense-mcp │
+                    │  Cursor ──► proxmox-ve / pfsense / truenas MCP │
                     └───────┬─────────────────────────────┘
                             │
               deploy/proxmox.sh
@@ -72,7 +72,7 @@ papita-proxmox-lab/
 ├── deploy/                         # Orchestration + PVE bundles (run from repo root)
 │   ├── toolkit.sh                  # Main CLI
 │   ├── proxmox.sh                  # SSH → PVE nodes
-│   ├── mcp.sh                      # Install / test / smoke / cursor-sync MCP servers
+│   ├── mcp.sh                      # Install/update MCP pkgs + sync user/project mcp.json
 │   ├── tailscale-pfsense-lan.sh    # Tailscale API + pfSense LAN helper
 │   ├── pfsense-restapi-access.sh   # pfREST Allowed Interfaces bootstrap
 │   ├── pfsense-firewall-tailscale.sh # Tailscale-tab firewall rules via pfREST
@@ -88,9 +88,10 @@ papita-proxmox-lab/
 │       ├── setup-pve-node.usage.txt
 │       └── tailscale-pfsense-lan.usage.txt
 ├── mcp/                            # Cursor MCP servers (Poetry path deps)
-│   ├── README.md                   # Install guide for all MCP packages
+│   ├── README.md                   # Install guide (scope, update, smoke)
 │   ├── proxmox-ve-mcp/             # Proxmox VE REST — 21 tools (read + gated write)
-│   └── pfsense-mcp/                # pfSense pfREST — 7 read-only tools + policy framework
+│   ├── pfsense-mcp/                # pfSense pfREST — 7 read-only tools + policy framework
+│   └── truenas-mcp/                # TrueNAS WebSocket — storage health + gated writes
 ├── docs/
 │   ├── TIPSNTRICKS.md              # Operational runbooks
 │   └── Diagrams.drawio
@@ -114,7 +115,7 @@ papita-proxmox-lab/
 | **jq**                          | Proxmox JSON (`pvesh`, cluster discovery, `mcp.json` merge)                 |
 | **ssh**, **scp**                | `deploy/proxmox.sh`                                                         |
 | **pre-commit** (optional)       | `./deploy/toolkit.sh … --pre-commit` or local hooks                         |
-| **Cursor** (optional)           | MCP client for `proxmox-ve` and `pfsense` servers                           |
+| **Cursor** (optional)           | MCP client for `proxmox-ve`, `pfsense`, and `truenas` servers                |
 
 ### Clone and Python dev environment
 
@@ -131,17 +132,20 @@ VS Code / Cursor: [`.vscode/settings.json`](./.vscode/settings.json) points the 
 
 ### MCP servers (Cursor)
 
+`deploy/mcp.sh` **prepares** the Poetry venv, Cursor `mcp.json` configs, and agent **skills** (under `.cursor/skills/`) ahead of time. Cursor then launches each server with `poetry run …` from the repo root — agents do **not** install MCP packages at runtime; they use the bundled skills to know when to call each MCP.
+
 ```bash
 chmod +x deploy/mcp.sh   # once
-./deploy/mcp.sh install
-./deploy/mcp.sh cursor-sync --all-targets
-./deploy/install-git-hooks.sh   # optional: auto-sync on git pull + agent session start
-# Edit ~/.cursor/mcp.json → set PVE_TOKEN_SECRET, PFSENSE_API_KEY, hosts as needed
+./deploy/mcp.sh install                 # venv + sync mcp.json + install skills (both scopes)
+# Or: --scope user | --scope project | --no-sync | --no-skills
+./deploy/install-git-hooks.sh           # optional: auto-sync on git pull + agent session start
+# Edit ~/.cursor/mcp.json → set API secrets (project config is seeded from user on first sync)
 ./deploy/mcp.sh smoke --server proxmox-ve-mcp
 ./deploy/mcp.sh smoke --server pfsense-mcp
+./deploy/mcp.sh smoke --server truenas-mcp
 ```
 
-Reload **Cursor** after `cursor-sync`. Full guide: [`mcp/README.md`](./mcp/README.md).
+After `git pull` when MCP code or skills changed: `./deploy/mcp.sh update`. Reload **Cursor** after install/sync. Full guide: [`mcp/README.md`](./mcp/README.md).
 
 ### PVE node prerequisites
 
@@ -166,16 +170,25 @@ Used by `deploy/tailscale-pfsense-lan.sh` and as optional **Tailscale Admin API*
 ./deploy/toolkit.sh proxmox -e dev --env-file .env -ip 172.16.0.101 -pa setup-node
 ```
 
-### Cursor MCP (`~/.cursor/mcp.json`)
+### Cursor MCP (`mcp.json`)
 
-`./deploy/mcp.sh cursor-sync --all-targets` merges each package's `mcp.json.example` into `~/.cursor/mcp.json` and `.cursor/mcp.json` (preserves existing `env` secrets). Run `./deploy/install-git-hooks.sh` once to keep both configs updated after `git pull` and on each agent session. Set **`cwd`** to the **repo root** so Poetry reuses `.venv/`.
+`install` / `update` (default `--scope both`) and `cursor-sync` merge each package's `mcp.json.example` into Cursor configs while **preserving existing `env` secrets**:
+
+| Scope | Path | Used by |
+| ----- | ---- | ------- |
+| `user` | `~/.cursor/mcp.json` | Cursor IDE + cursor-agent (user-wide) |
+| `project` | `.cursor/mcp.json` | This workspace |
+| `both` | both (default for install/update) | Recommended |
+
+Run `./deploy/install-git-hooks.sh` once to keep both configs updated after `git pull` and on each agent session. Set **`cwd`** to the **repo root** so Poetry reuses `.venv/`.
 
 | Server id    | Package          | Key variables                                                                         |
 | ------------ | ---------------- | ------------------------------------------------------------------------------------- |
 | `proxmox-ve` | `proxmox-ve-mcp` | `PVE_HOST`, `PVE_API_TOKEN` or split `PVE_USER` / `PVE_TOKEN_ID` / `PVE_TOKEN_SECRET` |
 | `pfsense`    | `pfsense-mcp`    | `PFSENSE_HOST` (IPv4/IPv6 only), `PFSENSE_API_KEY`, optional `PFSENSE_LOG_LEVEL`      |
+| `truenas`    | `truenas-mcp`    | See [`mcp/truenas-mcp/`](./mcp/truenas-mcp/) `.env.example` / `mcp.json.example`      |
 
-Setup guides: [proxmox-ve-mcp/docs/PVE_TOKEN_SETUP.md](./mcp/proxmox-ve-mcp/docs/PVE_TOKEN_SETUP.md), [pfsense-mcp/docs/PFSENSE_API_KEY_SETUP.md](./mcp/pfsense-mcp/docs/PFSENSE_API_KEY_SETUP.md).
+Setup guides: [proxmox-ve-mcp/docs/PVE_TOKEN_SETUP.md](./mcp/proxmox-ve-mcp/docs/PVE_TOKEN_SETUP.md), [pfsense-mcp/docs/PFSENSE_API_KEY_SETUP.md](./mcp/pfsense-mcp/docs/PFSENSE_API_KEY_SETUP.md), [truenas-mcp/docs/API_KEY_SETUP.md](./mcp/truenas-mcp/docs/API_KEY_SETUP.md).
 
 ### SSH to PVE
 
@@ -218,29 +231,40 @@ Common flags: `--env-file`, `--aws-sso` / `--aws-mfa`, `--pre-commit`, `--proxmo
 
 ### MCP servers (`deploy/mcp.sh`)
 
-| Action        | Description                                                                 |
-| ------------- | --------------------------------------------------------------------------- |
-| `list`        | Show packages under `mcp/` and Cursor server ids                            |
-| `install`     | `poetry install --with test`; register MCP console scripts                  |
-| `update`      | Same as `install` — run after `git pull`                                    |
-| `test`        | `pytest` for all MCP test suites                                            |
-| `smoke`       | Live connectivity smoke (loads credentials from `~/.cursor/mcp.json`)       |
-| `cursor-sync` | Merge `mcp.json.example` into `~/.cursor/mcp.json` (keeps existing secrets) |
+Prepares the repo Poetry venv, Cursor launch configs, and agent skills that teach when to invoke each MCP. Cursor spawns servers at session time; it does not re-run install.
+
+| Action        | Description                                                                                          |
+| ------------- | ---------------------------------------------------------------------------------------------------- |
+| `list`        | Show packages under `mcp/`, Cursor server ids, and bundled skills                                    |
+| `install`     | Poetry install + register console scripts; sync mcp.json; install skills for `--scope` (default `both`) |
+| `update`      | Re-lock/reinstall + refresh mcp.json + skills for `--scope` — run after `git pull`                   |
+| `test`        | `pytest` for all MCP test suites                                                                     |
+| `smoke`       | Live connectivity smoke (loads credentials from `~/.cursor/mcp.json`)                                |
+| `cursor-sync` | Merge `mcp.json.example` into user and/or project mcp.json (keeps existing secrets)                  |
+| `skills-sync` | Copy/refresh bundled skills for `--scope` (no Poetry)                                                |
+
+Bundled skills (source `.cursor/skills/`): `papita-proxmox-lab-map`, `proxmox-ve-mcp`, `truenas-mcp`. With `--scope user` or `both`, copies land in `~/.cursor/skills/` (repo-relative links rewritten to absolute paths).
+
+Options: `--scope user|project|both`, `--no-sync`, `--no-skills`, `--server NAME`, `--all-targets` (alias for `--scope both`).
 
 ```bash
-./deploy/mcp.sh install
-./deploy/mcp.sh cursor-sync
+./deploy/mcp.sh install                                    # venv + mcp.json + skills (both)
+./deploy/mcp.sh install --scope user                       # user mcp.json + ~/.cursor/skills
+./deploy/mcp.sh update                                     # after git pull
+./deploy/mcp.sh skills-sync --scope both                   # skills only
 ./deploy/mcp.sh smoke --server proxmox-ve-mcp              # 6 basic checks
 ./deploy/mcp.sh smoke --server proxmox-ve-mcp --extended   # 13 checks (guests, storage, Ceph)
 ./deploy/mcp.sh smoke --server pfsense-mcp                 # 9 checks (core + lab policy)
+./deploy/mcp.sh smoke --server truenas-mcp
 ```
 
 | Package            | Tools | Console scripts (examples)                                                          |
 | ------------------ | ----- | ----------------------------------------------------------------------------------- |
 | **proxmox-ve-mcp** | 21    | `proxmox-ve-mcp`, `proxmox-ve-mcp-smoke`                                            |
 | **pfsense-mcp**    | 7     | `pfsense-mcp`, `pfsense-mcp-smoke`, `pfsense-mcp-bootstrap`, `pfsense-mcp-firewall` |
+| **truenas-mcp**    | —     | `truenas-mcp`, `truenas-mcp-smoke`                                                  |
 
-In Cursor, call **`pve_run_smoke_tests`** or **`pfs_run_smoke_tests`** after install. Package READMEs: [`mcp/proxmox-ve-mcp/README.md`](./mcp/proxmox-ve-mcp/README.md), [`mcp/pfsense-mcp/README.md`](./mcp/pfsense-mcp/README.md).
+In Cursor, call **`pve_run_smoke_tests`** or **`pfs_run_smoke_tests`** after install. Package READMEs: [`mcp/proxmox-ve-mcp/README.md`](./mcp/proxmox-ve-mcp/README.md), [`mcp/pfsense-mcp/README.md`](./mcp/pfsense-mcp/README.md), [`mcp/truenas-mcp/README.md`](./mcp/truenas-mcp/README.md).
 
 ### pfSense pfREST helpers
 
@@ -321,6 +345,7 @@ Actions: `configure`, `approve-routes`, `patch-acl`, `verify`, `pfsense-steps`. 
 | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------ |
 | [`mcp/proxmox-ve-mcp/`](./mcp/proxmox-ve-mcp/)                                                   | Proxmox VE MCP server (FastMCP, httpx, Pydantic)       |
 | [`mcp/pfsense-mcp/`](./mcp/pfsense-mcp/)                                                         | pfSense pfREST MCP server + lab policy framework       |
+| [`mcp/truenas-mcp/`](./mcp/truenas-mcp/)                                                         | TrueNAS WebSocket MCP server (storage, Scrutiny, writes) |
 | [`deploy/python/misc/cluster/discover_hosts.py`](./deploy/python/misc/cluster/discover_hosts.py) | Step 7: DNS peer discovery → `/etc/hosts` lines        |
 | [`deploy/python/misc/cluster/domain_pattern.py`](./deploy/python/misc/cluster/domain_pattern.py) | Wildcard domain suffix expansion (`oldtimers.*`, etc.) |
 | [`deploy/python/datafiles/`](./deploy/python/datafiles/)                                         | Default host lists, regex, domain suffix labels        |
@@ -329,13 +354,13 @@ On PVE nodes, Python is **runtime-only** (no Poetry). On the workstation, Poetry
 
 ```bash
 poetry run pre-commit run --all-files
-poetry run pytest mcp/proxmox-ve-mcp/tests/ mcp/pfsense-mcp/tests/
+poetry run pytest mcp/proxmox-ve-mcp/tests/ mcp/pfsense-mcp/tests/ mcp/truenas-mcp/tests/
 ./deploy/mcp.sh test
 # or
 ./deploy/toolkit.sh none -e dev --pre-commit
 ```
 
-Both MCP packages emit **structured JSON logs on stderr** (`PVE_LOG_LEVEL` / `PFSENSE_LOG_LEVEL`); stdout stays free for MCP stdio protocol traffic.
+MCP packages emit **structured JSON logs on stderr** (`PVE_LOG_LEVEL` / `PFSENSE_LOG_LEVEL` / TrueNAS equivalents); stdout stays free for MCP stdio protocol traffic.
 
 ---
 
@@ -359,9 +384,10 @@ Both MCP packages emit **structured JSON logs on stderr** (`PVE_LOG_LEVEL` / `PF
 
 | Document                                                                        | Contents                                                                      |
 | ------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| [**MCP install guide**](./mcp/README.md)                                        | `deploy/mcp.sh`, Cursor sync, smoke tests, both packages                      |
+| [**MCP install guide**](./mcp/README.md)                                        | `deploy/mcp.sh` install/update, `--scope`, Cursor sync, smoke                 |
 | [**Proxmox VE MCP**](./mcp/proxmox-ve-mcp/README.md)                            | 21 tools, token setup, smoke catalog, requirements                            |
 | [**pfSense MCP**](./mcp/pfsense-mcp/README.md)                                  | 7 read tools, pfREST setup, policy framework                                  |
+| [**TrueNAS MCP**](./mcp/truenas-mcp/README.md)                                  | WebSocket API, storage health, gated writes                                   |
 | [**pfSense lab policy**](./mcp/pfsense-mcp/docs/POLICY.md)                      | Tailscale firewall, REST API access, endpoint privilege domains               |
 | [**Proxmox Tips & Tricks**](./docs/TIPSNTRICKS.md)                              | Ceph, cluster destroy/join, corosync, pfSense, Tailscale ACLs, MCP, Fedora VM |
 | [**PVE setup manual**](./deploy/docs/setup-pve-node.usage.txt)                  | Full 17-step reference (shown in `less` during setup)                         |
@@ -378,6 +404,7 @@ Both MCP packages emit **structured JSON logs on stderr** (`PVE_LOG_LEVEL` / `PF
 | Tailscale / pfSense automation       | Active (`tailscale-pfsense-lan.sh`, `pfsense-*` pfREST helpers) |
 | **Cursor MCP — Proxmox VE**          | Active (`proxmox-ve-mcp` v0.1.0a5 — read + gated write)         |
 | **Cursor MCP — pfSense**             | Active (`pfsense-mcp` v0.1.0a1 — read-only + lab policy verify) |
+| **Cursor MCP — TrueNAS**             | Active (`truenas-mcp` — storage health + gated writes)          |
 | Legacy Python app packages (`libs/`) | Referenced by toolkit; not in repository                        |
 
 ---
