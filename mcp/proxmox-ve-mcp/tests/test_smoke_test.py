@@ -84,13 +84,21 @@ async def test_smoke_tests_extended_full_access(init_pve) -> None:
     respx.get("https://pve.local:8006/api2/json/nodes/pvenode-001/ceph/status").mock(
         return_value=httpx.Response(501, json={"data": None})
     )
+    respx.get("https://pve.local:8006/api2/json/cluster/status").mock(
+        return_value=httpx.Response(200, json={"data": [{"type": "cluster", "name": "c", "quorate": 1, "nodes": 2}]})
+    )
+    respx.get("https://pve.local:8006/api2/json/cluster/options").mock(
+        return_value=httpx.Response(200, json={"data": {"ha": "shutdown_policy=conditional"}})
+    )
 
     report = await run_smoke_tests(extended=True)
     assert report["summary"]["failed"] == 0
     assert report["access_level"] == AccessLevel.READ_FULL.value
-    ids = {t["id"] for t in report["tests"]}
-    assert "cluster_config_nodes" in ids
-    assert "ceph_status" in ids
+    by_id = {t["id"]: t for t in report["tests"]}
+    assert "cluster_config_nodes" in by_id
+    assert "ceph_status" in by_id
+    assert by_id["cluster_quorum"]["status"] == "pass"
+    assert by_id["ha_shutdown_policy"]["status"] == "warn"
 
 
 @respx.mock

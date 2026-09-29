@@ -5,7 +5,8 @@ from typing import Any
 
 from proxmox_ve_mcp.client.http import PveClient
 from proxmox_ve_mcp.client.tasks import wait_for_task
-from proxmox_ve_mcp.context import get_client
+from proxmox_ve_mcp.constants import TASK_WAIT_MARGIN_SEC
+from proxmox_ve_mcp.context import get_client, get_settings
 from proxmox_ve_mcp.tools.helpers import parse_model, redact_config, require_confirm
 from proxmox_ve_mcp.tools.response import ok_response, tool_handler, write_tool_handler
 from proxmox_ve_mcp.tools.schemas import GuestRefInput, validate_node_name
@@ -96,10 +97,56 @@ async def pve_shutdown_guest_impl(
     }
 
     if wait_for_completion and isinstance(upid, str):
-        result["task"] = await wait_for_task(client, ref.node, upid)
+        result["task"] = await wait_for_task(client, ref.node, upid, timeout_sec=timeout + TASK_WAIT_MARGIN_SEC)
 
     duration_ms = int((time.perf_counter() - started) * 1000)
     return ok_response("pve_shutdown_guest", result, duration_ms=duration_ms)
+
+
+@write_tool_handler(
+    "pve_stop_guest",
+    mutating=True,
+    audit_fields=("node", "vmid", "guest_type", "reason", "overrule_shutdown"),
+)
+async def pve_stop_guest_impl(  # pylint: disable=too-many-arguments
+    node: str,
+    vmid: int,
+    guest_type: str,
+    confirm: bool,
+    reason: str,
+    overrule_shutdown: bool = False,
+    wait_for_completion: bool = False,
+) -> str:
+    """Hard stop (power off) a VM or CT; unsaved guest state is lost."""
+    require_confirm(confirm)
+    ref = parse_model(GuestRefInput, node=node, vmid=vmid, guest_type=guest_type)
+    assert isinstance(ref, GuestRefInput)
+    if len(reason.strip()) < 3:
+        raise ValueError("reason is required (min 3 characters) for a hard stop")
+
+    started = time.perf_counter()
+    client = get_client()
+    warnings = [f"Hard stop of {ref.guest_type}/{ref.vmid}: equivalent to pulling power; unsaved state is lost."]
+    if ref.vmid in get_settings().infra_vmids:
+        warnings.append(
+            f"VMID {ref.vmid} is a lab infrastructure guest (LAN router): TrueNAS becomes unreachable."
+        )
+
+    data = {"overrule-shutdown": 1} if overrule_shutdown else None
+    upid = await client.post(f"/nodes/{ref.node}/{ref.guest_type}/{ref.vmid}/status/stop", data=data)
+    result: dict[str, Any] = {
+        "node": ref.node,
+        "vmid": ref.vmid,
+        "guest_type": ref.guest_type,
+        "reason": reason.strip(),
+        "upid": upid,
+    }
+
+    if wait_for_completion and isinstance(upid, str):
+        result["task"] = await wait_for_task(client, ref.node, upid, timeout_sec=TASK_WAIT_MARGIN_SEC * 2)
+
+    duration_ms = int((time.perf_counter() - started) * 1000)
+    return ok_response("pve_stop_guest", result, duration_ms=duration_ms, warnings=warnings)
 
 
 @write_tool_handler(
@@ -127,7 +174,7 @@ async def pve_stopall_guests_impl(
     result: dict[str, Any] = {"node": node, "upid": upid}
 
     if wait_for_completion and isinstance(upid, str):
-        result["task"] = await wait_for_task(client, node, upid)
+        result["task"] = await wait_for_task(client, node, upid, timeout_sec=timeout + TASK_WAIT_MARGIN_SEC)
 
     duration_ms = int((time.perf_counter() - started) * 1000)
     return ok_response("pve_stopall_guests", result, duration_ms=duration_ms)

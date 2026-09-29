@@ -8,6 +8,8 @@ LAN_TEST_IP="${LAN_TEST_IP:-172.16.0.101}"
 MAIN_PVE_LAN_IP="${MAIN_PVE_LAN_IP:-172.16.0.101}"
 MAIN_PVE_TAILSCALE_NAME="${MAIN_PVE_TAILSCALE_NAME:-}"
 PFSENSE_NAME="${PFSENSE_NAME:-pfsense-fw001}"
+ROUTER_NAME="${ROUTER_NAME:-openwrt-pi}"
+ROUTER_TAG="${ROUTER_TAG:-tag:openwrt-lan-router}"
 TAILSCALE_TAILNET="${TAILSCALE_TAILNET:-tailf1ad0d.ts.net}"
 
 while [[ "$#" -gt 0 ]]; do
@@ -91,10 +93,10 @@ ts_api() {
     rm -f "$tmp"
 }
 
-find_pfsense_device_id() {
+find_router_device_id() {
     local devices_json device_id
     devices_json="$(ts_api GET "/tailnet/${TAILSCALE_TAILNET}/devices")"
-    device_id="$(python3 - <<'PY' "$devices_json" "$PFSENSE_NAME"
+    device_id="$(python3 - <<'PY' "$devices_json" "$ROUTER_NAME"
 import json, sys
 data = json.loads(sys.argv[1])
 needle = sys.argv[2].lower()
@@ -107,7 +109,7 @@ for dev in data.get("devices", []):
 PY
 )"
     if [[ -z "$device_id" ]]; then
-        log ERROR "Could not find pfSense device matching name '${PFSENSE_NAME}'."
+        log ERROR "Could not find LAN router device matching name '${ROUTER_NAME}'."
         exit 1
     fi
     printf '%s' "$device_id"
@@ -126,32 +128,34 @@ en = data.get("enabledRoutes") or []
 if cidr not in adv:
     print(json.dumps({"status": "missing_advertise", "advertised": adv}))
 else:
-    new_en = sorted(set(en) | {cidr})
+    exit_routes = {r for r in ("0.0.0.0/0", "::/0") if r in adv}
+    new_en = sorted(set(en) | {cidr} | exit_routes)
     print(json.dumps({"status": "ok", "routes": new_en, "advertised": adv}))
 PY
 )"
     status="$(python3 -c "import json,sys; print(json.load(sys.stdin)['status'])" <<<"$payload")"
     if [[ "$status" == "missing_advertise" ]]; then
-        log WARN "pfSense is not advertising ${LAN_CIDR} yet."
-        log INFO "On pfSense: VPN → Tailscale → Settings → Routing → Advertised Routes → add ${LAN_CIDR} → Save."
+        log WARN "${ROUTER_NAME} is not advertising ${LAN_CIDR} yet."
+        log INFO "On OpenWrt: tailscale set --advertise-routes=${LAN_CIDR} --advertise-exit-node"
         log INFO "Then re-run: $0 approve-routes"
         return 1
     fi
     payload="$(python3 -c "import json,sys; d=json.load(sys.stdin); print(json.dumps({'routes': d['routes']}))" <<<"$payload")"
     ts_api POST "/device/${device_id}/routes" "$payload" >/dev/null
-    log INFO "Enabled subnet route ${LAN_CIDR} on device ${device_id}."
+    log INFO "Enabled subnet route ${LAN_CIDR} (and exit node, if advertised) on device ${device_id}."
 }
 
 patch_acl_grants() {
     local current merged
     current="$(ts_api GET "/tailnet/${TAILSCALE_TAILNET}/acl")"
-    merged="$(python3 - <<'PY' "$current" "$LAN_CIDR" "$MAIN_PVE_LAN_IP" "$MAIN_PVE_TAILSCALE_NAME"
+    merged="$(python3 - <<'PY' "$current" "$LAN_CIDR" "$MAIN_PVE_LAN_IP" "$MAIN_PVE_TAILSCALE_NAME" "$ROUTER_TAG"
 import json, sys
 
 acl = json.loads(sys.argv[1])
 lan = sys.argv[2]
 main_lan = sys.argv[3]
 main_ts = sys.argv[4].strip()
+router_tag = sys.argv[5]
 main_ip = f"{main_lan}/32"
 
 tag_owners = acl.setdefault("tagOwners", {})
@@ -159,6 +163,7 @@ for tag in (
     "tag:auth-client",
     "tag:pfsense-oldtimers-client",
     "tag:pfsense-lan-router",
+    router_tag,
     "tag:private-node",
     "tag:pve-oldtimers-cluster",
     "tag:server-node",
@@ -168,6 +173,8 @@ for tag in (
 new_grants = [
     {"src": ["tag:auth-client"], "dst": [lan], "ip": ["*"]},
     {"src": ["tag:pfsense-oldtimers-client"], "dst": [lan], "ip": ["*"]},
+    {"src": ["tag:auth-client"], "dst": ["autogroup:internet"], "ip": ["*"]},
+    {"src": ["tag:pfsense-oldtimers-client"], "dst": ["autogroup:internet"], "ip": ["*"]},
     {"src": ["tag:private-node"], "dst": [lan], "ip": ["*"]},
     {"src": ["tag:private-node"], "dst": [main_ip], "ip": ["tcp:8006", "tcp:22"]},
     {"src": ["tag:pve-oldtimers-cluster"], "dst": [lan], "ip": ["*"]},
@@ -200,17 +207,24 @@ for g in new_grants:
     if grant_key(g) not in existing:
         grants.append(g)
 
-auto = acl.setdefault("autoApprovers", {}).setdefault("routes", {})
-for tag in ("tag:pfsense-lan-router",):
-    routes = auto.setdefault(tag, [])
-    if lan not in routes:
-        routes.append(lan)
+# autoApprovers.routes is keyed by CIDR; drop legacy tag-keyed entries.
+approvers = acl.setdefault("autoApprovers", {})
+auto = approvers.setdefault("routes", {})
+for key in [k for k in auto if k.startswith(("tag:", "group:", "autogroup:"))]:
+    del auto[key]
+# Single primary router for the lab LAN (no HA pair with pfSense).
+auto[lan] = [a for a in auto.get(lan, []) if a != "tag:pfsense-lan-router"]
+if router_tag not in auto[lan]:
+    auto[lan].append(router_tag)
+exit_approvers = approvers.setdefault("exitNode", [])
+if router_tag not in exit_approvers:
+    exit_approvers.append(router_tag)
 
 print(json.dumps(acl))
 PY
 )"
     ts_api POST "/tailnet/${TAILSCALE_TAILNET}/acl" "$merged" >/dev/null
-    log INFO "ACL updated with grants for ${LAN_CIDR} (main PVE admin: ${MAIN_PVE_LAN_IP})."
+    log INFO "ACL updated with grants for ${LAN_CIDR} (main PVE admin: ${MAIN_PVE_LAN_IP}); ${ROUTER_TAG} auto-approves ${LAN_CIDR} and exit node."
 }
 
 print_pfsense_steps() {
@@ -281,8 +295,8 @@ verify_connectivity() {
 action_configure() {
     require_tailscale_api
     local device_id
-    device_id="$(find_pfsense_device_id)"
-    log INFO "pfSense device id: ${device_id}"
+    device_id="$(find_router_device_id)"
+    log INFO "${ROUTER_NAME} device id: ${device_id}"
     approve_subnet_route "$device_id"
     patch_acl_grants
     log INFO "Waiting 5s for route propagation..."
@@ -292,7 +306,7 @@ action_configure() {
 
 action_approve_routes() {
     require_tailscale_api
-    approve_subnet_route "$(find_pfsense_device_id)"
+    approve_subnet_route "$(find_router_device_id)"
 }
 
 action_patch_acl() {

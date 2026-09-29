@@ -19,13 +19,13 @@ LAN 172.16.0.0/16  ◄── pfSense LAN (vmbr0)
 WAN / upstream     ◄── pfSense WAN (vmbr1 → 192.168.78.0/24)
 ```
 
-| Role | Host / ID | Notes |
-|------|-----------|--------|
-| PVE cluster | `pvecm-oldtimers` | Corosync on LAN `ring0` |
-| PVE nodes | `pve-001` … `pve-004` | All four online (verified) |
-| Firewall / router | VM `100` `pfSense-FW001` | On `pve-001`, disks on `local-lvm` |
-| Shared storage | TrueNAS `172.16.0.100` | Pool `main_data_storage` → NFS |
-| QDevice | `172.16.0.99` | `corosync-qnetd` only — **not** TrueNAS |
+| Role              | Host / ID                | Notes                                   |
+| ----------------- | ------------------------ | --------------------------------------- |
+| PVE cluster       | `pvecm-oldtimers`        | Corosync on LAN `ring0`                 |
+| PVE nodes         | `pve-001` … `pve-004`    | All four online (verified)              |
+| Firewall / router | VM `100` `pfSense-FW001` | On `pve-001`, disks on `local-lvm`      |
+| Shared storage    | TrueNAS `172.16.0.100`   | Pool `main_data_storage` → NFS          |
+| QDevice           | `172.16.0.99`            | `corosync-qnetd` only — **not** TrueNAS |
 
 ---
 
@@ -33,29 +33,29 @@ WAN / upstream     ◄── pfSense WAN (vmbr1 → 192.168.78.0/24)
 
 ### 2.1 Addressing
 
-| Segment | CIDR / range | Purpose |
-|---------|--------------|---------|
-| Homelab LAN | `172.16.0.0/16` | PVE management, corosync `ring0`, NFS clients, guest LAN |
-| Upstream / WAN bridge | `192.168.78.0/24` | Physical uplink behind pfSense WAN |
-| Tailscale CGNAT | `100.64.0.0/10` | Remote admin; pfSense advertises `172.16.0.0/16` |
+| Segment               | CIDR / range      | Purpose                                                  |
+| --------------------- | ----------------- | -------------------------------------------------------- |
+| Homelab LAN           | `172.16.0.0/16`   | PVE management, corosync `ring0`, NFS clients, guest LAN |
+| Upstream / WAN bridge | `192.168.78.0/24` | Physical uplink behind pfSense WAN                       |
+| Tailscale CGNAT       | `100.64.0.0/10`   | Remote admin; pfSense advertises `172.16.0.0/16`         |
 
 ### 2.2 Proxmox bridges (typical node)
 
 Verified on `pve-001`:
 
-| Bridge | Ports | Address | Role |
-|--------|-------|---------|------|
-| `vmbr0` | `nic1` | node `/16` on `172.16.0.0/16` | Cluster LAN / management / corosync |
-| `vmbr1` | `nic0` | e.g. `192.168.78.137/24` gw `192.168.78.1` | Upstream toward ISP/router |
+| Bridge  | Ports  | Address                                    | Role                                |
+| ------- | ------ | ------------------------------------------ | ----------------------------------- |
+| `vmbr0` | `nic1` | node `/16` on `172.16.0.0/16`              | Cluster LAN / management / corosync |
+| `vmbr1` | `nic0` | e.g. `192.168.78.137/24` gw `192.168.78.1` | Upstream toward ISP/router          |
 
 Node LAN IPs (corosync `ring0_addr`):
 
-| Node | `ring0` / LAN IP |
-|------|------------------|
-| `pve-001` | `172.16.0.101` |
-| `pve-002` | `172.16.0.102` |
-| `pve-003` | `172.16.0.103` |
-| `pve-004` | `172.16.0.104` |
+| Node      | `ring0` / LAN IP |
+| --------- | ---------------- |
+| `pve-001` | `172.16.0.101`   |
+| `pve-002` | `172.16.0.102`   |
+| `pve-003` | `172.16.0.103`   |
+| `pve-004` | `172.16.0.104`   |
 
 TrueNAS NFS server: **`172.16.0.100`**. Lab LAN gateway for clients is typically **`172.16.0.1`** (pfSense LAN) — see Tailscale/pfSense notes in TIPSNTRICKS.
 
@@ -63,9 +63,9 @@ TrueNAS NFS server: **`172.16.0.100`**. Lab LAN gateway for clients is typically
 
 VM **100** `pfSense-FW001`:
 
-| NIC | Bridge | Role |
-|-----|--------|------|
-| `net0` | `vmbr1` | WAN (upstream) |
+| NIC    | Bridge  | Role                  |
+| ------ | ------- | --------------------- |
+| `net0` | `vmbr1` | WAN (upstream)        |
 | `net1` | `vmbr0` | LAN (`172.16.0.0/16`) |
 
 Disk: `local-lvm:vm-100-disk-0` on `pve-001`. **`onboot=1`**. Not HA-eligible while disks remain local (see §5).
@@ -76,11 +76,11 @@ Tailscale: pfSense joins the tailnet as a **subnet router** advertising `172.16.
 
 ## 3. Proxmox cluster
 
-| Property | Value |
-|----------|--------|
-| Cluster name | `pvecm-oldtimers` |
-| Members | 4 (`pve-001` … `pve-004`) |
-| Quorum transport | Corosync over LAN (`vmbr0` / `ring0`) |
+| Property          | Value                                                              |
+| ----------------- | ------------------------------------------------------------------ |
+| Cluster name      | `pvecm-oldtimers`                                                  |
+| Members           | 4 (`pve-001` … `pve-004`)                                          |
+| Quorum transport  | Corosync over LAN (`vmbr0` / `ring0`)                              |
 | Main / entry node | `pve-001` (`172.16.0.101`) — common target for `deploy/proxmox.sh` |
 
 Orchestration entrypoints:
@@ -108,24 +108,25 @@ Config overlays:
 
 ### 4.2 QDevice
 
-| Item | Value |
-|------|--------|
-| Host | `172.16.0.99` |
-| Service | `corosync-qnetd` |
+| Item      | Value                                                   |
+| --------- | ------------------------------------------------------- |
+| Host      | `172.16.0.99`                                           |
+| Service   | `corosync-qnetd`                                        |
 | Bootstrap | `deploy/setup/misc/cluster/qdevice-server-bootstrap.sh` |
-| Clients | `corosync-qdevice` on each PVE node |
+| Clients   | `corosync-qdevice` on each PVE node                     |
 
 **Do not** run QDevice on TrueNAS (`172.16.0.100`). TrueNAS is NFS only.
 
-Quorum math (4 PVE + QDevice): 5 votes → quorum 3 → cluster can remain quorate with **2 PVE nodes + QDevice**. Confirm live with SSH `pvecm status` (REST `pve_cluster_health` is approximate only).
+Quorum math (4 PVE + QDevice): 5 votes → quorum 3 → cluster can remain quorate with **2 PVE nodes + QDevice**. Confirm live with `pve_cluster_health` (`quorate` from `/cluster/status`); per-vote QDevice detail via SSH `pvecm status`.
 
 ### 4.3 HA group
 
-| Setting | Value (from `default.truenas.nfs.env`) |
-|---------|----------------------------------------|
-| Rule / group name | `papita-ha` |
-| `HA_NODES` | `pve-001,pve-003,pve-002,pve-004` |
-| `HA_AUTO_ENROLL_NFS_GUESTS` | `0` |
+| Setting                     | Value (from `default.truenas.nfs.env`)                                                                                             |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Rule / group name           | `papita-ha`                                                                                                                        |
+| `HA_NODES`                  | `pve-001,pve-003,pve-002,pve-004`                                                                                                  |
+| `HA_AUTO_ENROLL_NFS_GUESTS` | `0`                                                                                                                                |
+| `HA_SHUTDOWN_POLICY`        | `freeze` — HA guests are not recovered elsewhere on node shutdown/reboot; required by MCP power tools (check: `pve_get_ha_status`) |
 
 Auto-enroll is **off**: guests on `local` / `local-lvm` (pfSense **100**, Fedora **101**) must **not** be HA-enrolled until disks move to shared NFS.
 
@@ -133,10 +134,10 @@ Auto-enroll is **off**: guests on `local` / `local-lvm` (pfSense **100**, Fedora
 
 ## 5. Guests (current)
 
-| VMID | Name | Node | Storage | HA |
-|------|------|------|---------|-----|
-| 100 | `pfSense-FW001` | `pve-001` | `local-lvm` | No — keep local; critical path firewall |
-| 101 | `Fedora-Testing` | `pve-001` | `local-lvm` | No |
+| VMID | Name             | Node      | Storage     | HA                                      |
+| ---- | ---------------- | --------- | ----------- | --------------------------------------- |
+| 100  | `pfSense-FW001`  | `pve-001` | `local-lvm` | No — keep local; critical path firewall |
+| 101  | `Fedora-Testing` | `pve-001` | `local-lvm` | No                                      |
 
 Future HA guests: place disks on **`truenas-nfs-main`**, then enroll under `papita-ha` (see TIPSNTRICKS Path B).
 
@@ -146,10 +147,10 @@ Future HA guests: place disks on **`truenas-nfs-main`**, then enroll under `papi
 
 ### 6.1 TrueNAS pools
 
-| Pool | Role | Topology (data) | Approx raw size |
-|------|------|-----------------|-----------------|
-| `main_data_storage` | PVE NFS / shared HA capacity | **`mirror-0`** (≈4 TB pair) **+** **`mirror-1`** (≈2 TB pair), striped | ≈5.4 TiB |
-| `core-components` | NAS system / apps | Single disk | ≈0.23 TiB |
+| Pool                | Role                         | Topology (data)                                                        | Approx raw size |
+| ------------------- | ---------------------------- | ---------------------------------------------------------------------- | --------------- |
+| `main_data_storage` | PVE NFS / shared HA capacity | **`mirror-0`** (≈4 TB pair) **+** **`mirror-1`** (≈2 TB pair), striped | ≈5.4 TiB        |
+| `core-components`   | NAS system / apps            | Single disk                                                            | ≈0.23 TiB       |
 
 **History (brief):** former pool `misc_data_storage` was destroyed; its disks became `mirror-1` on `main_data_storage`. CT template data was migrated under `main_data_storage/ct-templates`.
 
@@ -157,11 +158,11 @@ Future HA guests: place disks on **`truenas-nfs-main`**, then enroll under `papi
 
 Server: **`172.16.0.100`**. Options (PVE): `vers=4.1,hard,nconnect=4`.
 
-| Export path | PVE storage ID | Content | Purpose |
-|-------------|----------------|---------|---------|
-| `/mnt/main_data_storage` | `truenas-nfs-main` | `images,rootdir` | VM / LXC disks (HA-capable) |
+| Export path                           | PVE storage ID      | Content                      | Purpose                                             |
+| ------------------------------------- | ------------------- | ---------------------------- | --------------------------------------------------- |
+| `/mnt/main_data_storage`              | `truenas-nfs-main`  | `images,rootdir`             | VM / LXC disks (HA-capable)                         |
 | `/mnt/main_data_storage/ct-templates` | `truenas-nfs-media` | `iso,vztmpl,import,snippets` | ISOs, CT templates, OCI import, cloud-init snippets |
-| `/mnt/main_data_storage/logs` | `truenas-nfs-logs` | `backup` | Backup / dump target |
+| `/mnt/main_data_storage/logs`         | `truenas-nfs-logs`  | `backup`                     | Backup / dump target                                |
 
 Source of truth for IDs and content types: `deploy/setup/misc/cluster/default.truenas.nfs.env`.
 
@@ -169,10 +170,10 @@ Source of truth for IDs and content types: `deploy/setup/misc/cluster/default.tr
 
 ### 6.3 Node-local storage
 
-| Storage | Type | Content | Shared |
-|---------|------|---------|--------|
-| `local-lvm` | LVM-thin | `images,rootdir` | No |
-| `local` | dir `/var/lib/vz` | `iso,vztmpl,import,backup` | No |
+| Storage     | Type              | Content                    | Shared |
+| ----------- | ----------------- | -------------------------- | ------ |
+| `local-lvm` | LVM-thin          | `images,rootdir`           | No     |
+| `local`     | dir `/var/lib/vz` | `iso,vztmpl,import,backup` | No     |
 
 Use local for OS install scratch and for guests that must not migrate (pfSense today). Prefer `truenas-nfs-media` for ISO/CT/OCI library; prefer `truenas-nfs-main` for HA volume disks.
 
@@ -198,37 +199,37 @@ Re-checked against Proxmox REST + TrueNAS WebSocket APIs on **2026-09-19** (work
 
 ### 8.1 Cluster / guests
 
-| Check | Result |
-|-------|--------|
-| Cluster | `pvecm-oldtimers`, **4** nodes, **quorate** (`quorate=1` via `/cluster/status`) |
-| Nodes online | `pve-001` `.101`, `pve-002` `.102`, `pve-003` `.103`, `pve-004` `.104` |
-| VM 100 `pfSense-FW001` | `pve-001`, **running**, disk `local-lvm` |
-| VM 101 `Fedora-Testing` | `pve-001`, **running**, disk `local-lvm` |
+| Check                   | Result                                                                          |
+| ----------------------- | ------------------------------------------------------------------------------- |
+| Cluster                 | `pvecm-oldtimers`, **4** nodes, **quorate** (`quorate=1` via `/cluster/status`) |
+| Nodes online            | `pve-001` `.101`, `pve-002` `.102`, `pve-003` `.103`, `pve-004` `.104`          |
+| VM 100 `pfSense-FW001`  | `pve-001`, **running**, disk `local-lvm`                                        |
+| VM 101 `Fedora-Testing` | `pve-001`, **running**, disk `local-lvm`                                        |
 
 True `pvecm` / QDevice vote detail still requires SSH (`pvecm status`) — not fully exposed on REST.
 
 ### 8.2 PVE storage (active)
 
-| Storage ID | Type | Export / path | Content | Shared | `pve-001` status |
-|------------|------|---------------|---------|--------|------------------|
-| `truenas-nfs-main` | nfs | `172.16.0.100:/mnt/main_data_storage` | `images,rootdir` | yes | active; ≈**5.31 TiB** free |
-| `truenas-nfs-media` | nfs | `…:/mnt/main_data_storage/ct-templates` | `iso,vztmpl,import` | yes | active; ≈124 MiB used (CT template) |
-| `truenas-nfs-logs` | nfs | `…:/mnt/main_data_storage/logs` | `backup` | yes | active |
-| `local-lvm` | lvmthin | (per node) | `images,rootdir` | no | — |
-| `local` | dir | `/var/lib/vz` | `iso,vztmpl,import,backup` | no | — |
+| Storage ID          | Type    | Export / path                           | Content                    | Shared | `pve-001` status                    |
+| ------------------- | ------- | --------------------------------------- | -------------------------- | ------ | ----------------------------------- |
+| `truenas-nfs-main`  | nfs     | `172.16.0.100:/mnt/main_data_storage`   | `images,rootdir`           | yes    | active; ≈**5.31 TiB** free          |
+| `truenas-nfs-media` | nfs     | `…:/mnt/main_data_storage/ct-templates` | `iso,vztmpl,import`        | yes    | active; ≈124 MiB used (CT template) |
+| `truenas-nfs-logs`  | nfs     | `…:/mnt/main_data_storage/logs`         | `backup`                   | yes    | active                              |
+| `local-lvm`         | lvmthin | (per node)                              | `images,rootdir`           | no     | —                                   |
+| `local`             | dir     | `/var/lib/vz`                           | `iso,vztmpl,import,backup` | no     | —                                   |
 
 **Retired IDs confirmed absent:** `truenas-nfs-misc-*`, `truenas-nfs-templates`, `truenas-nfs-oci`.
 
 ### 8.3 TrueNAS pools / NFS
 
-| Check | Result |
-|-------|--------|
-| `misc_data_storage` | **Gone** (destroyed) |
+| Check               | Result                                                                    |
+| ------------------- | ------------------------------------------------------------------------- |
+| `misc_data_storage` | **Gone** (destroyed)                                                      |
 | `main_data_storage` | ONLINE / healthy; **mirror-0** (`sdf`+`sdg`) + **mirror-1** (`sde`+`sdc`) |
-| Pool size | ≈5.44 TiB raw (API `size` ≈ 5.98×10¹² bytes) |
-| Datasets | `ct-templates` (~124 MiB), `logs`, `oci-images` (empty placeholder) |
-| NFS exports | `/mnt/main_data_storage`, `…/ct-templates`, `…/logs` |
-| NFS hosts ACL | `.101`–`.104` usable (write verified on `.103` 2026-09-23) |
+| Pool size           | ≈5.44 TiB raw (API `size` ≈ 5.98×10¹² bytes)                              |
+| Datasets            | `ct-templates` (~124 MiB), `logs`, `oci-images` (empty placeholder)       |
+| NFS exports         | `/mnt/main_data_storage`, `…/ct-templates`, `…/logs`                      |
+| NFS hosts ACL       | `.101`–`.104` usable (write verified on `.103` 2026-09-23)                |
 
 Repo overlay matches live IDs: `deploy/setup/misc/cluster/default.truenas.nfs.env`.
 
@@ -240,14 +241,14 @@ Work performed to reach the state in §8. Guests **100/101 were not migrated**; 
 
 ### 9.1 Before → after
 
-| Area | Before | After (current) |
-|------|--------|-----------------|
-| TrueNAS data pools for PVE | `main_data_storage` (~3.5 TiB usable, single 4 TB mirror) **+** `misc_data_storage` (~1.76 TiB, 2 TB mirror) | **Only** `main_data_storage` with **two** striped mirrors (~5.3 TiB usable on PVE) |
-| Misc pool disks | `sde` + `sdc` in `misc_data_storage` | Same disks as **`mirror-1`** on `main_data_storage` |
-| PVE volume NFS | `truenas-nfs-main` + separate misc volume store (`truenas-nfs-misc-images`, content later `images,rootdir`) | **`truenas-nfs-main` only** for VM/LXC volumes (grown with pool) |
-| PVE media NFS | Split: misc ISO / templates / OCI / logs IDs; then temporary `truenas-nfs-templates` + `truenas-nfs-oci` | **`truenas-nfs-media`** (`iso,vztmpl,import`) + **`truenas-nfs-logs`** |
-| CT template | On `misc_data_storage/ct-templates` | On `main_data_storage/ct-templates` (ZFS local replication); still visible via `truenas-nfs-media` |
-| `truenas-nfs-main` free (approx) | ~3.5 TiB | **~5.31 TiB** (validated) |
+| Area                             | Before                                                                                                       | After (current)                                                                                    |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------- |
+| TrueNAS data pools for PVE       | `main_data_storage` (~3.5 TiB usable, single 4 TB mirror) **+** `misc_data_storage` (~1.76 TiB, 2 TB mirror) | **Only** `main_data_storage` with **two** striped mirrors (~5.3 TiB usable on PVE)                 |
+| Misc pool disks                  | `sde` + `sdc` in `misc_data_storage`                                                                         | Same disks as **`mirror-1`** on `main_data_storage`                                                |
+| PVE volume NFS                   | `truenas-nfs-main` + separate misc volume store (`truenas-nfs-misc-images`, content later `images,rootdir`)  | **`truenas-nfs-main` only** for VM/LXC volumes (grown with pool)                                   |
+| PVE media NFS                    | Split: misc ISO / templates / OCI / logs IDs; then temporary `truenas-nfs-templates` + `truenas-nfs-oci`     | **`truenas-nfs-media`** (`iso,vztmpl,import`) + **`truenas-nfs-logs`**                             |
+| CT template                      | On `misc_data_storage/ct-templates`                                                                          | On `main_data_storage/ct-templates` (ZFS local replication); still visible via `truenas-nfs-media` |
+| `truenas-nfs-main` free (approx) | ~3.5 TiB                                                                                                     | **~5.31 TiB** (validated)                                                                          |
 
 ### 9.2 Steps executed (ordered)
 
@@ -275,14 +276,14 @@ Work performed to reach the state in §8. Guests **100/101 were not migrated**; 
 
 ## 10. Operational notes
 
-| Topic | Guidance |
-|-------|----------|
-| Apply NFS/HA overlays | `./deploy/proxmox.sh setup-cluster-ha --ip-address 172.16.0.101` |
-| True quorum | SSH `pvecm status` — not REST alone |
-| Enroll HA guest | Disks on `truenas-nfs-main` first; leave `HA_AUTO_ENROLL_NFS_GUESTS=0` unless intentional |
-| Expand capacity | Grow `main_data_storage` (larger disks / add vdevs); do not split “free space” across pools via quotas |
-| QDevice vs NFS | Separate hosts: `.99` vs `.100` |
-| Diagrams / deep runbooks | [Diagrams.drawio](./Diagrams.drawio), [TIPSNTRICKS.md](./TIPSNTRICKS.md) |
+| Topic                    | Guidance                                                                                               |
+| ------------------------ | ------------------------------------------------------------------------------------------------------ |
+| Apply NFS/HA overlays    | `./deploy/proxmox.sh setup-cluster-ha --ip-address 172.16.0.101`                                       |
+| True quorum              | `pve_cluster_health` → `quorate`; vote detail via SSH `pvecm status`                                   |
+| Enroll HA guest          | Disks on `truenas-nfs-main` first; leave `HA_AUTO_ENROLL_NFS_GUESTS=0` unless intentional              |
+| Expand capacity          | Grow `main_data_storage` (larger disks / add vdevs); do not split “free space” across pools via quotas |
+| QDevice vs NFS           | Separate hosts: `.99` vs `.100`                                                                        |
+| Diagrams / deep runbooks | [Diagrams.drawio](./Diagrams.drawio), [TIPSNTRICKS.md](./TIPSNTRICKS.md)                               |
 
 ---
 
@@ -295,4 +296,4 @@ Work performed to reach the state in §8. Guests **100/101 were not migrated**; 
 
 ---
 
-*Last live validation: 2026-09-19 via PVE/TrueNAS APIs. Re-check `pvecm status` and NFS host ACLs after membership or share changes.*
+_Last live validation: 2026-09-19 via PVE/TrueNAS APIs. Re-check `pvecm status` and NFS host ACLs after membership or share changes._

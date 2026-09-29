@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any, Literal
 
 from truenas_mcp.client.errors import TnasApiError
+from truenas_mcp.client.websocket import classify_connect_error
 from truenas_mcp.config import TnasSettings
 from truenas_mcp.context import get_client, get_settings
 from truenas_mcp.tools.helpers import critical_alerts, normalize_list, pool_health_warnings
@@ -16,7 +18,8 @@ from truenas_mcp.tools.system import truenas_get_system_info_impl, truenas_syste
 
 TestStatus = Literal["pass", "fail", "warn"]
 
-CORE_SMOKE_CHECKS = frozenset({"config_valid", "websocket_auth", "system_info", "pools_query"})
+CORE_SMOKE_CHECKS = frozenset({"config_valid", "host_reachable", "websocket_auth", "system_info", "pools_query"})
+HOST_REACHABLE_TIMEOUT_SEC = 5.0
 OPTIONAL_SMOKE_CHECKS = frozenset(
     {
         "lab_ha_pool",
@@ -33,6 +36,7 @@ EXTENDED_SMOKE_CHECKS = frozenset(
         "list_pools_tool",
         "system_summary_tool",
         "list_nfs_shares_tool",
+        "list_nfs_clients_tool",
         "list_scrub_tasks_tool",
         "list_apps_tool",
         "check_api_key_tool",
@@ -57,9 +61,26 @@ def _failure(name: str, exc: Exception) -> dict[str, Any]:
     if isinstance(exc, TnasApiError):
         payload = exc.to_dict()
         result["error"] = payload.get("message", str(exc))
+        result["code"] = exc.code
+        if exc.hint:
+            result["hint"] = exc.hint
         if exc.method:
             result["method"] = exc.method
     return result
+
+
+async def _check_host_reachable(settings: TnasSettings) -> dict[str, Any]:
+    """Resolve ``TRUENAS_HOST`` and open a TCP connection to ``TRUENAS_PORT``."""
+    try:
+        _, writer = await asyncio.wait_for(
+            asyncio.open_connection(settings.host, settings.port),
+            timeout=HOST_REACHABLE_TIMEOUT_SEC,
+        )
+        writer.close()
+        await writer.wait_closed()
+        return {"name": "host_reachable", "status": "pass", "data": {"target": f"{settings.host}:{settings.port}"}}
+    except Exception as exc:
+        return _failure("host_reachable", classify_connect_error(exc, settings))
 
 
 async def _run_api_check(name: str, coro: Any) -> dict[str, Any]:
@@ -317,9 +338,10 @@ async def _check_tool(name: str, coro: Any) -> dict[str, Any]:
 
 async def _check_extended_tools() -> list[dict[str, Any]]:
     from truenas_mcp.tools.monitoring import truenas_check_api_key_impl, truenas_list_apps_impl
-    from truenas_mcp.tools.sharing import truenas_list_nfs_shares_impl
+    from truenas_mcp.tools.sharing import truenas_list_nfs_clients_impl, truenas_list_nfs_shares_impl
 
     tool_probes = [
+        ("list_nfs_clients_tool", truenas_list_nfs_clients_impl()),
         ("system_info_tool", truenas_get_system_info_impl()),
         ("check_api_key_tool", truenas_check_api_key_impl()),
         ("list_pools_tool", truenas_list_pools_impl()),
@@ -359,6 +381,11 @@ async def run_smoke_tests(*, extended: bool = False) -> dict[str, Any]:
     settings = get_settings()
     client = get_client()
     results: list[dict[str, Any]] = [_check_config_valid(settings)]
+
+    reachable = await _check_host_reachable(settings)
+    results.append(reachable)
+    if reachable["status"] != "pass":
+        return _smoke_report(results, settings, extended=extended)
 
     auth = await _run_api_check("websocket_auth", client.call("system.state"))
     results.append(auth)

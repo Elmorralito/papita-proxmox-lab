@@ -9,7 +9,9 @@ from typing import Any, Literal
 
 from proxmox_ve_mcp.client.errors import PveApiError
 from proxmox_ve_mcp.client.permissions import TOKEN_ACL_HINT
+from proxmox_ve_mcp.constants import HA_REQUIRED_SHUTDOWN_POLICY
 from proxmox_ve_mcp.context import get_client, get_settings
+from proxmox_ve_mcp.tools.ha import parse_shutdown_policy
 from proxmox_ve_mcp.tools.helpers import normalize_list
 from proxmox_ve_mcp.tools.response import ok_response, tool_handler
 
@@ -118,6 +120,22 @@ SMOKE_TEST_CATALOG: tuple[SmokeTestSpec, ...] = (
         required_privilege="Sys.Audit on /",
     ),
     SmokeTestSpec(
+        "cluster_quorum",
+        "read_extended",
+        "Cluster quorum",
+        "GET /cluster/status reports quorate=1",
+        extended_only=True,
+        required_privilege="Sys.Audit on /",
+    ),
+    SmokeTestSpec(
+        "ha_shutdown_policy",
+        "read_extended",
+        "HA shutdown policy",
+        "ha.shutdown_policy is freeze (required by power tools)",
+        extended_only=True,
+        required_privilege="Sys.Audit on /",
+    ),
+    SmokeTestSpec(
         "ceph_status",
         "read_extended",
         "Ceph health (optional)",
@@ -132,6 +150,14 @@ SMOKE_TEST_CATALOG: tuple[SmokeTestSpec, ...] = (
         "Token permissions include VM.PowerMgmt (informational only)",
         extended_only=True,
         required_privilege="VM.PowerMgmt on /",
+    ),
+    SmokeTestSpec(
+        "node_power_permissions",
+        "write_capability",
+        "Node power capability probe",
+        "Token permissions include Sys.PowerMgmt for pve_shutdown_node / pve_wake_on_lan (informational)",
+        extended_only=True,
+        required_privilege="Sys.PowerMgmt on /nodes",
     ),
 )
 
@@ -351,6 +377,26 @@ async def _run_single_test(  # noqa: C901
                 storage_ids=[s.get("storage") for s in storage],
             )
 
+        if spec.test_id == "cluster_quorum":
+            entries = normalize_list(await client.get("/cluster/status"))
+            cluster = next((e for e in entries if e.get("type") == "cluster"), None)
+            if cluster is None:
+                return _result(spec, "warn", detail="No cluster entry (standalone node?)")
+            if not cluster.get("quorate"):
+                return _result(spec, "fail", detail="Cluster is NOT quorate", cluster=cluster.get("name"))
+            return _result(spec, "pass", detail="Quorate", cluster=cluster.get("name"), nodes=cluster.get("nodes"))
+
+        if spec.test_id == "ha_shutdown_policy":
+            policy = parse_shutdown_policy(await client.get("/cluster/options"))
+            if policy != HA_REQUIRED_SHUTDOWN_POLICY:
+                return _result(
+                    spec,
+                    "warn",
+                    detail=f"shutdown_policy={policy}; power tools require {HA_REQUIRED_SHUTDOWN_POLICY}",
+                    shutdown_policy=policy,
+                )
+            return _result(spec, "pass", detail=f"shutdown_policy={policy}", shutdown_policy=policy)
+
         if spec.test_id == "ceph_status":
             node = await _find_sample_node(client, cache)
             if not node:
@@ -382,6 +428,19 @@ async def _run_single_test(  # noqa: C901
                 spec,
                 "warn",
                 detail="VM.PowerMgmt not in token permissions — read-only token",
+            )
+
+        if spec.test_id == "node_power_permissions":
+            perms = cache.get("permissions")
+            if perms is None:
+                perms = await client.get("/access/permissions")
+                cache["permissions"] = perms
+            if _permissions_include(perms, "Sys.PowerMgmt"):
+                return _result(spec, "pass", detail="Sys.PowerMgmt present — node power tools may work")
+            return _result(
+                spec,
+                "warn",
+                detail="Sys.PowerMgmt not in token permissions — pve_shutdown_node / pve_wake_on_lan will be denied",
             )
 
     except PveApiError as exc:

@@ -56,6 +56,8 @@ Exit code `0` = all required tests for the selected mode passed; `1` = one or mo
 | `node_status`          | CPU / memory / uptime         | `Sys.Audit` on `/nodes/{node}` | Status payload returned              |
 | `guest_inventory`      | VM + CT list                  | `VM.Audit` on `/`              | Guest list returned                  |
 | `storage_list`         | Storage definitions           | `Sys.Audit` on `/`             | Storage list returned                |
+| `cluster_quorum`       | `quorate` from cluster status | `Sys.Audit` on `/`             | Quorate (fail if not)                |
+| `ha_shutdown_policy`   | `ha.shutdown_policy`          | `Sys.Audit` on `/`             | `freeze` (warn otherwise)            |
 | `ceph_status`          | Ceph health (optional)        | Ceph present                   | Pass, skip if Ceph N/A, warn on deny |
 
 ### Tier 4 — Write capability (informational, `extended=true`)
@@ -63,6 +65,7 @@ Exit code `0` = all required tests for the selected mode passed; `1` = one or mo
 | ID                  | Checks                                   | Meaning                                                           |
 | ------------------- | ---------------------------------------- | ----------------------------------------------------------------- |
 | `write_permissions` | `/access/permissions` for `VM.PowerMgmt` | Reports whether write tools _may_ work (does not mutate anything) |
+| `node_power_permissions` | `/access/permissions` for `Sys.PowerMgmt` | Whether `pve_shutdown_node` / `pve_wake_on_lan` may work (warn only) |
 
 ## Access levels
 

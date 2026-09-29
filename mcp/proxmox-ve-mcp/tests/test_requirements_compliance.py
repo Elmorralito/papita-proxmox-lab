@@ -29,7 +29,16 @@ REQUIRED_V1_TOOLS: dict[str, ToolClass] = {
     "pve_start_guest": ToolClass.WRITE,
     "pve_shutdown_guest": ToolClass.WRITE,
     "pve_stopall_guests": ToolClass.WRITE,
+    "pve_get_ha_status": ToolClass.READ,
+    "pve_wait_for_task": ToolClass.READ,
+    "pve_wait_nodes_state": ToolClass.READ,
+    "pve_wake_on_lan": ToolClass.WRITE,
+    "pve_stop_guest": ToolClass.DESTRUCTIVE,
+    "pve_shutdown_node": ToolClass.DESTRUCTIVE,
 }
+
+# FR-903 exceptions: only these power tools may be destructive (docs/MCP_POWER_PLAN.md).
+APPROVED_DESTRUCTIVE_TOOLS = {"pve_stop_guest", "pve_shutdown_node"}
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -38,8 +47,9 @@ def register_all_tools():
     create_server()
 
 
-def test_no_destructive_tools() -> None:
-    assert ToolClass.DESTRUCTIVE not in TOOL_REGISTRY.values()
+def test_only_approved_destructive_tools() -> None:
+    destructive = {name for name, cls in TOOL_REGISTRY.items() if cls == ToolClass.DESTRUCTIVE}
+    assert destructive == APPROVED_DESTRUCTIVE_TOOLS
 
 
 def test_v1_tool_catalog_complete() -> None:

@@ -21,6 +21,7 @@ Onboarding: [README.md](../README.md). API key setup: [API_KEY_SETUP.md](./API_K
 - **v1 delivered:** **Read-only** — 10 MCP tools (v0.1).
 - **v1.1 delivered:** +5 read tools (API key check, SMART, alert policies, reporting, apps/Scrutiny).
 - **v2 delivered:** 3 gated write tools (`confirm=true`); no destructive operations.
+- **Power phase (docs/MCP_POWER_PLAN.md):** FR-902 reversed — 2 destructive tools `truenas_shutdown` / `truenas_reboot` behind NFS-client, running-job, `confirm`, `reason`, and `plan_only` guards.
 - **Auth:** API key via `auth.login_with_api_key` on persistent WebSocket; **wss:// only** (keys revoked over HTTP).
 - **Positioning vs official:** [truenas/truenas-mcp](https://github.com/truenas/truenas-mcp) (Go, research preview, broad coverage) remains the upstream reference. This package is **papita-native**: Poetry, `deploy/mcp.sh`, runbook traceability, lab NFS/HA focus — not a fork of the official binary.
 
@@ -85,7 +86,7 @@ Workstation (Cursor / deploy scripts)
 | ID     | Requirement                                | Priority | Acceptance criteria                                | Status      | Evidence                                                         |
 | ------ | ------------------------------------------ | -------- | -------------------------------------------------- | ----------- | ---------------------------------------------------------------- |
 | BR-001 | Agents **inspect** TrueNAS without WebGUI  | Must     | Pools, alerts, disks, jobs via JSON tools          | **Met**     | 10 read tools in `register.py`                                   |
-| BR-002 | **Classify** tools read/write/destructive  | Must     | Every tool declares class; no destructive v1       | **Met**     | `ToolClass`, `TOOL_REGISTRY`                                     |
+| BR-002 | **Classify** tools read/write/destructive  | Must     | Every tool declares class; no destructive v1       | **Met**     | `ToolClass`, `TOOL_REGISTRY`; destructive = power tools only     |
 | BR-003 | Align with **lab HA/NFS workflows**        | Must     | NFS export + pool health map to TIPSNTRICKS Path B | **Partial** | `truenas_list_nfs_shares`, summary warnings; no PVE-side `pvesm` |
 | BR-004 | Reach TrueNAS over LAN/Tailscale           | Must     | `TRUENAS_HOST`; TLS configurable                   | **Met**     | `config.py`; IP or hostname                                      |
 | BR-005 | Do **not** replace `setup-cluster-ha` Bash | Won't    | QDevice + `pvesm add nfs` remain Bash              | **N/A**     | Documented §2.1                                                  |
@@ -137,6 +138,7 @@ Workstation (Cursor / deploy scripts)
 | FR-030 | List NFS shares       | Must     | `sharing.nfs.query`         | **Met**     | `truenas_list_nfs_shares`                       |
 | FR-031 | Match lab export path | Should   | Derived vs `LAB_NFS_EXPORT` | **Partial** | Warnings in `truenas_list_nfs_shares` + summary |
 | FR-032 | SMB shares read       | Could    | `sharing.smb.query`         | **N/A**     | v1.1                                            |
+| FR-033 | List NFS clients      | Should   | `nfs.get_nfs3/4_clients`    | **Met**     | `truenas_list_nfs_clients`; IP → PVE node map   |
 
 ### 4.5 Jobs & maintenance
 
@@ -158,7 +160,7 @@ Workstation (Cursor / deploy scripts)
 | ------ | ----------------------------------- | -------------------------------- | ------------------------------------------------------------------ |
 | FR-900 | App catalog install/upgrade         | Destructive; official MCP covers | **N/A**                                                            |
 | FR-901 | VM management                       | Out of lab MCP scope             | **N/A**                                                            |
-| FR-902 | `system.reboot` / `system.shutdown` | Destructive                      | **N/A**                                                            |
+| FR-902 | `system.reboot` / `system.shutdown` | Reversed (2026-09): NAS could not be powered off on 2026-09-25 | **Met** — `truenas_shutdown` / `truenas_reboot` (destructive, guarded) |
 | FR-903 | Dataset/share mutations             | Data integrity                   | **Met** — v2 gated writes (`confirm=true`)                         |
 | FR-904 | Real-time event subscriptions       | Complexity                       | **N/A** — won't                                                    |
 | FR-905 | Scrutiny / Uptime Kuma app health   | No stable middleware API         | **Partial** — Scrutiny via `app.query`; Uptime Kuma on PVE cluster |
@@ -214,23 +216,24 @@ Documented in `BASH_ONLY_WORKFLOWS` (`constants.py`).
 
 ### Read tools
 
-| Tool                          | Class | TrueNAS method(s)                       | Runbook ref                      |
-| ----------------------------- | ----- | --------------------------------------- | -------------------------------- |
-| `truenas_get_system_info`     | read  | `system.info`, `system.state`           | TIPSNTRICKS § TrueNAS monitoring |
-| `truenas_check_api_key`       | read  | `system.state`, `system.info`           | API_KEY_SETUP                    |
-| `truenas_list_alerts`         | read  | `alert.list`                            | TIPSNTRICKS § monitoring         |
-| `truenas_list_alert_policies` | read  | `alert.list_policies`                   | TIPSNTRICKS § monitoring         |
-| `truenas_list_pools`          | read  | `pool.query`                            | TIPSNTRICKS § pools              |
-| `truenas_list_datasets`       | read  | `pool.dataset.query`                    | `default.truenas.nfs.env`        |
-| `truenas_list_disks`          | read  | `disk.query`, `disk.temperature_alerts` | TIPSNTRICKS § Scrutiny           |
-| `truenas_list_smart_results`  | read  | `smart.test.results`                    | TIPSNTRICKS § Scrutiny           |
-| `truenas_get_reporting_data`  | read  | `reporting.get_data`                    | TIPSNTRICKS § monitoring         |
-| `truenas_list_apps`           | read  | `app.query`                             | TIPSNTRICKS § Scrutiny           |
-| `truenas_list_jobs`           | read  | `core.get_jobs`                         | TIPSNTRICKS                      |
-| `truenas_list_nfs_shares`     | read  | `sharing.nfs.query`                     | TIPSNTRICKS § Path B HA          |
-| `truenas_list_scrub_tasks`    | read  | `pool.scrub.query`                      | TIPSNTRICKS § pools              |
-| `truenas_system_summary`      | read  | aggregate                               | TIPSNTRICKS § Path B             |
-| `truenas_run_smoke_tests`     | read  | smoke                                   | SMOKE_TESTS.md                   |
+| Tool                          | Class | TrueNAS method(s)                           | Runbook ref                      |
+| ----------------------------- | ----- | ------------------------------------------- | -------------------------------- |
+| `truenas_get_system_info`     | read  | `system.info`, `system.state`               | TIPSNTRICKS § TrueNAS monitoring |
+| `truenas_check_api_key`       | read  | `system.state`, `system.info`               | API_KEY_SETUP                    |
+| `truenas_list_alerts`         | read  | `alert.list`                                | TIPSNTRICKS § monitoring         |
+| `truenas_list_alert_policies` | read  | `alert.list_policies`                       | TIPSNTRICKS § monitoring         |
+| `truenas_list_pools`          | read  | `pool.query`                                | TIPSNTRICKS § pools              |
+| `truenas_list_datasets`       | read  | `pool.dataset.query`                        | `default.truenas.nfs.env`        |
+| `truenas_list_disks`          | read  | `disk.query`, `disk.temperature_alerts`     | TIPSNTRICKS § Scrutiny           |
+| `truenas_list_smart_results`  | read  | `smart.test.results`                        | TIPSNTRICKS § Scrutiny           |
+| `truenas_get_reporting_data`  | read  | `reporting.get_data`                        | TIPSNTRICKS § monitoring         |
+| `truenas_list_apps`           | read  | `app.query`                                 | TIPSNTRICKS § Scrutiny           |
+| `truenas_list_jobs`           | read  | `core.get_jobs`                             | TIPSNTRICKS                      |
+| `truenas_list_nfs_shares`     | read  | `sharing.nfs.query`                         | TIPSNTRICKS § Path B HA          |
+| `truenas_list_nfs_clients`    | read  | `nfs.get_nfs3_clients` / `get_nfs4_clients` | docs/MCP_POWER_PLAN.md           |
+| `truenas_list_scrub_tasks`    | read  | `pool.scrub.query`                          | TIPSNTRICKS § pools              |
+| `truenas_system_summary`      | read  | aggregate                                   | TIPSNTRICKS § Path B             |
+| `truenas_run_smoke_tests`     | read  | smoke                                       | SMOKE_TESTS.md                   |
 
 ### Write tools (gated)
 
@@ -239,6 +242,13 @@ Documented in `BASH_ONLY_WORKFLOWS` (`constants.py`).
 | `truenas_create_dataset`   | write | `pool.dataset.create` | `confirm=true` |
 | `truenas_update_nfs_share` | write | `sharing.nfs.update`  | `confirm=true` |
 | `truenas_dismiss_alert`    | write | `alert.dismiss`       | `confirm=true` |
+
+#### Destructive power tools (FR-902)
+
+| Tool               | Class       | Method            | Safety gate                                                                                           |
+| ------------------ | ----------- | ----------------- | ----------------------------------------------------------------------------------------------------- |
+| `truenas_shutdown` | destructive | `system.shutdown` | `confirm` + `reason`; refuses on NFS clients outside `expected_clients` or running scrub/replication/update (`force` overrides); `delay_s`; `plan_only` |
+| `truenas_reboot`   | destructive | `system.reboot`   | Same guards as `truenas_shutdown`                                                                     |
 
 ---
 

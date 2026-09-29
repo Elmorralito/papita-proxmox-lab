@@ -3,9 +3,12 @@
 DEFAULT_WS_PATH = "/websocket"
 DEFAULT_WS_TIMEOUT_SEC = 60.0
 LAB_TRUENAS_HOST = "172.16.0.100"
-LAB_HA_POOL_NAME = "pve-cluster-oldtimers-ha-storage"
-LAB_NFS_EXPORT = "/mnt/pve-cluster-oldtimers-ha-storage/pve-nfs"
+LAB_HA_POOL_NAME = "main_data_storage"
+LAB_NFS_EXPORT = "/mnt/main_data_storage"
 LAB_SCRUTINY_APP_NAME = "scrutiny"
+LAB_PVE_NODES = "pve-001=172.16.0.101,pve-002=172.16.0.102,pve-003=172.16.0.103,pve-004=172.16.0.104"
+# NFSv4 client states that hold a lease but have no live connection.
+NFS4_STALE_STATES = frozenset({"courtesy", "expirable", "expired"})
 LAB_CLUSTER_NAME = "pvecm-oldtimers"
 TNAS_TESTED_MAJOR_VERSION = "25"
 
@@ -36,4 +39,6 @@ RUNBOOK_REFS: dict[str, str] = {
     "truenas_create_dataset": "deploy/setup/misc/cluster/default.truenas.nfs.env",
     "truenas_update_nfs_share": "docs/TIPSNTRICKS.md#quorum-qdevice-truenas-nfs-and-ha-path-b",
     "truenas_dismiss_alert": "docs/TIPSNTRICKS.md",
+    "truenas_shutdown": "docs/MCP_POWER_PLAN.md — shutdown sequence step 6 (delayed, before the entry node)",
+    "truenas_reboot": "docs/MCP_POWER_PLAN.md — reboot only with PVE nodes off or NFS guests stopped",
 }

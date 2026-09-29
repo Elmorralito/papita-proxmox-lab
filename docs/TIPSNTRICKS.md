@@ -1098,9 +1098,10 @@ Omit grants entirely or use minimal `acls` to deny by default; add only the gran
 ```json
 "autoApprovers": {
   "routes": {
-    "tag:pfsense-lan-router": ["172.16.0.0/16"],
-    "tag:pve-oldtimers-cluster": ["10.0.0.0/24"]
-  }
+    "172.16.0.0/16": ["tag:openwrt-lan-router"],
+    "10.0.0.0/24": ["tag:pve-oldtimers-cluster"]
+  },
+  "exitNode": ["tag:openwrt-lan-router"]
 }
 ```
 

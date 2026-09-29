@@ -49,8 +49,12 @@ Optional overrides (environment variables)
   LAN_TEST_IP            Main PVE LAN IP for verify (default: 172.16.0.101)
   MAIN_PVE_LAN_IP        Main node LAN IP for admin ACL grants (default: 172.16.0.101)
   MAIN_PVE_TAILSCALE_NAME  Optional MagicDNS name for direct tailnet UI verify
-  PFSENSE_NAME           Substring match for pfSense device name/hostname in
-                         admin device list (default: pfsense-fw001)
+  PFSENSE_NAME           Legacy pfSense device name (default: pfsense-fw001);
+                         no longer used for route approval
+  ROUTER_NAME            Substring match for the LAN router device name/hostname
+                         in admin device list (default: openwrt-pi)
+  ROUTER_TAG             Tag that auto-approves LAN_CIDR and exit node
+                         (default: tag:openwrt-lan-router)
 
 Prerequisites
   curl, python3          Required for Tailscale API calls and ACL JSON merge.
@@ -60,10 +64,11 @@ Prerequisites
 
 --- Action: configure ---
   1. Validates TAILSCALE_API_KEY, TAILSCALE_TAILNET, curl, python3.
-  2. GET /tailnet/{tailnet}/devices — finds device where PFSENSE_NAME matches
+  2. GET /tailnet/{tailnet}/devices — finds device where ROUTER_NAME matches
      name or hostname (case-insensitive).
   3. approve_subnet_route: GET device routes; if LAN_CIDR not in advertisedRoutes,
-     warns and exits non-zero with pfSense instructions; else POST enabled routes.
+     warns and exits non-zero with OpenWrt instructions; else POST enabled routes
+     (LAN_CIDR plus 0.0.0.0/0 and ::/0 when the exit node is advertised).
   4. patch_acl_grants: GET current ACL; merge tagOwners, grants, and
      autoApprovers.routes (see below); POST full ACL document.
   5. sleep 5, then verify_connectivity.
@@ -77,6 +82,8 @@ Prerequisites
 
     tag:auth-client              → LAN_CIDR                    *
     tag:pfsense-oldtimers-client → LAN_CIDR                    *
+    tag:auth-client              → autogroup:internet          *  (exit node)
+    tag:pfsense-oldtimers-client → autogroup:internet          *  (exit node)
     tag:private-node             → LAN_CIDR                    *
     tag:private-node             → MAIN_PVE_LAN_IP/32          tcp:8006, tcp:22
     tag:pve-oldtimers-cluster    → LAN_CIDR                    *
@@ -86,11 +93,13 @@ Prerequisites
     tag:private-node             → MAIN_PVE_TAILSCALE_NAME     tcp:8006, tcp:22  (if set)
 
   tagOwners ensured for: tag:auth-client, tag:pfsense-oldtimers-client,
-  tag:pfsense-lan-router, tag:private-node, tag:pve-oldtimers-cluster,
+  tag:pfsense-lan-router, ROUTER_TAG, tag:private-node, tag:pve-oldtimers-cluster,
   tag:server-node (each default owner: autogroup:admin if missing).
 
-  autoApprovers.routes: LAN_CIDR appended for tag:pfsense-lan-router only
-  (PVE workers do not advertise routes; avoid dual routers).
+  autoApprovers.routes: { LAN_CIDR: [ROUTER_TAG] } — keyed by CIDR. Legacy
+  tag-keyed entries are removed and tag:pfsense-lan-router is dropped from
+  LAN_CIDR (single router; PVE workers do not advertise routes).
+  autoApprovers.exitNode: ROUTER_TAG appended.
 
 --- Action: verify ---
   route -n get LAN_TEST_IP (best effort)

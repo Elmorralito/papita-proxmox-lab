@@ -5,10 +5,11 @@ references, pagination, and write-operation confirmation gates.
 """
 
 import re
+from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
-from proxmox_ve_mcp.constants import NODE_NAME_PATTERN
+from proxmox_ve_mcp.constants import MAX_WAIT_CALL_SEC, NODE_NAME_PATTERN
 
 _NODE_RE = re.compile(NODE_NAME_PATTERN)
 
@@ -159,6 +160,97 @@ class ListTasksInput(BaseModel):
     )
     start: int | None = Field(default=None, ge=0)
     limit: int | None = Field(default=None, ge=1, le=500)
+
+
+class WaitForTaskInput(BaseModel):
+    """Bounded wait on a Proxmox task UPID.
+
+    Attributes:
+        upid: Task identifier returned by a write tool (``UPID:node:...``).
+        timeout_s: Seconds to wait in this call (1–120); re-call to keep waiting.
+    """
+
+    upid: str = Field(description="Task UPID, e.g. UPID:pve-001:...")
+    timeout_s: float = Field(default=MAX_WAIT_CALL_SEC, ge=1.0, le=MAX_WAIT_CALL_SEC)
+
+    @field_validator("upid")
+    @classmethod
+    def check_upid(cls, value: str) -> str:
+        """Require a UPID whose node segment is a valid node name."""
+        parts = value.split(":")
+        if len(parts) < 3 or parts[0] != "UPID":
+            raise ValueError("upid must look like UPID:<node>:...")
+        validate_node_name(parts[1])
+        return value
+
+
+class WaitNodesStateInput(BaseModel):
+    """Bounded wait for cluster nodes to reach ``online`` or ``offline``.
+
+    Attributes:
+        nodes: Node names to watch; ``None`` watches every cluster member.
+        target: Desired state (``online`` or ``offline``).
+        timeout_s: Seconds to wait in this call (1–120); re-call to keep waiting.
+    """
+
+    nodes: list[str] | None = Field(default=None, description="Nodes to watch; omit for all members")
+    target: Literal["online", "offline"] = Field(description="Desired node state")
+    timeout_s: float = Field(default=MAX_WAIT_CALL_SEC, ge=1.0, le=MAX_WAIT_CALL_SEC)
+
+    @field_validator("nodes")
+    @classmethod
+    def check_nodes(cls, value: list[str] | None) -> list[str] | None:
+        """Validate each node name; treat an empty list as all members."""
+        if not value:
+            return None
+        return [validate_node_name(name) for name in value]
+
+
+class ShutdownNodeInput(BaseModel):
+    """Power command for one cluster node.
+
+    Attributes:
+        node: Target node name.
+        command: ``shutdown`` or ``reboot``.
+        reason: Operator reason recorded in the audit log.
+    """
+
+    node: str = Field(description="Target node")
+    command: Literal["shutdown", "reboot"] = Field(default="shutdown")
+    reason: str = Field(min_length=3, max_length=200, description="Why the node is being powered off")
+
+    @field_validator("node")
+    @classmethod
+    def check_node(cls, value: str) -> str:
+        """Validate the node name."""
+        return validate_node_name(value)
+
+
+class WakeOnLanInput(BaseModel):
+    """Wake-on-LAN targets: explicit node names or every offline member.
+
+    Attributes:
+        nodes: Node names to wake.
+        all_offline: Wake every member reported offline in ``/cluster/status``.
+    """
+
+    nodes: list[str] | None = Field(default=None, description="Nodes to wake")
+    all_offline: bool = Field(default=False, description="Wake every offline cluster member")
+
+    @field_validator("nodes")
+    @classmethod
+    def check_nodes(cls, value: list[str] | None) -> list[str] | None:
+        """Validate each node name; treat an empty list as unset."""
+        if not value:
+            return None
+        return [validate_node_name(name) for name in value]
+
+    @model_validator(mode="after")
+    def check_target(self) -> "WakeOnLanInput":
+        """Require exactly one of ``nodes`` or ``all_offline``."""
+        if bool(self.nodes) == self.all_offline:
+            raise ValueError("Set exactly one of nodes=[...] or all_offline=true")
+        return self
 
 
 class ConfirmWriteInput(BaseModel):

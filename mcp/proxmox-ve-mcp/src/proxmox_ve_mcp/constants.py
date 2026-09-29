@@ -32,6 +32,16 @@ DEFAULT_HTTP_TIMEOUT_SEC = 30.0
 LONG_HTTP_TIMEOUT_SEC = 120.0
 MAX_CONCURRENT_REQUESTS = 4
 PVE_TESTED_MAJOR_VERSION = "8.x"
+MAX_WAIT_CALL_SEC = 120.0
+TASK_WAIT_MARGIN_SEC = 30.0
+HA_REQUIRED_SHUTDOWN_POLICY = "freeze"
+HA_DEFAULT_SHUTDOWN_POLICY = "conditional"
+# PveApiError codes meaning "the API host stopped answering" (expected after an entry-node shutdown).
+API_LOST_ERROR_CODES = frozenset(
+    {"PVE_CONNECT_TIMEOUT", "PVE_CONNECTION_REFUSED", "PVE_CONNECTION_ERROR", "PVE_TIMEOUT"}
+)
+LAB_INFRA_VMIDS = "100"
+NODE_POWER_COMMANDS = ("shutdown", "reboot")
 
 # Non-executable runbook pointers (repo-relative paths); keys are MCP tool names.
 RUNBOOK_REFS: dict[str, str] = {
@@ -49,13 +59,20 @@ RUNBOOK_REFS: dict[str, str] = {
     "pve_stopall_guests": "deploy/setup/pre-shutdown-proc.sh — pair with ceph osd set noout manually",
     "pve_shutdown_guest": "deploy/setup/pre-shutdown-proc.sh — graceful shutdown before maintenance",
     "pve_start_guest": "deploy/proxmox.sh — guest power; use read tools to verify target first",
+    "pve_get_ha_status": "docs/MCP_POWER_PLAN.md — HA shutdown_policy=freeze gate; docs/ARCHITECTURE.md §4",
+    "pve_wait_for_task": "docs/MCP_POWER_PLAN.md — poll UPIDs in ≤120 s calls",
+    "pve_wait_nodes_state": "docs/MCP_POWER_PLAN.md — shutdown/startup sequences",
+    "pve_shutdown_node": "docs/MCP_POWER_PLAN.md — shutdown sequence (entry node last)",
+    "pve_stop_guest": "docs/TIPSNTRICKS.md — hung guest blocking stopall",
+    "pve_wake_on_lan": "docs/MCP_POWER_PLAN.md — startup sequence; pvenode config set -wakeonlan <MAC>",
 }
 
 # Bash-only workflows for agents; values are deploy/script entrypoints, not MCP tools.
 BASH_ONLY_WORKFLOWS: dict[str, str] = {
     "setup-node": "deploy/proxmox.sh setup-node",
     "get-temp": "deploy/proxmox.sh get-temp",
-    "start-cluster": "deploy/proxmox.sh start-cluster (WoL)",
-    "stop-cluster": "deploy/proxmox.sh stop-cluster (node shutdown)",
+    "start-cluster": "deploy/proxmox.sh start-cluster (WoL; per-node via pve_wake_on_lan)",
+    "stop-cluster": "deploy/proxmox.sh stop-cluster (ordered; per-node via pve_shutdown_node)",
+    "wake-lab": "deploy/proxmox.sh wake-lab (cold start from the QDevice host: TrueNAS, then entry node)",
     "ceph-noout": "deploy/setup/pre-shutdown-proc.sh / post-startup-proc.sh",
 }

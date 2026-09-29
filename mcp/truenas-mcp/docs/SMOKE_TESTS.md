@@ -37,7 +37,7 @@ Exit code **0** when `core_passed` is true (warnings on lab-specific checks are 
 | ---------------------- | -------- | ---------------------------------- |
 | `system_state_ready`   | no       | Expect `READY`                     |
 | `pools_all_online`     | no       | Fail if any pool not `ONLINE`      |
-| `lab_ha_pool`          | **yes**  | `pve-cluster-oldtimers-ha-storage` |
+| `lab_ha_pool`          | **yes**  | `main_data_storage`                |
 | `alerts_listable`      | no       | `alert.list`                       |
 | `alerts_no_critical`   | **yes**  | Warn on WARNING/CRITICAL           |
 | `nfs_shares_listable`  | no       | `sharing.nfs.query`                |
@@ -53,22 +53,22 @@ Exit code **0** when `core_passed` is true (warnings on lab-specific checks are 
 
 ## Extended checks (`--extended`)
 
-| Check                     | Optional | Notes                                   |
-| ------------------------- | -------- | --------------------------------------- |
-| `disk_temperature_alerts` | **yes**  | May need extra API perms on some builds |
-| `reporting_graph`         | **yes**  | `reporting.get_data` cpu graph          |
-| `*_tool`                  | no       | MCP tool wrapper smoke (5 tools)        |
+| Check                     | Optional | Notes                                                           |
+| ------------------------- | -------- | --------------------------------------------------------------- |
+| `disk_temperature_alerts` | **yes**  | May need extra API perms on some builds                         |
+| `reporting_graph`         | **yes**  | `reporting.get_data` cpu graph                                  |
+| `*_tool`                  | no       | MCP tool wrapper smoke (8 tools, incl. `list_nfs_clients_tool`) |
 
 ## Lab-specific configuration
 
 Override defaults via environment:
 
-| Variable                        | Default                                         |
-| ------------------------------- | ----------------------------------------------- |
-| `TRUENAS_LAB_HA_POOL_NAME`      | `pve-cluster-oldtimers-ha-storage`              |
-| `TRUENAS_LAB_NFS_EXPORT`        | `/mnt/pve-cluster-oldtimers-ha-storage/pve-nfs` |
-| `TRUENAS_LAB_SCRUTINY_APP_NAME` | `scrutiny`                                      |
-| `TRUENAS_LAB_CONFIG_FILE`       | Optional path to `default.truenas.nfs.env`      |
+| Variable                        | Default                                    |
+| ------------------------------- | ------------------------------------------ |
+| `TRUENAS_LAB_HA_POOL_NAME`      | `main_data_storage`                        |
+| `TRUENAS_LAB_NFS_EXPORT`        | `/mnt/main_data_storage`                   |
+| `TRUENAS_LAB_SCRUTINY_APP_NAME` | `scrutiny`                                 |
+| `TRUENAS_LAB_CONFIG_FILE`       | Optional path to `default.truenas.nfs.env` |
 
 **Uptime Kuma** runs on Proxmox cluster `pvecm-oldtimers`, not TrueNAS. Use `proxmox-ve` MCP and `deploy/setup/misc/monitoring/papita_uptime_kuma_bootstrap.py`.
 

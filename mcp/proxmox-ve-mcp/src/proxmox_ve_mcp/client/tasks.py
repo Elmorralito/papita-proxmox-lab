@@ -10,7 +10,9 @@ Used by guest write tools when ``wait_for_completion=true`` is requested.
 import asyncio
 from typing import Any
 
+from proxmox_ve_mcp.client.errors import PveApiError
 from proxmox_ve_mcp.client.http import PveClient
+from proxmox_ve_mcp.constants import API_LOST_ERROR_CODES, MAX_WAIT_CALL_SEC
 
 
 def parse_upid_node(upid: str) -> str | None:
@@ -77,3 +79,85 @@ async def wait_for_task(
         f"Task {upid} on {node} did not finish within {timeout_sec}s; "
         f"last status: {last_status.get('status', 'unknown')}"
     )
+
+
+def task_succeeded(status: dict[str, Any]) -> bool:
+    """True when a stopped task reports ``exitstatus`` ``OK``."""
+    return status.get("status") == "stopped" and status.get("exitstatus") == "OK"
+
+
+def node_states(entries: list[Any]) -> dict[str, str]:
+    """Map node name → ``online``/``offline`` from ``/cluster/status`` node entries."""
+    states: dict[str, str] = {}
+    for entry in entries:
+        if isinstance(entry, dict) and entry.get("type") == "node" and entry.get("name"):
+            states[str(entry["name"])] = "online" if entry.get("online") else "offline"
+    return states
+
+
+async def wait_for_nodes_state(
+    client: PveClient,
+    nodes: list[str] | None,
+    target: str,
+    *,
+    timeout_sec: float = MAX_WAIT_CALL_SEC,
+    poll_interval_sec: float = 5.0,
+) -> dict[str, Any]:
+    """Poll ``GET /cluster/status`` until *nodes* reach *target* (``online``/``offline``).
+
+    When waiting for ``offline`` and the API host itself stops answering (entry node powered
+    off), the wait ends with ``api_lost=True`` and every unconfirmed node reported as
+    ``offline_assumed``.
+
+    Args:
+        client: Authenticated Proxmox HTTP client.
+        nodes: Node names to watch; ``None`` watches every cluster member.
+        target: ``online`` or ``offline``.
+        timeout_sec: Maximum seconds to wait (does not raise on timeout).
+        poll_interval_sec: Seconds between polls.
+
+    Returns:
+        ``reached``, ``api_lost``, per-node ``states``, ``pending`` nodes, and ``elapsed_s``.
+    """
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    deadline = started + timeout_sec
+    states: dict[str, str] = {}
+    watched: list[str] = list(nodes) if nodes else []
+
+    while True:
+        try:
+            raw = await client.get("/cluster/status")
+        except PveApiError as exc:
+            if target == "offline" and exc.code in API_LOST_ERROR_CODES:
+                for name in watched:
+                    if states.get(name) != "offline":
+                        states[name] = "offline_assumed"
+                return {
+                    "reached": True,
+                    "api_lost": True,
+                    "api_error": exc.code,
+                    "states": states,
+                    "pending": [],
+                    "elapsed_s": round(loop.time() - started, 1),
+                }
+            raise
+
+        current = node_states(raw if isinstance(raw, list) else [])
+        if not watched:
+            watched = sorted(current)
+        unknown = [name for name in watched if name not in current]
+        if unknown:
+            raise ValueError(f"Unknown cluster node(s): {', '.join(unknown)}")
+        states = {name: current[name] for name in watched}
+        pending = [name for name in watched if states[name] != target]
+        now = loop.time()
+        if not pending or now >= deadline:
+            return {
+                "reached": not pending,
+                "api_lost": False,
+                "states": states,
+                "pending": pending,
+                "elapsed_s": round(now - started, 1),
+            }
+        await asyncio.sleep(min(poll_interval_sec, max(deadline - now, 0.0)))

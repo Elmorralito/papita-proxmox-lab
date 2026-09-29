@@ -11,8 +11,9 @@ from truenas_mcp.tools.monitoring import (
     truenas_list_apps_impl,
     truenas_list_smart_results_impl,
 )
+from truenas_mcp.tools.power import truenas_reboot_impl, truenas_shutdown_impl
 from truenas_mcp.tools.registry import TOOL_REGISTRY, ToolClass
-from truenas_mcp.tools.sharing import truenas_list_nfs_shares_impl
+from truenas_mcp.tools.sharing import truenas_list_nfs_clients_impl, truenas_list_nfs_shares_impl
 from truenas_mcp.tools.smoke_test import truenas_run_smoke_tests_impl
 from truenas_mcp.tools.storage import (
     truenas_list_datasets_impl,
@@ -134,6 +135,12 @@ def register_tools(mcp: FastMCP) -> None:  # noqa: C901
         """List NFS shares; validate lab HA export path."""
         return await truenas_list_nfs_shares_impl()
 
+    @mcp.tool(name="truenas_list_nfs_clients")
+    @_track("truenas_list_nfs_clients", ToolClass.READ)
+    async def truenas_list_nfs_clients() -> str:
+        """List connected NFS clients (v3/v4) mapped to PVE nodes; safety gate before NAS shutdown."""
+        return await truenas_list_nfs_clients_impl()
+
     @mcp.tool(name="truenas_list_scrub_tasks")
     @_track("truenas_list_scrub_tasks", ToolClass.READ)
     async def truenas_list_scrub_tasks(limit: int = 20) -> str:
@@ -191,6 +198,51 @@ def register_tools(mcp: FastMCP) -> None:  # noqa: C901
     async def truenas_dismiss_alert(alert_id: str, confirm: bool) -> str:
         """Dismiss an active alert (requires confirm=true)."""
         return await truenas_dismiss_alert_impl(alert_id, confirm=confirm)
+
+    @mcp.tool(name="truenas_shutdown")
+    @_track("truenas_shutdown", ToolClass.DESTRUCTIVE)
+    async def truenas_shutdown(  # pylint: disable=too-many-arguments
+        reason: str,
+        confirm: bool = False,
+        delay_s: int = 0,
+        force: bool = False,
+        expected_clients: list[str] | None = None,
+        plan_only: bool = False,
+    ) -> str:
+        """DESTRUCTIVE: power off the NAS (system.shutdown) after guards.
+
+        Refuses while NFS clients outside expected_clients are connected or a scrub/replication/update
+        job runs (force=true overrides). delay_s lets the entry PVE node shut down first while the NAS
+        is still reachable through the router guest. plan_only=true checks without confirm.
+        """
+        return await truenas_shutdown_impl(
+            reason,
+            confirm=confirm,
+            delay_s=delay_s,
+            force=force,
+            expected_clients=expected_clients,
+            plan_only=plan_only,
+        )
+
+    @mcp.tool(name="truenas_reboot")
+    @_track("truenas_reboot", ToolClass.DESTRUCTIVE)
+    async def truenas_reboot(  # pylint: disable=too-many-arguments
+        reason: str,
+        confirm: bool = False,
+        delay_s: int = 0,
+        force: bool = False,
+        expected_clients: list[str] | None = None,
+        plan_only: bool = False,
+    ) -> str:
+        """DESTRUCTIVE: reboot the NAS (system.reboot) with the same guards as truenas_shutdown."""
+        return await truenas_reboot_impl(
+            reason,
+            confirm=confirm,
+            delay_s=delay_s,
+            force=force,
+            expected_clients=expected_clients,
+            plan_only=plan_only,
+        )
 
     @mcp.tool(name="truenas_run_smoke_tests")
     @_track("truenas_run_smoke_tests", ToolClass.READ)

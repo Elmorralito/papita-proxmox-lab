@@ -205,6 +205,72 @@ start_cluster() {
     return $ERROR_COUNT
 }
 
+# Cold start from the always-on QDevice host (-ip): wake each target in default.wol.macs order,
+# waiting for its TCP port before the next (TrueNAS NFS first, then the entry PVE node).
+WOL_MACS_FILE="${PAPITA_WOL_MACS_FILE:-${PVE_SETUP_DIR}/misc/cluster/default.wol.macs}"
+WOL_WAIT_SEC="${PAPITA_WOL_WAIT_SEC:-600}"
+WOL_BROADCAST="${PAPITA_WOL_BROADCAST:-255.255.255.255}"
+
+wake_lab() {
+    local name mac ip port entry
+    local -a entries=()
+    if [[ ! -r "$WOL_MACS_FILE" ]]; then
+        log "ERROR" "WoL targets file not readable: ${WOL_MACS_FILE}"
+        return 255
+    fi
+    while read -r name mac ip port _; do
+        [[ -z "${name:-}" || "$name" == \#* ]] && continue
+        if [[ ! "${mac:-}" =~ ^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$ ]] || [[ -z "${ip:-}" ]] || [[ ! "${port:-}" =~ ^[0-9]+$ ]]; then
+            log "ERROR" "Invalid line in ${WOL_MACS_FILE}: '${name} ${mac:-} ${ip:-} ${port:-}' (want <name> <MAC> <ip> <port>)."
+            return 255
+        fi
+        entries+=("${name} ${mac} ${ip} ${port}")
+    done <"$WOL_MACS_FILE"
+    if [[ ${#entries[@]} -eq 0 ]]; then
+        log "ERROR" "No WoL targets in ${WOL_MACS_FILE}; add '<name> <MAC> <ip> <port>' lines (TrueNAS first, then the entry PVE node)."
+        return 255
+    fi
+    if ! ssh "${SSH_COMMON_OPTS[@]}" "$TARGET_USERNAME@$IP_ADDRESS" "command -v wakeonlan" >/dev/null; then
+        log "ERROR" "wakeonlan is not installed on ${IP_ADDRESS}; re-run qdevice-server-bootstrap.sh or apt-get install -y wakeonlan."
+        return 255
+    fi
+
+    for entry in "${entries[@]}"; do
+        read -r name mac ip port <<<"$entry"
+        log "INFO" "Waking ${name} (${mac}); waiting for ${ip}:${port} (up to ${WOL_WAIT_SEC}s)..."
+        if ! ssh "${SSH_COMMON_OPTS[@]}" "$TARGET_USERNAME@$IP_ADDRESS" \
+            bash -s -- "$mac" "$ip" "$port" "$WOL_WAIT_SEC" "$WOL_BROADCAST" <<'REMOTE'
+set -euo pipefail
+mac=$1 ip=$2 port=$3 wait_s=$4 bcast=$5
+up() { timeout 3 bash -c "</dev/tcp/${ip}/${port}" 2>/dev/null; }
+if up; then
+    echo "already up"
+    exit 0
+fi
+deadline=$((SECONDS + wait_s))
+next_packet=0
+while ((SECONDS < deadline)); do
+    if ((SECONDS >= next_packet)); then
+        wakeonlan -i "$bcast" "$mac" >/dev/null
+        next_packet=$((SECONDS + 60))
+    fi
+    if up; then
+        echo "up after ${SECONDS}s"
+        exit 0
+    fi
+    sleep 5
+done
+exit 1
+REMOTE
+        then
+            log "ERROR" "${name} did not answer on ${ip}:${port} within ${WOL_WAIT_SEC}s; aborting (later targets depend on it)."
+            return 1
+        fi
+        log "INFO" "${name} is up."
+    done
+    log "INFO" "Lab core is up. post-startup-proc on the entry node wakes the other PVE nodes; then check pve_cluster_health and truenas_run_smoke_tests."
+}
+
 stop_cluster() {
     # Per-node API calls (pvesh … /nodes/<name>/…) target each cluster member by name.
     # Never run plain shutdown only on $IP_ADDRESS for every peer—that always hits the SSH
@@ -607,6 +673,9 @@ case "$ACTION" in
         ;;
     start-cluster)
         start_cluster
+        ;;
+    wake-lab)
+        wake_lab
         ;;
     stop-cluster)
         stop_cluster

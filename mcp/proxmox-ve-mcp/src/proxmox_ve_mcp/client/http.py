@@ -8,6 +8,8 @@ Successful calls return the unwrapped ``data`` field when present; otherwise the
 """
 
 import asyncio
+import socket
+import ssl
 from typing import Any
 
 import httpx
@@ -19,6 +21,64 @@ from proxmox_ve_mcp.constants import (
     LONG_HTTP_TIMEOUT_SEC,
     MAX_CONCURRENT_REQUESTS,
 )
+
+_UNREACHABLE_HINT = (
+    "PVE_HOST did not answer: the node may be powered off or its Tailscale device offline. "
+    "Point PVE_HOST at another online cluster member."
+)
+
+
+def _cause_chain(exc: BaseException) -> list[BaseException]:
+    chain: list[BaseException] = []
+    current: BaseException | None = exc
+    while current is not None and current not in chain:
+        chain.append(current)
+        current = current.__cause__ or current.__context__
+    return chain
+
+
+def transport_error(
+    exc: httpx.HTTPError,
+    settings: PveSettings,
+    *,
+    endpoint: str,
+    timeout: float,
+) -> PveApiError:
+    """Map an httpx transport failure to a :class:`PveApiError` with a stable code and hint."""
+    target = f"{settings.host}:{settings.port}"
+    chain = _cause_chain(exc)
+    detail = next((str(e) for e in chain if str(e)), type(exc).__name__)
+
+    def _err(message: str, code: str, hint: str) -> PveApiError:
+        return PveApiError(message, endpoint=endpoint, code=code, hint=hint)
+
+    if any(isinstance(e, socket.gaierror) for e in chain) or "Name or service not known" in detail:
+        return _err(
+            f"PVE_HOST '{settings.host}' does not resolve: {detail}",
+            "PVE_DNS_ERROR",
+            "Check the Tailscale device name (MagicDNS) or use a node LAN IP (172.16.0.101-104).",
+        )
+    if isinstance(exc, httpx.ConnectTimeout):
+        return _err(f"Timed out connecting to {target}", "PVE_CONNECT_TIMEOUT", _UNREACHABLE_HINT)
+    if isinstance(exc, httpx.TimeoutException):
+        return _err(
+            f"{type(exc).__name__} after {timeout:g}s on {endpoint} ({target})",
+            "PVE_TIMEOUT",
+            "Connected but the API did not answer in time: node busy, shutting down, or task still running.",
+        )
+    if any(isinstance(e, ssl.SSLError) for e in chain) or "[SSL" in detail:
+        return _err(
+            f"TLS handshake with {target} failed: {detail}",
+            "PVE_TLS_ERROR",
+            "Set PVE_VERIFY_SSL=false for self-signed certs, or use the node's Tailscale TLS name.",
+        )
+    if any(isinstance(e, ConnectionRefusedError) for e in chain) or "Connection refused" in detail:
+        return _err(
+            f"Connection refused by {target}",
+            "PVE_CONNECTION_REFUSED",
+            "Host is up but pveproxy is not listening on PVE_PORT; check the port or pveproxy status.",
+        )
+    return _err(f"HTTP request to {target}{endpoint} failed: {detail}", "PVE_CONNECTION_ERROR", _UNREACHABLE_HINT)
 
 
 class PveClient:
@@ -121,7 +181,7 @@ class PveClient:
                     timeout=httpx.Timeout(request_timeout),
                 )
             except httpx.HTTPError as exc:
-                raise PveApiError(f"HTTP request failed: {exc}") from exc
+                raise transport_error(exc, self._settings, endpoint=normalized, timeout=request_timeout) from exc
 
         return self._parse_response(response, endpoint=normalized)
 

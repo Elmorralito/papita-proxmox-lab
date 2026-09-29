@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import socket
+import ssl
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from truenas_mcp.client.errors import TnasApiError
+from truenas_mcp.client.websocket import classify_connect_error
 from truenas_mcp.config import TnasSettings
 from truenas_mcp.tools.smoke_test import (
     CORE_SMOKE_CHECKS,
@@ -15,6 +19,8 @@ from truenas_mcp.tools.smoke_test import (
     run_smoke_tests,
     smoke_core_passed,
 )
+
+REACHABLE = {"name": "host_reachable", "status": "pass"}
 
 
 def test_tool_response_ok() -> None:
@@ -33,7 +39,7 @@ def test_smoke_core_passed_requires_core_checks() -> None:
         ]
     }
     assert smoke_core_passed(report)
-    assert CORE_SMOKE_CHECKS == {"config_valid", "websocket_auth", "system_info", "pools_query"}
+    assert CORE_SMOKE_CHECKS == {"config_valid", "host_reachable", "websocket_auth", "system_info", "pools_query"}
 
 
 def test_smoke_core_failed_when_auth_fails() -> None:
@@ -60,12 +66,63 @@ async def test_run_smoke_tests_stops_after_auth_failure() -> None:
     with (
         patch("truenas_mcp.tools.smoke_test.get_settings", return_value=settings),
         patch("truenas_mcp.tools.smoke_test.get_client", return_value=client),
+        patch("truenas_mcp.tools.smoke_test._check_host_reachable", AsyncMock(return_value=REACHABLE)),
     ):
         report = await run_smoke_tests()
 
     names = [item["name"] for item in report["tests"]]
-    assert names == ["config_valid", "websocket_auth"]
+    assert names == ["config_valid", "host_reachable", "websocket_auth"]
     assert not report["core_passed"]
+
+
+@pytest.mark.asyncio
+async def test_run_smoke_tests_stops_when_host_unreachable() -> None:
+    settings = TnasSettings(host="nas.invalid", api_key="test-key")
+    client = AsyncMock()
+
+    with (
+        patch("truenas_mcp.tools.smoke_test.get_settings", return_value=settings),
+        patch("truenas_mcp.tools.smoke_test.get_client", return_value=client),
+        patch(
+            "truenas_mcp.tools.smoke_test.asyncio.open_connection",
+            AsyncMock(side_effect=socket.gaierror(-2, "Name or service not known")),
+        ),
+    ):
+        report = await run_smoke_tests()
+
+    names = [item["name"] for item in report["tests"]]
+    assert names == ["config_valid", "host_reachable"]
+    failed = report["tests"][1]
+    assert failed["status"] == "fail"
+    assert failed["code"] == "DNS_ERROR"
+    assert "TRUENAS_HOST" in failed["error"]
+    assert failed["hint"]
+    client.call.assert_not_called()
+    assert not report["core_passed"]
+
+
+@pytest.mark.parametrize(
+    ("exc", "code"),
+    [
+        (socket.gaierror(-2, "Name or service not known"), "DNS_ERROR"),
+        (ConnectionRefusedError(111, "Connection refused"), "CONNECTION_REFUSED"),
+        (ssl.SSLError("bad cert"), "TLS_ERROR"),
+        (TimeoutError(), "CONNECT_TIMEOUT"),
+        (OSError(113, "No route to host"), "CONNECTION_ERROR"),
+    ],
+)
+def test_classify_connect_error(exc: BaseException, code: str) -> None:
+    settings = TnasSettings(host="nas.example", api_key="test-key")
+    err = classify_connect_error(exc, settings)
+    assert err.code == code
+    assert str(err)
+    assert err.to_dict()["code"] == code
+
+
+def test_classify_connect_error_passes_through_api_errors() -> None:
+    settings = TnasSettings(host="nas.example", api_key="test-key")
+    original = TnasApiError("auth", code="AUTH_FAILED")
+    assert classify_connect_error(original, settings) is original
 
 
 @pytest.mark.asyncio
@@ -78,11 +135,11 @@ async def test_run_smoke_tests_basic_success() -> None:
         if method == "system.info":
             return {"hostname": "nas", "version": "25.10.0"}
         if method == "pool.query":
-            return [{"name": "pve-cluster-oldtimers-ha-storage", "status": "ONLINE"}]
+            return [{"name": "main_data_storage", "status": "ONLINE"}]
         if method == "alert.list":
             return []
         if method == "sharing.nfs.query":
-            return [{"enabled": True, "path": "/mnt/pve-cluster-oldtimers-ha-storage/pve-nfs"}]
+            return [{"enabled": True, "path": "/mnt/main_data_storage"}]
         if method == "pool.dataset.query":
             return [{"name": "tank/data"}]
         if method == "disk.query":
@@ -105,6 +162,7 @@ async def test_run_smoke_tests_basic_success() -> None:
     with (
         patch("truenas_mcp.tools.smoke_test.get_settings", return_value=settings),
         patch("truenas_mcp.tools.smoke_test.get_client", return_value=client),
+        patch("truenas_mcp.tools.smoke_test._check_host_reachable", AsyncMock(return_value=REACHABLE)),
     ):
         report = await run_smoke_tests()
 

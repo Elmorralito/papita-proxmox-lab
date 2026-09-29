@@ -67,6 +67,20 @@ Work in **Datacenter → Permissions** unless noted. Order matters: role → gro
 | Name       | `MCPAgent`                              |
 | Privileges | `Sys.Audit`, `VM.Audit`, `VM.PowerMgmt` |
 
+#### Power-capable MCP (node shutdown / WoL — optional)
+
+| Field      | Value                                                    |
+| ---------- | -------------------------------------------------------- |
+| Name       | `MCPAgentPower`                                          |
+| Privileges | `Sys.Audit`, `VM.Audit`, `VM.PowerMgmt`, `Sys.PowerMgmt` |
+
+```bash
+pveum role add MCPAgentPower -privs "Sys.Audit,VM.Audit,VM.PowerMgmt,Sys.PowerMgmt"
+pveum acl modify / -group mcp-agents -role MCPAgentPower
+```
+
+With privilege separation, the **token** ACL must include the role too (`pveum acl modify / -token 'mcp-agent@pam!cursor' -role MCPAgentPower`).
+
 Required privileges for common MCP tools:
 
 | Tool / endpoint                                           | Privilege                          |
@@ -75,7 +89,10 @@ Required privileges for common MCP tools:
 | `pve_get_cluster_config_nodes`, `pve_list_node_addresses` | `Sys.Audit` on `/`                 |
 | `pve_get_node_status`, network detail                     | `Sys.Audit` on `/nodes/{node}`     |
 | `pve_list_guests`, `pve_get_guest_status`                 | `VM.Audit` on `/`                  |
-| `pve_start_guest`, `pve_shutdown_guest`                   | `VM.PowerMgmt` on `/`              |
+| `pve_start_guest`, `pve_shutdown_guest`, `pve_stop_guest` | `VM.PowerMgmt` on `/`              |
+| `pve_get_ha_status` (HA rules / resources)                | `Sys.Audit` on `/`                 |
+| `pve_shutdown_node`                                       | `Sys.PowerMgmt` on `/nodes/{node}` |
+| `pve_wake_on_lan`                                         | `Sys.PowerMgmt` on `/nodes/{node}` |
 
 ---
 

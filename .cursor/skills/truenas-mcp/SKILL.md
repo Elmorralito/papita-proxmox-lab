@@ -12,7 +12,7 @@ description: >-
 
 # truenas MCP
 
-Package: `mcp/truenas-mcp` · Cursor server name: **`truenas`** · 18 tools (15 read, 3 write). Spec: [README](../../../mcp/truenas-mcp/README.md). Do not paste the README into context.
+Package: `mcp/truenas-mcp` · Cursor server name: **`truenas`** · 19 tools (16 read, 3 write). Spec: [README](../../../mcp/truenas-mcp/README.md). Do not paste the README into context.
 
 Token design: call **1–3 tools**, summarize, never dump envelopes. Unload unused MCP servers; this skill does not load proxmox-ve/pfSense.
 
@@ -41,8 +41,8 @@ Expected shape:
         "TRUENAS_API_KEY": "<redacted>",
         "TRUENAS_VERIFY_SSL": "false",
         "TRUENAS_WS_PATH": "/websocket",
-        "TRUENAS_LAB_HA_POOL_NAME": "pve-cluster-oldtimers-ha-storage",
-        "TRUENAS_LAB_NFS_EXPORT": "/mnt/pve-cluster-oldtimers-ha-storage/pve-nfs",
+        "TRUENAS_LAB_HA_POOL_NAME": "main_data_storage",
+        "TRUENAS_LAB_NFS_EXPORT": "/mnt/main_data_storage",
         "TRUENAS_LAB_SCRUTINY_APP_NAME": "scrutiny",
         "TRUENAS_LOG_LEVEL": "INFO"
       }
@@ -72,23 +72,24 @@ Usage:
 
 ## Pick tools (do not list all)
 
-| Need               | Tool                                                               |
-| ------------------ | ------------------------------------------------------------------ |
-| Alive / auth       | `truenas_check_api_key` or `truenas_get_system_info`               |
-| Operator dashboard | `truenas_system_summary`                                           |
-| Post-install       | `truenas_run_smoke_tests` (`extended=true` only if basic pass)     |
-| Alerts             | `truenas_list_alerts`                                              |
-| ZFS pools          | `truenas_list_pools`                                               |
-| Datasets           | `truenas_list_datasets`                                            |
-| Disks / temps      | `truenas_list_disks`                                               |
-| SMART              | `truenas_list_smart_results`                                       |
-| NFS HA export      | `truenas_list_nfs_shares`                                          |
-| Apps (Scrutiny)    | `truenas_list_apps`                                                |
-| Jobs / scrubs      | `truenas_list_jobs` / `truenas_list_scrub_tasks`                   |
-| Graphs             | `truenas_get_reporting_data` (`graph`: `cpu`\|`memory`\|`disk`\|…) |
-| Create dataset     | `truenas_create_dataset`                                           |
-| Enable/disable NFS | `truenas_update_nfs_share` (`share_id`)                            |
-| Dismiss alert      | `truenas_dismiss_alert`                                            |
+| Need               | Tool                                                                |
+| ------------------ | ------------------------------------------------------------------- |
+| Alive / auth       | `truenas_check_api_key` or `truenas_get_system_info`                |
+| Operator dashboard | `truenas_system_summary`                                            |
+| Post-install       | `truenas_run_smoke_tests` (`extended=true` only if basic pass)      |
+| Alerts             | `truenas_list_alerts`                                               |
+| ZFS pools          | `truenas_list_pools`                                                |
+| Datasets           | `truenas_list_datasets`                                             |
+| Disks / temps      | `truenas_list_disks`                                                |
+| SMART              | `truenas_list_smart_results`                                        |
+| NFS HA export      | `truenas_list_nfs_shares`                                           |
+| NFS clients        | `truenas_list_nfs_clients` (PVE nodes mounted; gate before NAS off) |
+| Apps (Scrutiny)    | `truenas_list_apps`                                                 |
+| Jobs / scrubs      | `truenas_list_jobs` / `truenas_list_scrub_tasks`                    |
+| Graphs             | `truenas_get_reporting_data` (`graph`: `cpu`\|`memory`\|`disk`\|…)  |
+| Create dataset     | `truenas_create_dataset`                                            |
+| Enable/disable NFS | `truenas_update_nfs_share` (`share_id`)                             |
+| Dismiss alert      | `truenas_dismiss_alert`                                             |
 
 Writes: **`confirm=true` required**. Optional `wait_for_job=true` on dataset/NFS updates. No reboot, interface, or catalog tools in v1/v2.
 

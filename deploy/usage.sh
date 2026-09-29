@@ -79,6 +79,10 @@ usage_proxmox() {
                    names from pvesh (JSON .node, any status—needed for WoL to offline peers),
                    send Wake-on-LAN to
                    each peer via pvenode wakeonlan <node> (skips the local node).
+    wake-lab       Cold start with the whole lab off. -ip is the always-on QDevice host
+                   (172.16.0.99, needs wakeonlan). Wakes targets from misc/cluster/default.wol.macs
+                   in order (TrueNAS, then the entry PVE node), waiting for each <ip>:<port>.
+                   Env: PAPITA_WOL_MACS_FILE, PAPITA_WOL_WAIT_SEC (600), PAPITA_WOL_BROADCAST.
     stop-cluster   From the host at -ip: for each peer node, pvesh create /nodes/<node>/stopall
                    then /nodes/<node>/status --command shutdown (cluster API, not repeated
                    shutdown on the SSH target). Then pvenode stopall on the local node; with

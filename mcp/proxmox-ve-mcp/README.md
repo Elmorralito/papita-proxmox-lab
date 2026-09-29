@@ -148,7 +148,7 @@ flowchart TB
 | --------------- | -------------------------------------------------------------- |
 | **Read**        | GET-only API calls; no confirmation required                   |
 | **Write**       | POST with mandatory `confirm=true`; audit log on stderr        |
-| **Destructive** | Registered in `ToolClass` but **zero destructive tools in v1** |
+| **Destructive** | Power tools only (`pve_shutdown_node`, `pve_stop_guest`): `confirm=true` + `reason`; keep off auto-run allowlists |
 
 Additional safeguards:
 
@@ -160,28 +160,31 @@ Additional safeguards:
 
 ## MCP tools
 
-### Read (18)
+### Read (21)
 
-| Tool                           | Purpose                                                   | Lab workflow                                    |
-| ------------------------------ | --------------------------------------------------------- | ----------------------------------------------- |
-| `pve_get_version`              | API smoke test; validates token and TLS                   | —                                               |
-| `pve_check_token`              | Permission probe matrix; run when tools return HTTP 403   | [PVE_TOKEN_SETUP.md](./docs/PVE_TOKEN_SETUP.md) |
-| `pve_run_smoke_tests`          | **Post-install suite** — connectivity, auth, access level | [SMOKE_TESTS.md](./docs/SMOKE_TESTS.md)         |
-| `pve_list_node_addresses`      | Corosync `ring0_addr` + interface IPs per node            | `deploy/proxmox.sh local-node`                  |
-| `pve_list_nodes`               | Cluster members with online/offline status                | `deploy/proxmox.sh cluster-nodes`               |
-| `pve_get_cluster_config_nodes` | Node config including `ring0_addr`                        | `deploy/proxmox.sh local-node`                  |
-| `pve_get_cluster_options`      | Datacenter options (mailto, mailfrom, …)                  | `setup-pve-node.sh` step 12                     |
-| `pve_list_tasks`               | Cluster tasks with optional filter and pagination         | TIPSNTRICKS troubleshooting                     |
-| `pve_get_task_log`             | Task log for a UPID on a node                             | Async operation follow-up                       |
-| `pve_list_resources`           | VMs, CTs, storage, pools — filterable                     | TIPSNTRICKS cluster verify                      |
-| `pve_cluster_health`           | Derived online/offline summary + quorum hint              | TIPSNTRICKS cluster verify                      |
-| `pve_get_node_status`          | CPU, memory, uptime for a node                            | Capacity checks                                 |
-| `pve_list_guests`              | VM and CT inventory (`guest_type`: qemu/lxc)              | —                                               |
-| `pve_get_guest_status`         | Runtime status for one guest                              | —                                               |
-| `pve_get_guest_config`         | Guest config with secrets redacted                        | —                                               |
-| `pve_list_storage`             | Storage definitions; pass `node` for capacity             | TIPSNTRICKS `pvesm status`                      |
-| `pve_get_ceph_status`          | Ceph health summary (read-only)                           | TIPSNTRICKS OSD Storage                         |
-| `pve_list_ceph_osds`           | OSD list on a node (read-only)                            | TIPSNTRICKS OSD Storage                         |
+| Tool                           | Purpose                                                   | Lab workflow                                      |
+| ------------------------------ | --------------------------------------------------------- | ------------------------------------------------- |
+| `pve_get_version`              | API smoke test; validates token and TLS                   | —                                                 |
+| `pve_check_token`              | Permission probe matrix; run when tools return HTTP 403   | [PVE_TOKEN_SETUP.md](./docs/PVE_TOKEN_SETUP.md)   |
+| `pve_run_smoke_tests`          | **Post-install suite** — connectivity, auth, access level | [SMOKE_TESTS.md](./docs/SMOKE_TESTS.md)           |
+| `pve_list_node_addresses`      | Corosync `ring0_addr` + interface IPs per node            | `deploy/proxmox.sh local-node`                    |
+| `pve_list_nodes`               | Cluster members with online/offline status                | `deploy/proxmox.sh cluster-nodes`                 |
+| `pve_get_cluster_config_nodes` | Node config including `ring0_addr`                        | `deploy/proxmox.sh local-node`                    |
+| `pve_get_cluster_options`      | Datacenter options (mailto, mailfrom, …)                  | `setup-pve-node.sh` step 12                       |
+| `pve_list_tasks`               | Cluster tasks with optional filter and pagination         | TIPSNTRICKS troubleshooting                       |
+| `pve_get_task_log`             | Task log for a UPID on a node                             | Async operation follow-up                         |
+| `pve_list_resources`           | VMs, CTs, storage, pools — filterable                     | TIPSNTRICKS cluster verify                        |
+| `pve_cluster_health`           | True quorum, entry node, QDevice, online/offline summary  | TIPSNTRICKS cluster verify                        |
+| `pve_get_ha_status`            | HA manager, LRMs, resources, rules, `shutdown_policy`     | [MCP_POWER_PLAN.md](../../docs/MCP_POWER_PLAN.md) |
+| `pve_wait_for_task`            | Bounded (≤120 s) wait on a UPID + log tail                | Follow-up for write tools                         |
+| `pve_wait_nodes_state`         | Bounded wait for nodes online/offline                     | Shutdown / startup sequences                      |
+| `pve_get_node_status`          | CPU, memory, uptime for a node                            | Capacity checks                                   |
+| `pve_list_guests`              | VM and CT inventory (`guest_type`: qemu/lxc)              | —                                                 |
+| `pve_get_guest_status`         | Runtime status for one guest                              | —                                                 |
+| `pve_get_guest_config`         | Guest config with secrets redacted                        | —                                                 |
+| `pve_list_storage`             | Storage definitions; pass `node` for capacity             | TIPSNTRICKS `pvesm status`                        |
+| `pve_get_ceph_status`          | Ceph health summary (read-only)                           | TIPSNTRICKS OSD Storage                           |
+| `pve_list_ceph_osds`           | OSD list on a node (read-only)                            | TIPSNTRICKS OSD Storage                           |
 
 Many responses include `meta.runbook_ref` pointing to the relevant repo path (see `constants.RUNBOOK_REFS`).
 
@@ -195,13 +198,23 @@ Many responses include `meta.runbook_ref` pointing to the relevant repo path (se
 
 Write tools return a UPID; set `wait_for_completion=true` to poll task status.
 
+### Power (1 write + 2 destructive — [MCP_POWER_PLAN.md](../../docs/MCP_POWER_PLAN.md))
+
+| Tool                | Class       | Purpose                                                                 | Guards                                                                                         |
+| ------------------- | ----------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `pve_wake_on_lan`   | write       | WoL from the API entry node (`nodes=[...]` or `all_offline=true`)       | `confirm`; online targets skipped; missing-MAC hint                                            |
+| `pve_shutdown_node` | destructive | Node `shutdown` / `reboot`                                              | `confirm` + `reason`; `ha.shutdown_policy=freeze`; entry node needs `allow_entry_host`; quorum / running-guest / router warnings; `plan_only` |
+| `pve_stop_guest`    | destructive | Hard stop a hung VM/CT (`overrule_shutdown` aborts a running shutdown) | `confirm` + `reason`; warns for `PVE_LAB_INFRA_VMIDS`                                          |
+
+`PVE_LAB_INFRA_VMIDS` (default `100`) lists the LAN router guest(s); tools warn before stopping them because TrueNAS is only reachable through the router. Token needs `Sys.PowerMgmt` ([PVE_TOKEN_SETUP.md](./docs/PVE_TOKEN_SETUP.md)).
+
 ### Response shape
 
 ```json
 {
   "ok": true,
   "data": {},
-  "warnings": ["Approximate quorum only — no pvecm in v1"],
+  "warnings": ["Offline nodes: pve-004"],
   "meta": {
     "tool": "pve_cluster_health",
     "tool_class": "read",
@@ -245,6 +258,7 @@ Deferred to **v2**: SSH proxy tool, hard guest stop, migration, MCP resources fo
 | `PVE_API_TOKEN`    | Yes\*    | —       | Alternative: full `USER@REALM!TOKENID=SECRET` string         |
 | `PVE_VERIFY_SSL`   | No       | `true`  | Set `false` only for default self-signed cert before step 17 |
 | `PVE_LOG_LEVEL`    | No       | `INFO`  | stderr JSON log level: `DEBUG`, `INFO`, `WARNING`, `ERROR`   |
+| `PVE_LAB_INFRA_VMIDS` | No    | `100`   | Comma-separated LAN router guest VMIDs (power-tool warnings) |
 | `PVE_INTEGRATION`  | No       | —       | Set to `1` to run live-cluster integration tests             |
 
 \* Provide either `PVE_API_TOKEN` or all three split fields.
@@ -373,7 +387,7 @@ Requires **Python 3.11+** (`requires-python = ">=3.11,<4"`).
 
 | Item                                    | Status    | Notes                                                       |
 | --------------------------------------- | --------- | ----------------------------------------------------------- |
-| Quorum detection (`pve_cluster_health`) | Partial   | Approximates from node online counts; no `pvecm` in v1      |
+| Quorum detection (`pve_cluster_health`) | Met       | `quorate` from `/cluster/status`; QDevice best-effort       |
 | WoL, sensors, Ceph mutations            | By design | No REST equivalent or intentionally excluded                |
 | `stop-cluster` parity                   | Partial   | MCP covers guest stopall only; node shutdown stays in Bash  |
 | MCP resources for TIPSNTRICKS           | v2        | Runbook hints in docstrings and `meta.runbook_ref` for now  |

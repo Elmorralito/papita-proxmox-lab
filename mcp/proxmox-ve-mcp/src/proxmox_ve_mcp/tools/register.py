@@ -20,16 +20,20 @@ from proxmox_ve_mcp.tools.guests import (
     pve_get_guest_config_impl,
     pve_shutdown_guest_impl,
     pve_start_guest_impl,
+    pve_stop_guest_impl,
     pve_stopall_guests_impl,
 )
+from proxmox_ve_mcp.tools.ha import pve_get_ha_status_impl
 from proxmox_ve_mcp.tools.nodes import (
     pve_get_guest_status_impl,
     pve_get_node_status_impl,
     pve_list_guests_impl,
 )
+from proxmox_ve_mcp.tools.power import pve_shutdown_node_impl, pve_wake_on_lan_impl
 from proxmox_ve_mcp.tools.registry import TOOL_REGISTRY, ToolClass
 from proxmox_ve_mcp.tools.smoke_test import pve_run_smoke_tests_impl
 from proxmox_ve_mcp.tools.storage import pve_list_storage_impl
+from proxmox_ve_mcp.tools.waits import pve_wait_for_task_impl, pve_wait_nodes_state_impl
 
 ToolFn = Callable[..., Awaitable[str]]
 
@@ -123,8 +127,30 @@ def register_tools(mcp: FastMCP) -> None:  # noqa: C901
     @mcp.tool(name="pve_cluster_health")
     @_track("pve_cluster_health", ToolClass.READ)
     async def pve_cluster_health() -> str:
-        """Cluster health summary: online/offline counts and approximate quorum hint."""
+        """Cluster health: true quorum (/cluster/status), entry node, QDevice, online/offline counts."""
         return await pve_cluster_health_impl()
+
+    @mcp.tool(name="pve_get_ha_status")
+    @_track("pve_get_ha_status", ToolClass.READ)
+    async def pve_get_ha_status() -> str:
+        """HA manager, per-node LRM state, resources, rules, and ha.shutdown_policy (must be freeze)."""
+        return await pve_get_ha_status_impl()
+
+    @mcp.tool(name="pve_wait_for_task")
+    @_track("pve_wait_for_task", ToolClass.READ)
+    async def pve_wait_for_task(upid: str, timeout_s: float = 120.0) -> str:
+        """Wait ≤120 s for a task UPID; returns finished/succeeded and log tail. Re-call while finished=false."""
+        return await pve_wait_for_task_impl(upid=upid, timeout_s=timeout_s)
+
+    @mcp.tool(name="pve_wait_nodes_state")
+    @_track("pve_wait_nodes_state", ToolClass.READ)
+    async def pve_wait_nodes_state(
+        target: str,
+        nodes: list[str] | None = None,
+        timeout_s: float = 120.0,
+    ) -> str:
+        """Wait ≤120 s for nodes (default all) to be online/offline; API loss counts as offline."""
+        return await pve_wait_nodes_state_impl(target=target, nodes=nodes, timeout_s=timeout_s)
 
     @mcp.tool(name="pve_get_node_status")
     @_track("pve_get_node_status", ToolClass.READ)
@@ -214,10 +240,74 @@ def register_tools(mcp: FastMCP) -> None:  # noqa: C901
         timeout: int = 120,
         wait_for_completion: bool = False,
     ) -> str:
-        """Stop all guests on a node. Requires confirm=true. Set Ceph noout separately."""
+        """Stop all guests on a node. Requires confirm=true."""
         return await pve_stopall_guests_impl(
             node=node,
             confirm=confirm,
             timeout=timeout,
             wait_for_completion=wait_for_completion,
         )
+
+    @mcp.tool(name="pve_stop_guest")
+    @_track("pve_stop_guest", ToolClass.DESTRUCTIVE)
+    async def pve_stop_guest(  # pylint: disable=too-many-arguments
+        node: str,
+        vmid: int,
+        guest_type: str,
+        confirm: bool,
+        reason: str,
+        overrule_shutdown: bool = False,
+        wait_for_completion: bool = False,
+    ) -> str:
+        """DESTRUCTIVE hard stop (power off) of a VM or CT; unsaved state is lost.
+
+        Use only when pve_shutdown_guest hangs. overrule_shutdown aborts a running shutdown task.
+        Requires confirm=true and a reason.
+        """
+        return await pve_stop_guest_impl(
+            node=node,
+            vmid=vmid,
+            guest_type=guest_type,
+            confirm=confirm,
+            reason=reason,
+            overrule_shutdown=overrule_shutdown,
+            wait_for_completion=wait_for_completion,
+        )
+
+    @mcp.tool(name="pve_shutdown_node")
+    @_track("pve_shutdown_node", ToolClass.DESTRUCTIVE)
+    async def pve_shutdown_node(
+        node: str,
+        reason: str,
+        confirm: bool = False,
+        command: str = "shutdown",
+        allow_entry_host: bool = False,
+        plan_only: bool = False,
+    ) -> str:
+        """DESTRUCTIVE: shut down or reboot one PVE node (POST /nodes/{node}/status).
+
+        Refuses unless ha.shutdown_policy=freeze, the node is online, and (for the API entry
+        node) allow_entry_host=true. Warns on quorum loss, running guests, and the LAN router
+        guest. plan_only=true runs every check without confirm and changes nothing.
+        """
+        return await pve_shutdown_node_impl(
+            node=node,
+            reason=reason,
+            confirm=confirm,
+            command=command,
+            allow_entry_host=allow_entry_host,
+            plan_only=plan_only,
+        )
+
+    @mcp.tool(name="pve_wake_on_lan")
+    @_track("pve_wake_on_lan", ToolClass.WRITE)
+    async def pve_wake_on_lan(
+        confirm: bool,
+        nodes: list[str] | None = None,
+        all_offline: bool = False,
+    ) -> str:
+        """Wake offline nodes via WoL sent from the API entry node (POST /nodes/{node}/wakeonlan).
+
+        Pass nodes=[...] or all_offline=true. Online nodes are skipped. Requires confirm=true.
+        """
+        return await pve_wake_on_lan_impl(confirm=confirm, nodes=nodes, all_offline=all_offline)

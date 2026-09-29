@@ -15,7 +15,7 @@ Authentication supports either a single combined token string
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from proxmox_ve_mcp.constants import API_PREFIX
+from proxmox_ve_mcp.constants import API_PREFIX, LAB_INFRA_VMIDS
 from proxmox_ve_mcp.logging_config import resolve_log_level
 
 
@@ -52,6 +52,24 @@ class PveSettings(BaseSettings):
         default="INFO",
         description="Logging level for stderr JSON logs (DEBUG, INFO, WARNING, ERROR)",
     )
+    lab_infra_vmids: str = Field(
+        default=LAB_INFRA_VMIDS,
+        description="Comma-separated VMIDs of lab infrastructure guests (LAN router); kept running",
+    )
+
+    @field_validator("lab_infra_vmids")
+    @classmethod
+    def validate_infra_vmids(cls, value: str) -> str:
+        """Require ``PVE_LAB_INFRA_VMIDS`` to be a comma-separated list of integer VMIDs."""
+        for part in value.split(","):
+            if part.strip() and not part.strip().isdigit():
+                raise ValueError(f"PVE_LAB_INFRA_VMIDS must be comma-separated integers, got {part!r}")
+        return value
+
+    @property
+    def infra_vmids(self) -> frozenset[int]:
+        """Parsed :attr:`lab_infra_vmids`."""
+        return frozenset(int(part) for part in self.lab_infra_vmids.split(",") if part.strip())
 
     @field_validator("log_level")
     @classmethod

@@ -11,6 +11,7 @@ from truenas_mcp.constants import (
     DEFAULT_WS_TIMEOUT_SEC,
     LAB_HA_POOL_NAME,
     LAB_NFS_EXPORT,
+    LAB_PVE_NODES,
     LAB_SCRUTINY_APP_NAME,
 )
 from truenas_mcp.logging_config import resolve_log_level
@@ -69,6 +70,10 @@ class TnasSettings(BaseSettings):
         default=LAB_SCRUTINY_APP_NAME,
         description="Scrutiny app name in app.query",
     )
+    lab_pve_nodes: str = Field(
+        default=LAB_PVE_NODES,
+        description="PVE node=IP pairs (comma-separated) used to name NFS clients",
+    )
     lab_config_file: str | None = Field(
         default=None,
         description="Optional path to lab env file (e.g. default.truenas.nfs.env)",
@@ -126,6 +131,16 @@ class TnasSettings(BaseSettings):
         if export:
             return self.model_copy(update={"lab_nfs_export": export})
         return self
+
+    @property
+    def pve_node_by_ip(self) -> dict[str, str]:
+        """Map IP → PVE node name from ``lab_pve_nodes`` (``name=ip,name=ip``)."""
+        mapping: dict[str, str] = {}
+        for pair in self.lab_pve_nodes.split(","):
+            name, sep, ip = pair.strip().partition("=")
+            if sep and name.strip() and ip.strip():
+                mapping[ip.strip()] = name.strip()
+        return mapping
 
     @property
     def ws_uri(self) -> str:

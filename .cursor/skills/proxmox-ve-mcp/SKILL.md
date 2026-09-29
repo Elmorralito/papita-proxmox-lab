@@ -12,7 +12,7 @@ description: >-
 
 # proxmox-ve MCP
 
-Package: `mcp/proxmox-ve-mcp` · Cursor server name: **`proxmox-ve`** · 21 tools (18 read, 3 write). Spec: [README](../../../mcp/proxmox-ve-mcp/README.md). Do not paste the README into context.
+Package: `mcp/proxmox-ve-mcp` · Cursor server name: **`proxmox-ve`** · 24 tools (21 read, 3 write). Spec: [README](../../../mcp/proxmox-ve-mcp/README.md). Do not paste the README into context.
 
 Token design: call **1–3 tools**, summarize, never dump envelopes. Unload unused MCP servers; this skill does not load pfSense/TrueNAS.
 
@@ -73,7 +73,9 @@ Usage:
 | Post-install | `pve_run_smoke_tests` (`extended=true` only if basic pass and Sys.Audit needed) |
 | Members      | `pve_list_nodes`                                                                |
 | ring0 / IPs  | `pve_get_cluster_config_nodes` or `pve_list_node_addresses`                     |
-| Online count | `pve_cluster_health` (approx quorum; **not** `pvecm`)                           |
+| Quorum       | `pve_cluster_health` (`quorate`, `entry_node`, QDevice)                         |
+| HA / freeze  | `pve_get_ha_status` (`shutdown_policy` must be `freeze`)                        |
+| Wait         | `pve_wait_for_task` (UPID) / `pve_wait_nodes_state` (online/offline), ≤120 s    |
 | VMs/CTs      | `pve_list_guests` (`node` optional)                                             |
 | One guest    | `pve_get_guest_status` / `pve_get_guest_config` (`guest_type`: `qemu`\|`lxc`)   |
 | Storage      | `pve_list_storage`                                                              |
@@ -82,7 +84,7 @@ Usage:
 
 Writes: **`confirm=true` required**. Optional `wait_for_completion=true` (UPID poll). No destructive tools in v1.
 
-`pve_list_resources` `type` at API: `vm` \| `storage` \| `node` \| `sdn` (not `haresource`). Prefer `pve_list_guests` for qemu/lxc.
+`pve_list_resources` `type` at API: `vm` \| `storage` \| `node` \| `sdn` (not `haresource`; use `pve_get_ha_status`). Prefer `pve_list_guests` for qemu/lxc.
 
 Envelope: `{ok, data, warnings, meta}` — report `ok`, counts, names; skip permission dumps.
 
@@ -95,7 +97,7 @@ Envelope: `{ok, data, warnings, meta}` — report `ok`, counts, names; skip perm
   - `setup-node`, `get-temp` (sensors)
   - Ceph `noout`, OSD start/destroy
   - migrate, hard stop, HA group CRUD
-- `pve_cluster_health` quorum is **approximate** (online counts). True quorum: SSH `pvecm status`.
+- `pve_cluster_health` returns true `quorate` (from `/cluster/status`), `entry_node` (node answering the API), and best-effort `qdevice` status. Per-vote detail still needs SSH `pvecm status`.
 - Ceph HTTP 500 `ceph-mon` binary missing = Ceph not installed, not a bad token.
 - `pve_stopall_guests` does **not** set Ceph `noout`.
 - Guest config redacts passwords/keys; still do not echo tokens.
