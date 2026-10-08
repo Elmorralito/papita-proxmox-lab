@@ -1,0 +1,76 @@
+groups:
+  - name: papita.pve.recording
+    interval: 30s
+    rules:
+      - record: papita:pve_cpu_busy_ratio
+        expr: 1 - avg by (instance) (rate(node_cpu_seconds_total{job="pve-nodes",mode="idle"}[5m]))
+      - record: papita:pve_memory_used_bytes
+        expr: node_memory_MemTotal_bytes{job="pve-nodes"} - node_memory_MemAvailable_bytes{job="pve-nodes"}
+      - record: papita:pve_memory_used_ratio
+        expr: |
+          papita:pve_memory_used_bytes
+          /
+          node_memory_MemTotal_bytes{job="pve-nodes"}
+      - record: papita:pve_rootfs_used_ratio
+        expr: |
+          1 - (
+            node_filesystem_avail_bytes{job="pve-nodes",mountpoint="/"}
+            /
+            node_filesystem_size_bytes{job="pve-nodes",mountpoint="/"}
+          )
+
+  - name: papita.pve.alerts
+    rules:
+      - alert: PVENodeExporterDown
+        expr: up{job="pve-nodes"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          cluster: pvecm-oldtimers
+        annotations:
+          summary: "PVE node-exporter down on {{ $labels.instance }}"
+          description: "prometheus-node-exporter :9100 unreachable for 5m."
+
+      - alert: PVENodeHighCPU
+        expr: papita:pve_cpu_busy_ratio > 0.85
+        for: 15m
+        labels:
+          severity: warning
+          cluster: pvecm-oldtimers
+        annotations:
+          summary: "PVE {{ $labels.instance }} CPU busy > 85%"
+          description: "5m CPU busy ratio is {{ $value | humanizePercentage }}."
+
+      - alert: PVENodeMemoryLow
+        expr: papita:pve_memory_used_ratio > 0.90
+        for: 15m
+        labels:
+          severity: warning
+          cluster: pvecm-oldtimers
+        annotations:
+          summary: "PVE {{ $labels.instance }} memory used > 90%"
+          description: "Used ratio is {{ $value | humanizePercentage }}."
+
+      - alert: PVENodeRootDiskFull
+        expr: papita:pve_rootfs_used_ratio > 0.85
+        for: 15m
+        labels:
+          severity: warning
+          cluster: pvecm-oldtimers
+        annotations:
+          summary: "PVE {{ $labels.instance }} root filesystem > 85% full"
+          description: "Used ratio is {{ $value | humanizePercentage }}."
+
+      - alert: PVENodeLoadHigh
+        expr: |
+          node_load5{job="pve-nodes"}
+          /
+          count by (instance) (node_cpu_seconds_total{job="pve-nodes",mode="idle"})
+          > 1.5
+        for: 15m
+        labels:
+          severity: warning
+          cluster: pvecm-oldtimers
+        annotations:
+          summary: "PVE {{ $labels.instance }} load5 per CPU > 1.5"
+          description: "Normalized load5 is {{ $value }}."

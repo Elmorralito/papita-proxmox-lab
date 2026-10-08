@@ -52,7 +52,7 @@ CLUSTER_ZONE_SUFFIXES_FILE="${PYTHON_ROOT}/datafiles/default.domain.suffixes.lis
 DISCOVER_HOSTS_PY="${PYTHON_ROOT}/misc/cluster/discover_hosts.py"
 PAPITA_HOSTS_BLOCK_BEGIN="# BEGIN papita-pve-cluster-hosts"
 PAPITA_HOSTS_BLOCK_END="# END papita-pve-cluster-hosts"
-PVE_SETUP_LAST_STEP=18
+PVE_SETUP_LAST_STEP=19
 START_FROM_STEP=0
 DEFAULT_CRONTAB_SCHEDULE="0 4 * * 6"
 # Tailscale Proxmox cert renewal cron (step 17.2); five fields only — user/command appended by script.
@@ -81,6 +81,50 @@ _default_tags() {
     if [[ -n "$tags" ]]; then
         printf '"%s"' "$tags"
     fi
+}
+
+# Lab PVE nodes typically have IPv4-only default route (via 172.16.0.1) while
+# resolvers still return AAAA. Dual-stack curl then fails with "Could not
+# resolve host" or a resolve timeout against tailscale.com. PATH wrapper so
+# install.sh's own curl invocations stay on IPv4 too.
+_papita_ipv4_curl_wrap_dir() {
+    local wrap_dir="${1:-/tmp/papita-curl4}"
+    mkdir -p "$wrap_dir"
+    cat >"${wrap_dir}/curl" <<'WRAP'
+#!/bin/sh
+exec /usr/bin/curl -4 "$@"
+WRAP
+    chmod 0755 "${wrap_dir}/curl"
+    printf '%s' "$wrap_dir"
+}
+
+_install_tailscale_pkg() {
+    local wrap_dir installer
+    if command -v tailscale >/dev/null 2>&1; then
+        log INFO "Tailscale already installed; skipping download."
+        return 0
+    fi
+    if ! command -v curl >/dev/null 2>&1; then
+        log ERROR "curl not found (step 1). Cannot download Tailscale."
+        return 1
+    fi
+    wrap_dir="$(_papita_ipv4_curl_wrap_dir /tmp/papita-curl4)"
+    installer="$(mktemp /tmp/tailscale-install.XXXXXX.sh)"
+    log INFO "Downloading Tailscale installer over IPv4 (this node has no IPv6 default route)..."
+    if ! PATH="${wrap_dir}:${PATH}" curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 20 \
+        https://tailscale.com/install.sh -o "$installer"; then
+        log ERROR "Failed to download https://tailscale.com/install.sh. Check DNS (nameserver 172.16.0.1) and IPv4 HTTPS egress."
+        rm -f "$installer"
+        return 1
+    fi
+    if ! PATH="${wrap_dir}:${PATH}" sh "$installer"; then
+        log ERROR "Failed to install Tailscale."
+        rm -f "$installer"
+        return 1
+    fi
+    rm -f "$installer"
+    log INFO "Tailscale installed."
+    return 0
 }
 
 # Returns 0 when START_FROM_STEP is past step_num (caller should return 0).
@@ -119,6 +163,7 @@ confirm_pve_setup() {
 16. Configure periodic backup job (vzdump)
 17. Proxmox Web UI: Tailscale-issued TLS certificate (HTTPS 8006)
 18. QDevice client + HA watchdog (corosync-qdevice, softdog)
+19. prometheus-node-exporter (:9100 for k8s-monitor Grafana)
 
   Usage: at the "Input:" prompt, enter h, help, ?, usage, -h, or --help to open the full manual in less (q to quit), then choose again.
 EOF
@@ -689,11 +734,9 @@ setup_tailscale() {
         return 0
     fi
     if [ "$confirm" == "y" ]; then
-        if ! curl -fsSL https://tailscale.com/install.sh | sh; then
-            log ERROR "Failed to install Tailscale."
+        if ! _install_tailscale_pkg; then
             return 1
         fi
-        log INFO "Tailscale installed."
     fi
     log INFO "Continuing with Tailscale setup..."
     install -d -m 0755 /etc/sysctl.d
@@ -1391,6 +1434,34 @@ setup_quorum_ha_client() {
 }
 
 # -----------------------------------------------------------------------------
+# prometheus-node-exporter for Grafana/Prometheus on CT 231.
+# Cluster-wide stack sync: ./deploy/proxmox.sh setup-monitoring from workstation.
+# -----------------------------------------------------------------------------
+setup_pve_node_exporter() {
+    _skip_pve_step 19 "prometheus-node-exporter for k8s-monitor" && return 0
+
+    prompt_until_ynet "19. QUESTION: Install prometheus-node-exporter on :9100 (Grafana PVE dashboard)? (y/n, e or t to exit setup): " confirm
+    if [ "$confirm" != "y" ]; then
+        return 0
+    fi
+
+    local ne_script="${SCRIPT_DIR}/misc/monitoring/papita-pve-node-exporter.sh"
+    if [ ! -f "$ne_script" ]; then
+        log ERROR "Missing ${ne_script}. Re-run deploy/proxmox.sh setup-node to refresh the bundle."
+        return 1
+    fi
+
+    bash "$ne_script" || {
+        log ERROR "papita-pve-node-exporter.sh failed."
+        return 1
+    }
+
+    log INFO "Node exporter listening on :9100. Push Grafana/Prometheus config with:"
+    log INFO "  ./deploy/proxmox.sh setup-monitoring --ip-address <MAIN_NODE_LAN_IP>"
+    return 0
+}
+
+# -----------------------------------------------------------------------------
 # Main
 # -----------------------------------------------------------------------------
 main() {
@@ -1434,6 +1505,7 @@ main() {
     setup_backup_job || log WARN "Backup job setup failed; continuing."
     setup_pve_tailscale_ui_certificate || log WARN "Proxmox Tailscale UI certificate step failed; continuing."
     setup_quorum_ha_client || log WARN "QDevice client / HA watchdog step failed; continuing."
+    setup_pve_node_exporter || log WARN "prometheus-node-exporter step failed; continuing."
 
     log INFO "Done."
 }

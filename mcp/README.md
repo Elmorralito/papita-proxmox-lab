@@ -2,11 +2,12 @@
 
 This directory holds [Model Context Protocol](https://modelcontextprotocol.io/) servers used by **Cursor** (and other MCP clients) to operate the lab without ad-hoc SSH.
 
-| Package                                | Cursor server id | Purpose                                                                              |
-| -------------------------------------- | ---------------- | ------------------------------------------------------------------------------------ |
-| [`proxmox-ve-mcp/`](./proxmox-ve-mcp/) | `proxmox-ve`     | Proxmox VE REST API (`:8006`) — cluster read + gated guest power                     |
-| [`pfsense-mcp/`](./pfsense-mcp/)       | `pfsense`        | pfSense pfREST (`:443`) — read-only firewall / Tailscale inspect + lab policy verify |
-| [`truenas-mcp/`](./truenas-mcp/)       | `truenas`        | TrueNAS WebSocket API — storage health, Scrutiny app, gated writes                   |
+| Package                                | Cursor server id | Purpose                                                                                  |
+| -------------------------------------- | ---------------- | ---------------------------------------------------------------------------------------- |
+| [`proxmox-ve-mcp/`](./proxmox-ve-mcp/) | `proxmox-ve`     | Proxmox VE REST API (`:8006`) — cluster read + gated guest power                         |
+| [`pfsense-mcp/`](./pfsense-mcp/)       | `pfsense`        | pfSense pfREST (`:443`) — read-only firewall / Tailscale inspect + lab policy verify     |
+| [`truenas-mcp/`](./truenas-mcp/)       | `truenas`        | TrueNAS WebSocket API — storage health, Scrutiny app, gated writes                       |
+| [`openwrt-mcp/`](./openwrt-mcp/)       | `openwrt`        | OpenWrt gateway (`openwrt-pi`) — firewall inspect + human-approved, auto-rollback writes |
 
 **pfSense CLIs** (install via `./deploy/mcp.sh install`): `pfsense-mcp-smoke`, `pfsense-mcp-bootstrap` (REST API Allowed Interfaces), `pfsense-mcp-firewall` (Tailscale-tab rules). See [pfsense-mcp/docs/POLICY.md](./pfsense-mcp/docs/POLICY.md).
 
@@ -37,7 +38,7 @@ Reload **Cursor** after `cursor-sync`. In Settings → MCP, confirm `proxmox-ve`
 | `update`      | Same as `install` — run after `git pull` when MCP code changed                                          |
 | `test`        | `pytest` for MCP test suites                                                                            |
 | `smoke`       | Run post-install smoke tests (loads `PVE_*` from `~/.cursor/mcp.json`)                                  |
-| `cursor-sync` | Merge each `mcp/*/mcp.json.example` into Cursor MCP configs (preserves existing `env` secrets) |
+| `cursor-sync` | Merge each `mcp/*/mcp.json.example` into Cursor MCP configs (preserves existing `env` secrets)          |
 
 **Auto-sync (recommended once per clone):**
 
@@ -52,10 +53,10 @@ This installs:
 
 Both run `./deploy/mcp.sh cursor-sync --all-targets --if-changed --enable-agent`, which updates:
 
-| Target | Used by |
-| ------ | ------- |
-| `~/.cursor/mcp.json` | cursor-agent CLI, Cursor IDE (user-level) |
-| `.cursor/mcp.json` | cursor-agent when `--workspace` is this repo (project-level) |
+| Target               | Used by                                                      |
+| -------------------- | ------------------------------------------------------------ |
+| `~/.cursor/mcp.json` | cursor-agent CLI, Cursor IDE (user-level)                    |
+| `.cursor/mcp.json`   | cursor-agent when `--workspace` is this repo (project-level) |
 
 The first project sync seeds `.cursor/mcp.json` from your user config so secrets carry over. Edit API tokens once in `~/.cursor/mcp.json`; later syncs preserve them.
 
@@ -154,4 +155,4 @@ git pull
 | Smoke test 403                            | Fix token ACL — run `pve_check_token` or see PVE_TOKEN_SETUP.md |
 | `ModuleNotFoundError`                     | `./deploy/mcp.sh update`                                        |
 
-Package-specific docs: [proxmox-ve-mcp/README.md](./proxmox-ve-mcp/README.md), [pfsense-mcp/README.md](./pfsense-mcp/README.md), [truenas-mcp/README.md](./truenas-mcp/README.md).
+Package-specific docs: [proxmox-ve-mcp/README.md](./proxmox-ve-mcp/README.md), [pfsense-mcp/README.md](./pfsense-mcp/README.md), [truenas-mcp/README.md](./truenas-mcp/README.md), [openwrt-mcp/README.md](./openwrt-mcp/README.md).

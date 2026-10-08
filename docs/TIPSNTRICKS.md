@@ -407,11 +407,11 @@ pvecm status && echo && pvecm nodes && echo && corosync-cfgtool -s
 
 This lab runs a **4-node** cluster (`pve-001` … `004`) on LAN `172.16.0.0/16`. Without a QDevice, quorum is **3 of 4** (one node may be offline). A **QDevice** tie-breaker plus **HA fencing** is required before shared-storage HA can survive two node losses.
 
-| Component    | Lab default                                                       | Role                                                        |
-| ------------ | ----------------------------------------------------------------- | ----------------------------------------------------------- |
-| QDevice host | `172.16.0.105` (`deploy/setup/misc/cluster/default.qdevice.host`) | Runs `corosync-qnetd` — **not** a PVE node, **not** TrueNAS |
-| TrueNAS NFS  | `172.16.0.100` (`default.truenas.nfs.env`)                        | Shared storage (`truenas-nfs-main` + misc content IDs)      |
-| PVE nodes    | `corosync-qdevice` + `softdog`                                    | QDevice client + watchdog fencing                           |
+| Component    | Lab default                                                                                | Role                                                        |
+| ------------ | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------- |
+| QDevice host | `172.16.0.99` (`deploy/setup/misc/cluster/default.qdevice.host`; Tailscale `100.81.26.61`) | Runs `corosync-qnetd` — **not** a PVE node, **not** TrueNAS |
+| TrueNAS NFS  | `172.16.0.100` (`default.truenas.nfs.env`)                                                 | Shared storage (`truenas-nfs-main` + misc content IDs)      |
+| PVE nodes    | `corosync-qdevice` + `softdog`                                                             | QDevice client + watchdog fencing                           |
 
 **Do not** point QDevice at `172.16.0.102` — that is `pve-002`. **Do not** enroll guests whose disks are on `local` / `local-lvm` (pfSense included).
 
@@ -456,7 +456,7 @@ This deploys `misc/cluster/`, runs the node client on **every online member**, t
 
 - Adds cluster firewall allow for TrueNAS (if `cluster.fw` exists)
 - `pvesm add nfs` for `truenas-nfs-main` and misc content exports → `172.16.0.100`
-- `pvecm qdevice setup <QDEVICE_IP>` when `172.16.0.105` is up with `corosync-qnetd`
+- `pvecm qdevice setup <QDEVICE_IP>` when `172.16.0.99` is up with `corosync-qnetd` (Tailscale `100.81.26.61` only if LAN is unreachable)
 - PVE 9: `ha-manager rules add node-affinity papita-ha` (HA groups are gone; rules require `--resources`)
 
 #### Add a VM to HA
@@ -892,7 +892,7 @@ Default **Automatic outbound NAT** masquerades LAN traffic to the WAN IP. Usuall
 
 ### Step 9 — Connect pfSense to Tailscale (site-to-site)
 
-This lab uses Tailscale CGNAT space `100.64.0.0/10` on **all** PVE nodes (AWS EFS data plane). pfSense joins the same tailnet as a **subnet router**, advertising **172.16.0.0/16** (gateway **172.16.0.1**). Remote **admin** access uses the **main node** (default **172.16.0.101**) via pfSense subnet route and/or MagicDNS — worker nodes do not advertise routes. Site-to-site requires **both** Tailscale ACL grants **and** pfSense/NAT rules.
+This lab uses Tailscale CGNAT space `100.64.0.0/10` on **all** PVE nodes (AWS EFS data plane). The LAN gateway (**OpenWrt** `openwrt-pi` at `100.78.68.87`, previously pfSense) joins the same tailnet as a **subnet router**, advertising **172.16.0.0/16** (gateway **172.16.0.1**). SSH: `ssh -i ~/.ssh/id_ed25519_NASGW root@100.78.68.87`. Tag with `tag:pfsense-lan-router` so `autoApprovers.routes` can approve the LAN CIDR; after `tailscale up --advertise-tags`, **approve the node and disable key expiry** in the admin console (tag changes can expire the node key). Remote **admin** access uses the **main node** (default **172.16.0.101**) via that subnet route and/or MagicDNS — worker nodes do not advertise routes. Site-to-site requires **both** Tailscale ACL grants **and** router firewall/NAT rules.
 
 **References:**
 
@@ -1655,3 +1655,13 @@ curl -fsS "http://<kuma-host>:31050/api/push/<TOKEN>?status=up&msg=scrub+ok"
 
 > [!NOTE]
 > Allow **LAN → monitored ports** on pfSense if rules are tightened beyond defaults. Kuma on TrueNAS must reach targets on `172.16.0.0/16` and Tailscale `100.x.x.x` addresses.
+
+---
+
+## OpenWrt gateway (openwrt-mcp)
+
+- Agents manage the OpenWrt firewall only through `mcp/openwrt-mcp` (plan → human approval → apply → confirm). No shell/UCI passthrough.
+- Install the router agent: `deploy/setup/misc/openwrt/papita-openwrt-mcp-agent-install.sh install --host <ip> --admin-key <key>`.
+- Unconfirmed changes auto-roll back on the router (procd watchdog, survives reboot). Manual recovery: see `mcp/openwrt-mcp/docs/RUNBOOK.md`.
+- Never reuse the root admin key for the MCP; do not change Tailscale/SSH config through it.
+- Live canary stays gated by `mcp/openwrt-mcp/docs/GO_NO_GO.md`.

@@ -90,6 +90,10 @@ usage_proxmox() {
                    node-affinity rules when resources exist, verify quorum.
                    Prerequisite: corosync-qnetd on the host in misc/cluster/default.qdevice.host
                    (NOT TrueNAS). Edit misc/cluster/default.truenas.nfs.env for export path.
+    setup-monitoring
+                   Deploy misc/monitoring (Grafana/Prometheus/Alertmanager, no secrets);
+                   install prometheus-node-exporter on every online member; write CT 231
+                   guest firewall; pct-sync compose/rules/dashboards into the k8s-monitor LXC.
 
   Required:
     -ip, --ip-address     Proxmox cluster member to SSH into (IP or DNS)

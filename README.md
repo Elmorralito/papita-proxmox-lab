@@ -8,15 +8,16 @@ Network diagram source: [`docs/Diagrams.drawio`](./docs/Diagrams.drawio) (export
 
 ## Overview
 
-| Concern             | Where it lives                                                                                                                                              | What it does                                                                                              |
-| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| **Workstation CLI** | [`deploy/toolkit.sh`](./deploy/toolkit.sh)                                                                                                                  | Single entrypoint: Python dev tooling, Proxmox SSH deploy, optional AWS SSO/MFA                           |
-| **PVE bootstrap**   | [`deploy/setup/setup-pve-node.sh`](./deploy/setup/setup-pve-node.sh)                                                                                        | Interactive 18-step node setup (APT, WoL, sensors, hosts, Tailscale, hooks, QDevice client, backups, TLS) |
-| **Cluster ops**     | [`deploy/proxmox.sh`](./deploy/proxmox.sh)                                                                                                                  | SSH to nodes: `setup-node`, `setup-cluster-ha`, `get-temp`, `start-cluster`, `stop-cluster`               |
-| **Tailnet + LAN**   | [`deploy/tailscale-pfsense-lan.sh`](./deploy/tailscale-pfsense-lan.sh)                                                                                      | Approve pfSense routes, patch Tailscale ACLs, verify admin path to main PVE                               |
-| **pfSense pfREST**  | [`deploy/pfsense-restapi-access.sh`](./deploy/pfsense-restapi-access.sh) · [`deploy/pfsense-firewall-tailscale.sh`](./deploy/pfsense-firewall-tailscale.sh) | Bootstrap REST API access and apply agreed Tailscale-tab firewall rules via pfREST                        |
-| **Cursor MCP**      | [`mcp/`](./mcp/) · [`deploy/mcp.sh`](./deploy/mcp.sh)                                                                                                       | Install, test, and sync MCP servers for Proxmox VE and pfSense                                            |
-| **Runbooks**        | [`docs/TIPSNTRICKS.md`](./docs/TIPSNTRICKS.md)                                                                                                              | Ceph, cluster join, pfSense, Tailscale, VM clipboard, MCP smoke, maintenance                              |
+| Concern             | Where it lives                                                                                                                                              | What it does                                                                                                             |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| **Workstation CLI** | [`deploy/toolkit.sh`](./deploy/toolkit.sh)                                                                                                                  | Single entrypoint: Python dev tooling, Proxmox SSH deploy, optional AWS SSO/MFA                                          |
+| **PVE bootstrap**   | [`deploy/setup/setup-pve-node.sh`](./deploy/setup/setup-pve-node.sh)                                                                                        | Interactive 19-step node setup (APT, WoL, sensors, hosts, Tailscale, hooks, QDevice client, backups, TLS, node-exporter) |
+| **Cluster ops**     | [`deploy/proxmox.sh`](./deploy/proxmox.sh)                                                                                                                  | SSH to nodes: `setup-node`, `setup-cluster-ha`, `setup-monitoring`, `get-temp`, `start-cluster`, `stop-cluster`          |
+| **Tailnet + LAN**   | [`deploy/tailscale-pfsense-lan.sh`](./deploy/tailscale-pfsense-lan.sh)                                                                                      | Approve pfSense routes, patch Tailscale ACLs, verify admin path to main PVE                                              |
+| **pfSense pfREST**  | [`deploy/pfsense-restapi-access.sh`](./deploy/pfsense-restapi-access.sh) · [`deploy/pfsense-firewall-tailscale.sh`](./deploy/pfsense-firewall-tailscale.sh) | Bootstrap REST API access and apply agreed Tailscale-tab firewall rules via pfREST                                       |
+| **Cursor MCP**      | [`mcp/`](./mcp/) · [`deploy/mcp.sh`](./deploy/mcp.sh)                                                                                                       | Install, test, and sync MCP servers for Proxmox VE and pfSense                                                           |
+| **Runbooks**        | [`docs/TIPSNTRICKS.md`](./docs/TIPSNTRICKS.md)                                                                                                              | Ceph, cluster join, pfSense, Tailscale, VM clipboard, MCP smoke, maintenance                                             |
+| **Monitoring**      | [`deploy/setup/misc/monitoring/`](./deploy/setup/misc/monitoring/)                                                                                          | Grafana/Prometheus (CT 231), rules, dashboards, k8s collectors, Uptime Kuma — no secrets                                 |
 
 **Lab topology (default):**
 
@@ -78,9 +79,10 @@ papita-proxmox-lab/
 │   ├── pfsense-firewall-tailscale.sh # Tailscale-tab firewall rules via pfREST
 │   ├── utils.sh / usage.sh         # Shared logging, prompts, help text
 │   ├── setup/                      # Copied to /root/deploy on each PVE node
-│   │   ├── setup-pve-node.sh       # 17-step interactive bootstrap
+│   │   ├── setup-pve-node.sh       # 19-step interactive bootstrap
 │   │   ├── post-startup-proc.sh / pre-shutdown-proc.sh
-│   │   └── misc/tailscale/         # default tags, routes, LAN fallback lists
+│   │   ├── misc/tailscale/         # default tags, routes, LAN fallback lists
+│   │   └── misc/monitoring/        # Grafana/Prometheus/Kuma (no secrets)
 │   ├── python/                     # Copied to /root/deploy/python on nodes
 │   │   ├── misc/cluster/           # discover_hosts.py, domain_pattern.py (step 7)
 │   │   └── datafiles/              # default.hosts.*, domain suffix lists
@@ -106,15 +108,15 @@ papita-proxmox-lab/
 
 ### Workstation prerequisites
 
-| Tool                            | Used for                                                                    |
-| ------------------------------- | --------------------------------------------------------------------------- |
-| **bash** 4+                     | All deploy scripts (`set -euo pipefail`)                                    |
-| **Poetry** 2.x                  | Dev venv, MCP packages, linter tooling                                      |
-| **Python** 3.11+                | MCP servers and pre-commit (3.14 in [`.python-version`](./.python-version)) |
-| **jq**                          | Proxmox JSON (`pvesh`, cluster discovery, `mcp.json` merge)                 |
-| **ssh**, **scp**                | `deploy/proxmox.sh`                                                         |
-| **pre-commit** (optional)       | `./deploy/toolkit.sh … --pre-commit` or local hooks                         |
-| **Cursor** (optional)           | MCP client for `proxmox-ve` and `pfsense` servers                           |
+| Tool                      | Used for                                                                    |
+| ------------------------- | --------------------------------------------------------------------------- |
+| **bash** 4+               | All deploy scripts (`set -euo pipefail`)                                    |
+| **Poetry** 2.x            | Dev venv, MCP packages, linter tooling                                      |
+| **Python** 3.11+          | MCP servers and pre-commit (3.14 in [`.python-version`](./.python-version)) |
+| **jq**                    | Proxmox JSON (`pvesh`, cluster discovery, `mcp.json` merge)                 |
+| **ssh**, **scp**          | `deploy/proxmox.sh`                                                         |
+| **pre-commit** (optional) | `./deploy/toolkit.sh … --pre-commit` or local hooks                         |
+| **Cursor** (optional)     | MCP client for `proxmox-ve` and `pfsense` servers                           |
 
 ### Clone and Python dev environment
 
@@ -195,13 +197,13 @@ All deploy commands assume the **repository root** as the current working direct
 ./deploy/toolkit.sh ACTION -e {dev|prod} [OPTIONS]
 ```
 
-| Action                           | Description                                                |
-| -------------------------------- | ---------------------------------------------------------- |
-| `build`                          | Build wheels from `libs/` → `dist/` (when `libs/` exists)  |
-| `devsync`                        | `build` + pip install wheels into the active env           |
-| `test`                           | `build` + pytest with coverage (when `tests/` exists)      |
-| `proxmox` / `deploy_proxmox`     | Delegate to [`deploy/proxmox.sh`](./deploy/proxmox.sh)     |
-| `none`                           | No-op; useful with `--pre-commit` only                     |
+| Action                       | Description                                               |
+| ---------------------------- | --------------------------------------------------------- |
+| `build`                      | Build wheels from `libs/` → `dist/` (when `libs/` exists) |
+| `devsync`                    | `build` + pip install wheels into the active env          |
+| `test`                       | `build` + pytest with coverage (when `tests/` exists)     |
+| `proxmox` / `deploy_proxmox` | Delegate to [`deploy/proxmox.sh`](./deploy/proxmox.sh)    |
+| `none`                       | No-op; useful with `--pre-commit` only                    |
 
 Common flags: `--env-file`, `--aws-sso` / `--aws-mfa`, `--pre-commit`, `--proxmox-action`, `--ip-address`, `--hostname`, `--profile`, `--region`.
 
@@ -261,6 +263,7 @@ Policy reference: [pfsense-mcp/docs/POLICY.md](./mcp/pfsense-mcp/docs/POLICY.md)
 | ------------------------------ | ------------------------------------------------------ |
 | `setup-node`                   | Replace remote `/root/deploy`, run `setup-pve-node.sh` |
 | `setup-cluster-ha`             | QDevice + TrueNAS NFS + HA group (see TIPSNTRICKS)     |
+| `setup-monitoring`             | Deploy `misc/monitoring` to CT 231 + node-exporter     |
 | `get-temp`                     | Cluster-wide `sensors -j` table                        |
 | `start-cluster`                | WoL peer nodes via `pvenode wakeonlan`                 |
 | `stop-cluster`                 | `pvesh stopall` + shutdown per node                    |
@@ -276,7 +279,7 @@ Manual for setup prompts: [`deploy/docs/setup-pve-node.usage.txt`](./deploy/docs
 
 ### PVE setup steps (`setup-pve-node.sh`)
 
-Controlled by `PVE_SETUP_LAST_STEP=18`. At the first prompt, enter `y`, `n`, a step number `1`–`18`, or `h`/`help` for the full manual.
+Controlled by `PVE_SETUP_LAST_STEP=19`. At the first prompt, enter `y`, `n`, a step number `1`–`19`, or `h`/`help` for the full manual.
 
 | Step | Topic                                                                         |
 | ---- | ----------------------------------------------------------------------------- |
@@ -298,17 +301,21 @@ Controlled by `PVE_SETUP_LAST_STEP=18`. At the first prompt, enter `y`, `n`, a s
 | 16   | vzdump backup cron                                                            |
 | 17   | Tailscale TLS cert for UI `:8006` (**main node only**)                        |
 | 18   | QDevice client (`corosync-qdevice`) + softdog watchdog (HA fencing prep)      |
+| 19   | prometheus-node-exporter `:9100` (Grafana PVE dashboard)                      |
 
-After all nodes complete step 18, run **`./deploy/proxmox.sh setup-cluster-ha --ip-address 172.16.0.101`** from the workstation (see [TIPSNTRICKS § Quorum, QDevice, TrueNAS NFS, and HA](./docs/TIPSNTRICKS.md)).
+After all nodes complete step 18, run **`./deploy/proxmox.sh setup-cluster-ha --ip-address 172.16.0.101`**. Push Grafana/Prometheus from [`deploy/setup/misc/monitoring/`](./deploy/setup/misc/monitoring/) with **`./deploy/proxmox.sh setup-monitoring --ip-address 172.16.0.101`**.
 
-### Tailscale + pfSense LAN
+### Tailscale + lab LAN router
+
+The LAN gateway is **OpenWrt** `openwrt-pi` (`100.78.68.87`, advertises `172.16.0.0/16`). pfSense (`pfsense-fw001`) is the previous router; `configure` still matches either hostname (`LAN_ROUTER_NAME` then `PFSENSE_NAME`).
 
 ```bash
+ssh -i ~/.ssh/id_ed25519_NASGW root@100.78.68.87
 export TAILSCALE_API_KEY='tskey-api-...'
 export TAILSCALE_TAILNET='your-tailnet.ts.net'
 ./deploy/tailscale-pfsense-lan.sh configure          # routes + ACL + verify
 ./deploy/tailscale-pfsense-lan.sh verify             # local checks only
-./deploy/tailscale-pfsense-lan.sh pfsense-steps      # WebGUI checklist
+./deploy/tailscale-pfsense-lan.sh pfsense-steps      # pfSense WebGUI checklist (legacy)
 ```
 
 Actions: `configure`, `approve-routes`, `patch-acl`, `verify`, `pfsense-steps`. Manual: [`deploy/docs/tailscale-pfsense-lan.usage.txt`](./deploy/docs/tailscale-pfsense-lan.usage.txt).
@@ -364,7 +371,7 @@ Both MCP packages emit **structured JSON logs on stderr** (`PVE_LOG_LEVEL` / `PF
 | [**pfSense MCP**](./mcp/pfsense-mcp/README.md)                                  | 7 read tools, pfREST setup, policy framework                                  |
 | [**pfSense lab policy**](./mcp/pfsense-mcp/docs/POLICY.md)                      | Tailscale firewall, REST API access, endpoint privilege domains               |
 | [**Proxmox Tips & Tricks**](./docs/TIPSNTRICKS.md)                              | Ceph, cluster destroy/join, corosync, pfSense, Tailscale ACLs, MCP, Fedora VM |
-| [**PVE setup manual**](./deploy/docs/setup-pve-node.usage.txt)                  | Full 17-step reference (shown in `less` during setup)                         |
+| [**PVE setup manual**](./deploy/docs/setup-pve-node.usage.txt)                  | Full 19-step reference (shown in `less` during setup)                         |
 | [**Tailscale / pfSense manual**](./deploy/docs/tailscale-pfsense-lan.usage.txt) | ACL grants, verify, pfSense checklist                                         |
 | [**Network diagram**](./docs/Diagrams.drawio)                                   | Editable architecture (draw.io)                                               |
 

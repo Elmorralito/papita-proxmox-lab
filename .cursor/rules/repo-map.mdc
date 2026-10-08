@@ -12,7 +12,7 @@ alwaysApply: true
 ```
 Local workstation
   deploy/toolkit.sh ──► deploy/proxmox.sh ──SSH──► PVE nodes (deploy/setup/setup-pve-node.sh)
-  deploy/mcp.sh     ──► Cursor MCP servers (proxmox-ve, pfsense, truenas)
+  deploy/mcp.sh     ──► Cursor MCP servers (proxmox-ve, pfsense, truenas, openwrt)
 ```
 
 ## Directory tree
@@ -21,16 +21,16 @@ Local workstation
 papita-proxmox-lab/
 ├── deploy/                    # Orchestration entrypoints (run from repo root)
 │   ├── toolkit.sh             # Main CLI: build|test|proxmox + optional AWS auth
-│   ├── proxmox.sh             # SSH to PVE: setup-node, cluster start/stop, get-temp
+│   ├── proxmox.sh             # SSH to PVE: setup-node, setup-monitoring, cluster start/stop, get-temp
 │   ├── mcp.sh                 # Install / test / smoke MCP servers
 │   ├── utils.sh               # log(), prompts, AWS auth, run_command
 │   ├── usage.sh               # usage_toolkit, usage_proxmox, usage_setup_pve_node
-│   ├── tailscale-pfsense-lan.sh   # Tailscale ACL + pfSense LAN helper (workstation)
+│   ├── tailscale-pfsense-lan.sh   # Tailscale ACL + LAN router helper (OpenWrt / pfSense)
 │   ├── docs/
 │   │   ├── setup-pve-node.usage.txt       # PVE setup manual (less during prompts)
 │   │   └── tailscale-pfsense-lan.usage.txt
 │   ├── setup/                  # SCP'd to /root/deploy on PVE by proxmox.sh setup-node
-│   │   ├── setup-pve-node.sh      # Interactive 18-step PVE bootstrap (PVE_SETUP_LAST_STEP=18)
+│   │   ├── setup-pve-node.sh      # Interactive 19-step PVE bootstrap (PVE_SETUP_LAST_STEP=19)
 │   │   ├── post-startup-proc.sh   # Boot: quorum wait, ceph noout unset, WoL from main node
 │   │   ├── pre-shutdown-proc.sh   # Shutdown: optional pvesh stopall, ceph osd set noout
 │   │   ├── post-startup-proc.service / pre-shutdown-proc.service
@@ -39,11 +39,15 @@ papita-proxmox-lab/
 │   │   │   ├── default.tags.list      # Tailscale ACL tags (tag:private-node, …)
 │   │   │   ├── default.gateways.list  # Optional PVE subnet routes (empty; pfSense advertises LAN)
 │   │   │   └── default.lan.routes.list  # Main-node fallback LAN route (172.16.0.0/16)
-│   │   └── misc/cluster/              # QDevice + TrueNAS NFS + HA (setup-cluster-ha)
-│   │       ├── default.qdevice.host / default.truenas.nfs.env
-│   │       ├── qdevice-server-bootstrap.sh
-│   │       ├── papita-node-qdevice-client.sh
-│   │       └── papita-cluster-quorum-ha.sh
+│   │   ├── misc/cluster/              # QDevice + TrueNAS NFS + HA (setup-cluster-ha)
+│   │   │   ├── default.qdevice.host / default.truenas.nfs.env
+│   │   │   ├── qdevice-server-bootstrap.sh
+│   │   │   ├── papita-node-qdevice-client.sh
+│   │   │   └── papita-cluster-quorum-ha.sh
+│   │   └── misc/monitoring/           # Grafana/Prometheus/Kuma (no secrets)
+│   │       ├── k8s-monitor/           # CT 231 compose, scrape, rules, dashboards
+│   │       ├── kubernetes/            # kube-state-metrics, node-exporter, Prometheus SA
+│   │       └── papita-*.sh / papita_uptime_kuma_bootstrap.py
 │   └── python/                # SCP'd to /root/deploy/python on PVE (proxmox.sh setup-node)
 │       ├── misc/cluster/
 │       │   ├── discover_hosts.py      # Step 7: DNS peer discovery → /etc/hosts
@@ -55,7 +59,8 @@ papita-proxmox-lab/
 ├── mcp/                       # Cursor MCP servers (Poetry path deps)
 │   ├── proxmox-ve-mcp/
 │   ├── pfsense-mcp/
-│   └── truenas-mcp/
+│   ├── truenas-mcp/
+│   └── openwrt-mcp/               # OpenWrt firewall: plan/approve/apply+watchdog (router-agent/ is ucode)
 ├── docs/
 │   ├── TIPSNTRICKS.md         # Ceph, OSD, cluster maintenance runbooks
 │   └── Diagrams.drawio
@@ -87,6 +92,7 @@ Required: `-e dev|prod`. Optional: `--env-file`, AWS SSO/MFA flags, `--pre-commi
 |--------|---------|
 | `setup-node` | SCP `deploy/setup/` to node, run `setup-pve-node.sh` |
 | `setup-cluster-ha` | QDevice client on all nodes + TrueNAS NFS + HA group on entry host |
+| `setup-monitoring` | Deploy `misc/monitoring` to CT 231; node-exporter on all members |
 | `get-temp` | Cluster-wide temperature via `sensors -j` (requires step 5) |
 | `start-cluster` | WoL peer nodes via `pvenode wakeonlan` |
 | `stop-cluster` | Per-node `pvesh stopall` + hypervisor shutdown |
@@ -96,7 +102,7 @@ Requires `--ip-address`. SSH: ControlMaster multiplexing; password via `PAPITA_S
 
 ### PVE setup steps (`setup-pve-node.sh`)
 
-Step skip: `_skip_pve_step N` when `START_FROM_STEP > N`. Menu max: `PVE_SETUP_LAST_STEP` (18).
+Step skip: `_skip_pve_step N` when `START_FROM_STEP > N`. Menu max: `PVE_SETUP_LAST_STEP` (19).
 
 | Step | Topic |
 |------|--------|
@@ -118,6 +124,7 @@ Step skip: `_skip_pve_step N` when `START_FROM_STEP > N`. Menu max: `PVE_SETUP_L
 | 16 | vzdump cron (`papita-vzdump-all.sh`, configurable schedule) |
 | 17 | Tailscale TLS cert for UI :8006 (main node only) |
 | 18 | QDevice client (`corosync-qdevice`) + softdog watchdog (HA fencing prep) |
+| 19 | prometheus-node-exporter `:9100` (`papita-pve-node-exporter.sh`) |
 
 **Node-installed helpers (when steps run):** `/usr/local/sbin/papita-{smart-scan,vzdump-all,tailscale-cert-renew}.sh`, `/etc/default/papita-{post-startup,pre-shutdown}`, `/etc/cron.d/papita-*`.
 
@@ -127,7 +134,7 @@ Step skip: `_skip_pve_step N` when `START_FROM_STEP > N`. Menu max: `PVE_SETUP_L
 |------|------|
 | `pyproject.toml` | Poetry (package-mode=false); black/isort/flake8/mypy/pylint/interrogate settings |
 | `.pre-commit-config.yaml` | trailing-ws, yaml/toml, shellcheck, isort, black, flake8, pylint, mypy |
-| `.gitignore` | `.env`, `poetry.lock`, drawio backups |
+| `.gitignore` | `.env`, `poetry.lock`, drawio backups, monitoring tokens/grafana.env |
 
 ## Conventions for agents
 

@@ -32,7 +32,7 @@ Repo context:
 - [ ] Entry CLI: deploy/toolkit.sh (run from repo root)
 - [ ] PVE scripts copied to /root/deploy on nodes (deploy/setup/ → deploy/ on node)
 - [ ] PVE setup manual: deploy/docs/setup-pve-node.usage.txt
-- [ ] MCP servers under mcp/ (proxmox-ve, pfsense, truenas)
+- [ ] MCP servers under mcp/ (proxmox-ve, pfsense, truenas, openwrt)
 - [ ] Secrets: .env — never commit
 - [ ] Python: dev tooling only (no app package yet)
 ```
@@ -72,20 +72,21 @@ Required: `-e dev\|prod`. Optional: `--env-file`, AWS SSO/MFA, `--pre-commit`, a
 
 ### Proxmox (`deploy/proxmox.sh`)
 
-| Action                         | Purpose                                              |
-| ------------------------------ | ---------------------------------------------------- |
-| `setup-node`                   | SCP `deploy/setup/` to node, run `setup-pve-node.sh` |
-| `setup-cluster-ha`             | QDevice client on all nodes + TrueNAS NFS + HA group |
-| `get-temp`                     | Cluster temperature via `sensors -j` (step 5)        |
-| `start-cluster`                | WoL peer nodes via `pvenode wakeonlan`               |
-| `stop-cluster`                 | Per-node `pvesh stopall` + hypervisor shutdown       |
-| `cluster-nodes` / `local-node` | Discovery helpers                                    |
+| Action                         | Purpose                                                  |
+| ------------------------------ | -------------------------------------------------------- |
+| `setup-node`                   | SCP `deploy/setup/` to node, run `setup-pve-node.sh`     |
+| `setup-cluster-ha`             | QDevice client on all nodes + TrueNAS NFS + HA group     |
+| `setup-monitoring`             | Deploy Grafana/Prometheus tree to CT 231 + node-exporter |
+| `get-temp`                     | Cluster temperature via `sensors -j` (step 5)            |
+| `start-cluster`                | WoL peer nodes via `pvenode wakeonlan`                   |
+| `stop-cluster`                 | Per-node `pvesh stopall` + hypervisor shutdown           |
+| `cluster-nodes` / `local-node` | Discovery helpers                                        |
 
 SSH: ControlMaster multiplexing; password via `PAPITA_SSH_PASSWORD` or keys. **Must source `utils.sh` before calling `log`.**
 
-### PVE setup (`setup-pve-node.sh`) — 18 steps
+### PVE setup (`setup-pve-node.sh`) — 19 steps
 
-Controlled by `PVE_SETUP_LAST_STEP=18` and `_skip_pve_step` when jumping via menu.
+Controlled by `PVE_SETUP_LAST_STEP=19` and `_skip_pve_step` when jumping via menu.
 
 | #   | Step                          | Notes                                                                    |
 | --- | ----------------------------- | ------------------------------------------------------------------------ |
@@ -107,6 +108,7 @@ Controlled by `PVE_SETUP_LAST_STEP=18` and `_skip_pve_step` when jumping via men
 | 16  | vzdump backup cron            | Configurable schedule/storage                                            |
 | 17  | Tailscale TLS :8006           | Main node only                                                           |
 | 18  | QDevice client + softdog      | Per-node; cluster HA via `proxmox.sh setup-cluster-ha`                   |
+| 19  | prometheus-node-exporter      | `:9100`; stack sync via `proxmox.sh setup-monitoring`                    |
 
 Manual: `deploy/docs/setup-pve-node.usage.txt` (shown via `usage_setup_pve_node` in `deploy/usage.sh`).
 

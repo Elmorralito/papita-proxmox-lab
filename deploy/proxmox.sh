@@ -50,6 +50,7 @@ _deploy_tree_via_tar() {
     local -a excludes=("$@")
     local -a tar_cmd=(tar -C "$src_dir")
     local pattern
+    local dest_host="${DEPLOY_TAR_HOST:-$IP_ADDRESS}"
 
     # macOS bsdtar embeds com.apple.provenance xattrs; GNU tar on PVE warns on extract.
     if [[ "$(uname -s)" == "Darwin" ]]; then
@@ -61,8 +62,8 @@ _deploy_tree_via_tar() {
     done
     tar_cmd+=(-cf - .)
 
-    ssh "${SSH_COMMON_OPTS[@]}" "$TARGET_USERNAME@$IP_ADDRESS" mkdir -p "$remote_dir"
-    COPYFILE_DISABLE=1 "${tar_cmd[@]}" | ssh "${SSH_COMMON_OPTS[@]}" "$TARGET_USERNAME@$IP_ADDRESS" \
+    ssh "${SSH_COMMON_OPTS[@]}" "$TARGET_USERNAME@$dest_host" mkdir -p "$remote_dir"
+    COPYFILE_DISABLE=1 "${tar_cmd[@]}" | ssh "${SSH_COMMON_OPTS[@]}" "$TARGET_USERNAME@$dest_host" \
         "tar -C ${remote_dir} -xf - --warning=no-unknown-keyword"
 }
 
@@ -89,7 +90,7 @@ setup_node() {
     ssh "${SSH_COMMON_OPTS[@]}" "$TARGET_USERNAME@$IP_ADDRESS" mkdir -p "${TARGET_REMOTE_PATH}/deploy"
     # tar preserves misc/tailscale/ reliably (macOS scp -r deploy/setup/. can skip nested dirs).
     _deploy_tree_via_tar "${PVE_SETUP_DIR}" "${TARGET_REMOTE_PATH}/deploy" \
-        __pycache__ '*.pyc'
+        __pycache__ '*.pyc' grafana.env '*.token' '_live_pull'
     _deploy_tree_via_tar "${PVE_PYTHON_DIR}" "${TARGET_REMOTE_PATH}/deploy/python" \
         __pycache__ '*.pyc'
     scp "${SSH_COMMON_OPTS[@]}" "$PROJECT_PATH/deploy/utils.sh" "$TARGET_USERNAME@$IP_ADDRESS:$TARGET_REMOTE_PATH/deploy/utils.sh"
@@ -109,6 +110,9 @@ setup_node() {
         misc/tailscale/default.tags.list \
         misc/cluster/papita-node-qdevice-client.sh \
         misc/cluster/papita-cluster-quorum-ha.sh \
+        misc/monitoring/papita-sync-k8s-monitor.sh \
+        misc/monitoring/papita-pve-node-exporter.sh \
+        misc/monitoring/k8s-monitor/docker-compose.yml \
         python/misc/cluster/discover_hosts.py \
         python/datafiles/default.hosts.list; do
         if ! ssh "${SSH_COMMON_OPTS[@]}" "$TARGET_USERNAME@$IP_ADDRESS" \
@@ -333,6 +337,100 @@ setup_cluster_ha() {
     fi
 
     log "INFO" "setup-cluster-ha completed. Verify with: pvecm status; ha-manager status; pvesm status."
+    return 0
+}
+
+_deploy_monitoring_bundle_to() {
+    local dest_host="$1"
+    local mon_dir="${PVE_SETUP_DIR}/misc/monitoring"
+    if [[ ! -d "$mon_dir" ]]; then
+        log "ERROR" "Missing local monitoring bundle: ${mon_dir}"
+        exit 255
+    fi
+    log "INFO" "Deploying misc/monitoring to ${dest_host}:${TARGET_REMOTE_PATH}/deploy/misc/monitoring."
+    DEPLOY_TAR_HOST="$dest_host" _deploy_tree_via_tar "$mon_dir" "${TARGET_REMOTE_PATH}/deploy/misc/monitoring" \
+        __pycache__ '*.pyc' grafana.env '*.token' '_live_pull'
+    ssh "${SSH_COMMON_OPTS[@]}" "$TARGET_USERNAME@$dest_host" \
+        "chmod -R a+rx ${TARGET_REMOTE_PATH}/deploy/misc/monitoring && chmod +x ${TARGET_REMOTE_PATH}/deploy/misc/monitoring/*.sh"
+}
+
+_pve_cluster_monitoring_node_visitor() {
+    local node_name=$1
+    log "INFO" "prometheus-node-exporter ready on ${node_name}."
+}
+
+setup_monitoring() {
+    local local_node cluster_cfg_json remote_ne_cmd fw_script sync_script
+    local ct_json ct_node ct_host
+
+    if ! local_node=$(get_local_node); then
+        log "ERROR" "Could not determine local Proxmox node (not a cluster member?)."
+        return 255
+    fi
+    log "INFO" "Local cluster node: ${local_node} (SSH entry: ${TARGET_USERNAME}@${IP_ADDRESS})"
+
+    get_cluster_nodes
+    if [[ ${#CLUSTER_NODE_IDS[@]} -eq 0 ]]; then
+        log "ERROR" "No online cluster nodes found."
+        return 255
+    fi
+
+    cluster_cfg_json=$(ssh "${SSH_COMMON_OPTS[@]}" "$TARGET_USERNAME@$IP_ADDRESS" \
+        "pvesh get /cluster/config/nodes --output-format json 2>/dev/null" || true)
+    if [[ -z "$cluster_cfg_json" ]] || ! jq -e . >/dev/null 2>&1 <<<"$cluster_cfg_json"; then
+        log "WARN" "Could not read /cluster/config/nodes JSON; peer SSH may fail."
+        cluster_cfg_json="[]"
+    else
+        cluster_cfg_json=$(jq 'if type == "object" and ((.data | type) == "array") then .data elif type == "array" then . else [] end' <<<"$cluster_cfg_json")
+    fi
+
+    _deploy_monitoring_bundle_to "$IP_ADDRESS"
+
+    fw_script="${TARGET_REMOTE_PATH}/deploy/misc/monitoring/papita-k8s-monitor-ct-firewall.sh"
+    sync_script="${TARGET_REMOTE_PATH}/deploy/misc/monitoring/papita-sync-k8s-monitor.sh"
+    remote_ne_cmd="if [ -f ${TARGET_REMOTE_PATH}/deploy/misc/monitoring/papita-pve-node-exporter.sh ]; then bash ${TARGET_REMOTE_PATH}/deploy/misc/monitoring/papita-pve-node-exporter.sh; else export DEBIAN_FRONTEND=noninteractive; apt-get update -qq; apt-get install -y prometheus-node-exporter; systemctl enable --now prometheus-node-exporter; echo node-exporter-inline \$(hostname -s) \$(systemctl is-active prometheus-node-exporter); fi"
+
+    log "INFO" "Installing prometheus-node-exporter on all cluster members..."
+    _pve_cluster_for_each_remote_ssh "$local_node" "$cluster_cfg_json" "$remote_ne_cmd" \
+        _pve_cluster_monitoring_node_visitor
+
+    log "INFO" "Writing k8s-monitor CT guest firewall (231.fw) on ${local_node}..."
+    if ! ssh "${SSH_COMMON_OPTS[@]}" "$TARGET_USERNAME@$IP_ADDRESS" "bash ${fw_script}"; then
+        log "ERROR" "papita-k8s-monitor-ct-firewall.sh failed on ${IP_ADDRESS}."
+        return 255
+    fi
+
+    ct_json=$(ssh "${SSH_COMMON_OPTS[@]}" "$TARGET_USERNAME@$IP_ADDRESS" \
+        "pvesh get /cluster/resources --type vm --output-format json 2>/dev/null" || true)
+    if [[ -z "$ct_json" ]] || ! jq -e . >/dev/null 2>&1 <<<"$ct_json"; then
+        ct_json="[]"
+    else
+        ct_json=$(jq 'if type == "object" and ((.data | type) == "array") then .data elif type == "array" then . else [] end' <<<"$ct_json")
+    fi
+    ct_node=$(jq -r --arg vmid "${PAPITA_K8S_MONITOR_VMID:-231}" \
+        '.[]? | select((.vmid|tonumber) == ($vmid|tonumber) and .type == "lxc") | .node' <<<"${ct_json}" | head -1)
+    if [[ -z "$ct_node" || "$ct_node" == "null" ]]; then
+        log "ERROR" "Could not find LXC ${PAPITA_K8S_MONITOR_VMID:-231} in cluster resources."
+        return 255
+    fi
+    if [[ "$ct_node" == "$local_node" ]]; then
+        ct_host="$IP_ADDRESS"
+    else
+        ct_host=$(_pve_cluster_ring0_addr_for_node "$ct_node" "$cluster_cfg_json")
+        if [[ -z "$ct_host" ]]; then
+            log "ERROR" "No ring0_addr for CT host ${ct_node}."
+            return 255
+        fi
+        _deploy_monitoring_bundle_to "$ct_host"
+    fi
+
+    log "INFO" "Syncing Grafana/Prometheus stack into CT ${PAPITA_K8S_MONITOR_VMID:-231} on ${ct_node} (${ct_host})..."
+    if ! ssh "${SSH_COMMON_OPTS[@]}" "$TARGET_USERNAME@$ct_host" "bash ${sync_script}"; then
+        log "ERROR" "papita-sync-k8s-monitor.sh failed on ${ct_host}."
+        return 255
+    fi
+
+    log "INFO" "setup-monitoring completed. Grafana: http://172.16.20.11:3000  Prometheus: http://172.16.20.11:9090"
     return 0
 }
 
@@ -613,6 +711,9 @@ case "$ACTION" in
         ;;
     setup-cluster-ha)
         setup_cluster_ha
+        ;;
+    setup-monitoring)
+        setup_monitoring
         ;;
     *)
         log "ERROR" "Invalid action: $ACTION."
