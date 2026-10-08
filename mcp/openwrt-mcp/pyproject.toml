@@ -1,0 +1,36 @@
+[project]
+name = "openwrt-mcp"
+version = "0.1.0a1"
+description = "Policy-constrained Model Context Protocol server for OpenWrt firewall administration."
+readme = "README.md"
+authors = [{ name = "Elmorralito", email = "drestrepohinc@gmail.com" }]
+requires-python = ">=3.11,<4"
+dependencies = [
+    "cryptography (>=42.0.0)",
+    "mcp (>=1.9.0,<2.0.0)",
+    "pydantic (>=2.3.0,<3.0)",
+    "pydantic-settings (>=2.6.0,<3.0)",
+    "python-dotenv (>=1.0.1,<2.0)",
+]
+
+[project.scripts]
+openwrt-mcp = "openwrt_mcp.server:main"
+openwrt-mcp-smoke = "openwrt_mcp.smoke_cli:main"
+openwrt-mcp-approve = "openwrt_mcp.approval.cli:main"
+
+[project.urls]
+HomePage = "https://github.com/Elmorralito/papita-proxmox-lab/tree/main/mcp/openwrt-mcp"
+Documentation = "https://github.com/Elmorralito/papita-proxmox-lab/blob/main/mcp/openwrt-mcp/README.md"
+
+[tool.poetry]
+package-mode = true
+packages = [{ include = "openwrt_mcp", from = "src" }]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["src", "tests"]
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"

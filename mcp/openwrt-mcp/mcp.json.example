@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "openwrt": {
+      "command": "poetry",
+      "args": ["run", "openwrt-mcp"],
+      "cwd": "/absolute/path/to/papita-proxmox-lab",
+      "env": {
+        "OPENWRT_ROUTER_ID": "openwrt-pi",
+        "OPENWRT_HOST": "100.78.68.87",
+        "OPENWRT_LAN_HOST": "172.16.0.1",
+        "OPENWRT_SSH_KEY_PATH": "~/.ssh/id_ed25519_openwrt_mcp",
+        "OPENWRT_KNOWN_HOSTS_PATH": "~/.config/openwrt-mcp/known_hosts",
+        "OPENWRT_PROBE_HOST": "172.16.0.101",
+        "OPENWRT_LOG_LEVEL": "INFO"
+      }
+    }
+  }
+}
