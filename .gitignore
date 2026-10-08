@@ -23,18 +23,3 @@ __pycache__/
 .DS_Store
 .tmp/
 tmp/
-
-# Monitoring secrets (live copies on CT/nodes only)
-uptime-kuma.env
-uptime-kuma.credentials
-deploy/setup/misc/monitoring/**/grafana.env
-deploy/setup/misc/monitoring/**/*.token
-deploy/setup/misc/monitoring/**/*.key
-deploy/setup/misc/monitoring/**/*.pem
-
-# openwrt-mcp local state, approver keys and agent keys (never commit)
-mcp/openwrt-mcp/.env
-mcp/openwrt-mcp/**/*.sqlite3
-mcp/openwrt-mcp/**/audit.jsonl
-mcp/openwrt-mcp/**/approver.key
-mcp/openwrt-mcp/**/*.keynum
