@@ -1,0 +1,13 @@
+---
+extends: default
+
+rules:
+  # Compose/Prometheus/Kubernetes manifests in this repo omit the "---" marker.
+  document-start: disable
+  # PromQL expressions and descriptions are long single-line strings.
+  line-length:
+    max: 160
+    level: warning
+  comments-indentation: disable
+  truthy:
+    check-keys: false
