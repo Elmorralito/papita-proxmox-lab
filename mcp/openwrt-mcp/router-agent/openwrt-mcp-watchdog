@@ -1,0 +1,17 @@
+#!/bin/sh
+# openwrt-mcp watchdog: runs under procd (respawn). Independent of SSH, the MCP service and the workstation.
+# - writes an uptime heartbeat the agent requires before any mutation
+# - rolls back unconfirmed transactions after the deadline or after a reboot
+RUN=/var/run/openwrt-mcp
+AGENT=/usr/libexec/openwrt-mcp-agent
+mkdir -p "$RUN"
+chmod 700 "$RUN"
+
+# Boot reconcile first (unconfirmed journal from a previous boot is rolled back immediately).
+"$AGENT" --watchdog-tick
+
+while :; do
+	cut -d' ' -f1 /proc/uptime > "$RUN/watchdog.alive.tmp" && mv "$RUN/watchdog.alive.tmp" "$RUN/watchdog.alive"
+	"$AGENT" --watchdog-tick
+	sleep 3
+done

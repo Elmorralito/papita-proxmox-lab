@@ -1,0 +1,15 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: blackhole
+  group_by: ["alertname"]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 12h
+
+receivers:
+  - name: blackhole
+    # Stub: replace with Slack / email / webhook when ready.
+    # webhook_configs:
+    #   - url: http://127.0.0.1:5001/

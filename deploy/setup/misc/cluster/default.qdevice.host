@@ -1,4 +1,6 @@
 # Dedicated Corosync QDevice host (corosync-qnetd).
 # Must NOT be a Proxmox cluster member. Do not use TrueNAS (172.16.0.100) — that host serves NFS only.
 # Bootstrap: bash qdevice-server-bootstrap.sh on this host before pvecm qdevice setup.
+# Live host: raspi-qdevice-oldtimers LAN 172.16.0.99 (not 172.16.0.105).
+# Tailscale fallback if LAN is down: 100.81.26.61 (PVE nodes must reach the tailnet).
 172.16.0.99

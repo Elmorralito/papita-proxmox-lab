@@ -1,0 +1,11 @@
+# Proxmox guest firewall for k8s-monitor LXC (VMID 231).
+# Apply with papita-k8s-monitor-ct-firewall.sh on a cluster member.
+[OPTIONS]
+enable: 1
+
+[RULES]
+IN ACCEPT -source 172.16.0.0/16 -p tcp -dport 3000 -log nolog
+IN ACCEPT -source 172.16.0.0/16 -p tcp -dport 9090 -log nolog
+IN ACCEPT -source 172.16.0.0/16 -p tcp -dport 9093 -log nolog
+IN ACCEPT -source 100.64.0.0/10 -p tcp -dport 3000 -log nolog
+IN ACCEPT -source 172.16.0.0/16 -p tcp -dport 22 -log nolog

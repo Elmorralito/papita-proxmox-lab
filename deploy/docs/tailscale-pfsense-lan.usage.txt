@@ -8,8 +8,16 @@ What it is
   (advertised routes, NAT, firewall). Run from your workstation with network
   access to the Tailscale API.
 
-  Topology: all PVE nodes join Tailscale for AWS EFS; pfSense advertises
-  172.16.0.0/16; remote Proxmox admin uses main node (172.16.0.101) only.
+  Topology: all PVE nodes join Tailscale for AWS EFS; the lab LAN router
+  (OpenWrt openwrt-pi, formerly pfSense pfsense-fw001) advertises 172.16.0.0/16;
+  remote Proxmox admin uses main node (172.16.0.101) only.
+
+  OpenWrt SSH (workstation):
+    ssh -i ~/.ssh/id_ed25519_NASGW root@100.78.68.87
+  Do not add a second UCI firewall zone named "tailscale" (fw4 symbol
+  tailscale_devices collides). Use the existing zone covering network
+  "tailscale" / device tailscale0. After tailscale up --advertise-tags, approve
+  the machine and disable key expiry in the Tailscale admin console.
 
 How to run
   From the repository root (requires deploy/utils.sh and deploy/usage.sh):
@@ -49,8 +57,8 @@ Optional overrides (environment variables)
   LAN_TEST_IP            Main PVE LAN IP for verify (default: 172.16.0.101)
   MAIN_PVE_LAN_IP        Main node LAN IP for admin ACL grants (default: 172.16.0.101)
   MAIN_PVE_TAILSCALE_NAME  Optional MagicDNS name for direct tailnet UI verify
-  PFSENSE_NAME           Substring match for pfSense device name/hostname in
-                         admin device list (default: pfsense-fw001)
+  LAN_ROUTER_NAME        Preferred Tailscale hostname match (default: openwrt-pi)
+  PFSENSE_NAME           Fallback hostname match (default: pfsense-fw001)
 
 Prerequisites
   curl, python3          Required for Tailscale API calls and ACL JSON merge.
@@ -60,8 +68,8 @@ Prerequisites
 
 --- Action: configure ---
   1. Validates TAILSCALE_API_KEY, TAILSCALE_TAILNET, curl, python3.
-  2. GET /tailnet/{tailnet}/devices — finds device where PFSENSE_NAME matches
-     name or hostname (case-insensitive).
+  2. GET /tailnet/{tailnet}/devices — finds LAN_ROUTER_NAME (openwrt-pi) first,
+     then PFSENSE_NAME (pfsense-fw001), name or hostname substring.
   3. approve_subnet_route: GET device routes; if LAN_CIDR not in advertisedRoutes,
      warns and exits non-zero with pfSense instructions; else POST enabled routes.
   4. patch_acl_grants: GET current ACL; merge tagOwners, grants, and

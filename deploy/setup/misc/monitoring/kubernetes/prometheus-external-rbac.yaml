@@ -1,0 +1,49 @@
+# ServiceAccount for the external Prometheus on k8s-monitor (CT 231).
+# Create a long-lived token on the cluster and store it only on the CT:
+#   kubectl -n monitoring create token prometheus-external --duration=8760h
+# Copy the token to /opt/k8s-monitor/secrets/k8s-bearer.token (never git).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus-external
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/part-of: papita-k8s-monitor
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: prometheus-external
+  labels:
+    app.kubernetes.io/part-of: papita-k8s-monitor
+rules:
+  - apiGroups: [""]
+    resources:
+      - nodes
+      - nodes/metrics
+      - nodes/proxy
+      - services
+      - endpoints
+      - pods
+      - namespaces
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["get", "list", "watch"]
+  - nonResourceURLs: ["/metrics", "/metrics/cadvisor"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: prometheus-external
+  labels:
+    app.kubernetes.io/part-of: papita-k8s-monitor
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: prometheus-external
+subjects:
+  - kind: ServiceAccount
+    name: prometheus-external
+    namespace: monitoring

@@ -1,0 +1,9 @@
+# Proxmox guest firewall for Uptime Kuma (LXC 1004).
+# Apply with papita-uptime-kuma-firewall.sh on a cluster member.
+[OPTIONS]
+enable: 1
+
+[RULES]
+IN ACCEPT -source 172.16.0.0/16 -p tcp -dport 3001 -log nolog
+IN ACCEPT -source 100.64.0.0/10 -p tcp -dport 3001 -log nolog
+IN ACCEPT -i lo -log nolog

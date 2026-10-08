@@ -22,7 +22,7 @@ How to run
 First prompt (after the on-screen step list)
   y              Start from step 1 (full run)
   n              Exit immediately; no further steps
-  1-18           Skip all steps before this number; begin at that step
+  1-19           Skip all steps before this number; begin at that step
   (empty)        Same as starting from the beginning (step 1)
   h, help, ?, usage, -h, --help
                  Show this manual again in the pager, then ask again (CLI --help as above)
@@ -30,7 +30,7 @@ First prompt (after the on-screen step list)
 Failure behavior
   Step 1 (APT) can exit the whole script on error (missing apt-dependencies.list,
   failed apt install, or jq / vim / unattended-upgrades missing after install).
-  Steps 2-18: errors are usually logged and the script continues with the next step.
+  Steps 2-19: errors are usually logged and the script continues with the next step.
 
 --- Step 1 — APT configuration ---
   Gate: answer "n" at 1. QUESTION to skip the entire step.
@@ -67,7 +67,10 @@ Failure behavior
 
 --- Step 8 — Tailscale (install + forwarding + firewall + optional NAT) ---
   y/c/n install flow; sysctl forwarding; 8.1 cluster.fw Tailscale ACCEPT rule; 8.2 optional NAT masq.
-  All cluster nodes install Tailscale (AWS EFS data plane). Remote admin uses main node only.
+  Installer is fetched with curl -4 (PATH wrapper) because lab nodes often have AAAA
+  for tailscale.com but no IPv6 default route — dual-stack curl then fails to resolve.
+  Skip download if tailscale is already on PATH. All cluster nodes install Tailscale
+  (AWS EFS data plane). Remote admin uses main node only.
 
 --- Step 9 — tailscale up ---
   Hostname, tags; tailscale up --accept-dns --ssh --reset.
@@ -123,3 +126,9 @@ Failure behavior
   ./deploy/proxmox.sh setup-cluster-ha --ip-address <MAIN_NODE_LAN_IP>
   after bootstrapping corosync-qnetd on the host in misc/cluster/default.qdevice.host
   (NOT TrueNAS 172.16.0.100). Edit misc/cluster/default.truenas.nfs.env for NFS export path.
+
+--- Step 19 — prometheus-node-exporter ---
+  Installs prometheus-node-exporter on this node (:9100) for the PVE Grafana dashboard.
+  Cluster Grafana/Prometheus stack (CT 231): from workstation run
+  ./deploy/proxmox.sh setup-monitoring --ip-address <MAIN_NODE_LAN_IP>
+  Assets live in deploy/setup/misc/monitoring/ (no tokens).

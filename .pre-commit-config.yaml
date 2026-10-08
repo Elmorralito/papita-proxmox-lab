@@ -6,6 +6,8 @@ repos:
       - id: trailing-whitespace
       - id: end-of-file-fixer
       - id: check-yaml
+        # Kubernetes manifests bundle several documents per file.
+        args: ["--allow-multiple-documents"]
       - id: check-toml
       # - id: detect-aws-credentials
       - id: detect-private-key
@@ -45,7 +47,9 @@ repos:
     hooks:
       - id: pylint
         name: pylint
-        entry: pylint
+        # Use the project venv. The pyenv `pylint` shim has a stale shebang
+        # (cursor-ss python) and is executed as a shell script.
+        entry: .venv/bin/pylint
         language: system
         types: [python]
         require_serial: true
@@ -88,6 +92,7 @@ repos:
     rev: 1.7.0
     hooks:
       - id: interrogate
+        language_version: python3.14
         args: ["-c", "pyproject.toml"]
         files: "^.*/[src|tests]"
         pass_filenames: false

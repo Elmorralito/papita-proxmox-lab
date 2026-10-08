@@ -8,6 +8,7 @@ LAN_TEST_IP="${LAN_TEST_IP:-172.16.0.101}"
 MAIN_PVE_LAN_IP="${MAIN_PVE_LAN_IP:-172.16.0.101}"
 MAIN_PVE_TAILSCALE_NAME="${MAIN_PVE_TAILSCALE_NAME:-}"
 PFSENSE_NAME="${PFSENSE_NAME:-pfsense-fw001}"
+LAN_ROUTER_NAME="${LAN_ROUTER_NAME:-openwrt-pi}"
 TAILSCALE_TAILNET="${TAILSCALE_TAILNET:-tailf1ad0d.ts.net}"
 
 while [[ "$#" -gt 0 ]]; do
@@ -94,20 +95,22 @@ ts_api() {
 find_pfsense_device_id() {
     local devices_json device_id
     devices_json="$(ts_api GET "/tailnet/${TAILSCALE_TAILNET}/devices")"
-    device_id="$(python3 - <<'PY' "$devices_json" "$PFSENSE_NAME"
+    device_id="$(python3 - <<'PY' "$devices_json" "$LAN_ROUTER_NAME" "$PFSENSE_NAME"
 import json, sys
 data = json.loads(sys.argv[1])
-needle = sys.argv[2].lower()
-for dev in data.get("devices", []):
-    name = (dev.get("name") or "").lower()
-    hostname = (dev.get("hostname") or "").lower()
-    if needle in name or needle in hostname:
-        print(dev.get("id") or dev.get("nodeId") or "")
-        break
+needles = [n.lower() for n in sys.argv[2:] if n.strip()]
+devices = data.get("devices", [])
+for needle in needles:
+    for dev in devices:
+        name = (dev.get("name") or "").lower()
+        hostname = (dev.get("hostname") or "").lower()
+        if needle in name or needle in hostname:
+            print(dev.get("id") or dev.get("nodeId") or "")
+            raise SystemExit
 PY
 )"
     if [[ -z "$device_id" ]]; then
-        log ERROR "Could not find pfSense device matching name '${PFSENSE_NAME}'."
+        log ERROR "Could not find LAN router matching '${LAN_ROUTER_NAME}' or '${PFSENSE_NAME}'."
         exit 1
     fi
     printf '%s' "$device_id"
@@ -282,7 +285,7 @@ action_configure() {
     require_tailscale_api
     local device_id
     device_id="$(find_pfsense_device_id)"
-    log INFO "pfSense device id: ${device_id}"
+    log INFO "LAN router Tailscale device id: ${device_id}"
     approve_subnet_route "$device_id"
     patch_acl_grants
     log INFO "Waiting 5s for route propagation..."

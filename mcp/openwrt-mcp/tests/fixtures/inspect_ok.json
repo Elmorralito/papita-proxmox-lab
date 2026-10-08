@@ -1,0 +1,24 @@
+{
+  "ok": true,
+  "v": 1,
+  "agent_version": "0.1.0",
+  "config_revision": "sha256:9f2c0000000000000000000000000000000000000000000000000000000000aa",
+  "agent_owned_rules": [
+    {
+      "id": "allow-metrics",
+      "section": "mcp_allow_metrics",
+      "enabled": true,
+      "dest_port": 9100,
+      "src": "lan",
+      "proto": "tcp"
+    }
+  ],
+  "pending_changes": false,
+  "nft_loaded": true,
+  "nft_rules": ["mcp_allow_metrics"],
+  "wan_exposure": false,
+  "watchdog_alive": true,
+  "active_txn": null,
+  "tailscale_running": true,
+  "clock_ok": true
+}
