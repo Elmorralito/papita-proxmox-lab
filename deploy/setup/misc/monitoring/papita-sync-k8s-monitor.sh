@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Copy k8s-monitor stack (no secrets) into LXC 231 and reload Prometheus / Grafana.
+# Copy k8s-monitor stack (no secrets) into LXC 231 and reload Prometheus.
+# Grafana lives on the QDevice Pi (papita-qdevice-grafana.sh), not in this CT.
 # Run on the PVE node that currently hosts the CT (or any member with pct).
 set -euo pipefail
 
@@ -24,8 +25,6 @@ fi
 pct exec "$VMID" -- mkdir -p \
     "${DEST}/prometheus/rules" \
     "${DEST}/alertmanager" \
-    "${DEST}/grafana/provisioning/dashboards/json" \
-    "${DEST}/grafana/provisioning/datasources" \
     "${DEST}/secrets"
 
 push_file() {
@@ -38,21 +37,12 @@ push_file prometheus/prometheus.yml
 push_file prometheus/rules/k8s.yml
 push_file prometheus/rules/pve.yml
 push_file alertmanager/alertmanager.yml
-push_file grafana/provisioning/datasources/prometheus.yml
-push_file grafana/provisioning/dashboards/provider.yml
-push_file grafana/provisioning/dashboards/json/k8s.json
-push_file grafana/provisioning/dashboards/json/pve.json
 
-if ! pct exec "$VMID" -- test -f "${DEST}/grafana.env"; then
-    pct exec "$VMID" -- tee "${DEST}/grafana.env" <"${SRC}/grafana.env.example" >/dev/null
-    pct exec "$VMID" -- chmod 600 "${DEST}/grafana.env"
-    echo "[WARN] wrote ${DEST}/grafana.env from example; set GF_SECURITY_ADMIN_PASSWORD on the CT."
-fi
 if ! pct exec "$VMID" -- test -s "${DEST}/secrets/k8s-bearer.token"; then
     echo "[WARN] ${DEST}/secrets/k8s-bearer.token missing on CT; Kubernetes scrapes need it."
 fi
 
-pct exec "$VMID" -- bash -lc "cd ${DEST} && docker compose up -d"
+# --remove-orphans drops the retired grafana container; the grafana_data volume is kept.
+pct exec "$VMID" -- bash -lc "cd ${DEST} && docker compose up -d --remove-orphans"
 pct exec "$VMID" -- bash -lc "wget -qO- --post-data='' http://127.0.0.1:9090/-/reload && echo '[INFO] prometheus reloaded'"
-pct exec "$VMID" -- bash -lc "cd ${DEST} && docker compose restart grafana"
 echo "[INFO] synced monitoring stack to CT ${VMID}:${DEST}"

@@ -17,7 +17,7 @@ Network diagram source: [`docs/Diagrams.drawio`](./docs/Diagrams.drawio) (export
 | **pfSense pfREST**  | [`deploy/pfsense-restapi-access.sh`](./deploy/pfsense-restapi-access.sh) · [`deploy/pfsense-firewall-tailscale.sh`](./deploy/pfsense-firewall-tailscale.sh) | Bootstrap REST API access and apply agreed Tailscale-tab firewall rules via pfREST                                       |
 | **Cursor MCP**      | [`mcp/`](./mcp/) · [`deploy/mcp.sh`](./deploy/mcp.sh)                                                                                                       | Install, test, and sync MCP servers for Proxmox VE and pfSense                                                           |
 | **Runbooks**        | [`docs/TIPSNTRICKS.md`](./docs/TIPSNTRICKS.md)                                                                                                              | Ceph, cluster join, pfSense, Tailscale, VM clipboard, MCP smoke, maintenance                                             |
-| **Monitoring**      | [`deploy/setup/misc/monitoring/`](./deploy/setup/misc/monitoring/)                                                                                          | Grafana/Prometheus (CT 231), rules, dashboards, k8s collectors, Uptime Kuma — no secrets                                 |
+| **Monitoring**      | [`deploy/setup/misc/monitoring/`](./deploy/setup/misc/monitoring/)                                                                                          | Prometheus (CT 231), Grafana (QDevice Pi), rules, dashboards, k8s collectors, Uptime Kuma — no secrets                   |
 
 **Lab topology (default):**
 
@@ -303,7 +303,7 @@ Controlled by `PVE_SETUP_LAST_STEP=19`. At the first prompt, enter `y`, `n`, a s
 | 18   | QDevice client (`corosync-qdevice`) + softdog watchdog (HA fencing prep)      |
 | 19   | prometheus-node-exporter `:9100` (Grafana PVE dashboard)                      |
 
-After all nodes complete step 18, run **`./deploy/proxmox.sh setup-cluster-ha --ip-address 172.16.0.101`**. Push Grafana/Prometheus from [`deploy/setup/misc/monitoring/`](./deploy/setup/misc/monitoring/) with **`./deploy/proxmox.sh setup-monitoring --ip-address 172.16.0.101`**.
+After all nodes complete step 18, run **`./deploy/proxmox.sh setup-cluster-ha --ip-address 172.16.0.101`**. Push Prometheus/Alertmanager from [`deploy/setup/misc/monitoring/`](./deploy/setup/misc/monitoring/) with **`./deploy/proxmox.sh setup-monitoring --ip-address 172.16.0.101`**.
 
 ### Tailscale + lab LAN router
 

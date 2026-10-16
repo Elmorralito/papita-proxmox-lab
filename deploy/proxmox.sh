@@ -424,13 +424,13 @@ setup_monitoring() {
         _deploy_monitoring_bundle_to "$ct_host"
     fi
 
-    log "INFO" "Syncing Grafana/Prometheus stack into CT ${PAPITA_K8S_MONITOR_VMID:-231} on ${ct_node} (${ct_host})..."
+    log "INFO" "Syncing Prometheus/Alertmanager stack into CT ${PAPITA_K8S_MONITOR_VMID:-231} on ${ct_node} (${ct_host})..."
     if ! ssh "${SSH_COMMON_OPTS[@]}" "$TARGET_USERNAME@$ct_host" "bash ${sync_script}"; then
         log "ERROR" "papita-sync-k8s-monitor.sh failed on ${ct_host}."
         return 255
     fi
 
-    log "INFO" "setup-monitoring completed. Grafana: http://172.16.20.11:3000  Prometheus: http://172.16.20.11:9090"
+    log "INFO" "setup-monitoring completed. Prometheus: http://172.16.20.11:9090  Grafana (QDevice Pi): http://172.16.0.99:3000"
     return 0
 }
 

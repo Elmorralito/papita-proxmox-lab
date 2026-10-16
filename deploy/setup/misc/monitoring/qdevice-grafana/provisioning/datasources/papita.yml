@@ -1,0 +1,24 @@
+apiVersion: 1
+
+# Grafana runs on raspi-qdevice-oldtimers (outside the PVE cluster).
+# Prometheus stays on k8s-monitor CT 231; Scrutiny is the TrueNAS app (REST via Infinity).
+datasources:
+  - name: Prometheus
+    uid: papita-prometheus
+    type: prometheus
+    access: proxy
+    url: http://172.16.20.11:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      timeInterval: 30s
+
+  - name: Scrutiny
+    uid: papita-scrutiny
+    type: yesoreyeram-infinity-datasource
+    access: proxy
+    url: http://172.16.0.100:31054
+    editable: false
+    jsonData:
+      allowedHosts:
+        - http://172.16.0.100:31054

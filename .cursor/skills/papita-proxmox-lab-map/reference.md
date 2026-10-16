@@ -104,25 +104,26 @@ Last aligned to repo tree (~46 tracked files). Gitignored paths listed separatel
 
 ### `deploy/setup/misc/monitoring/`
 
-Versioned lab monitoring (no tokens). Live Grafana/Prometheus: LXC **231** `172.16.20.11`. Uptime Kuma: LXC **1004**.
+Versioned lab monitoring (no tokens). Live Prometheus/Alertmanager: LXC **231** `172.16.20.11`. Grafana: QDevice Pi `172.16.0.99:3000`. Uptime Kuma: LXC **1004**.
 
 | File                                        | Role                                                        |
 | ------------------------------------------- | ----------------------------------------------------------- |
 | `README.md`                                 | Inventory and apply commands                                |
 | `default.k8s-monitor.env.example`           | CT 231 / API VIP / node-exporter IPs                        |
 | `default.uptime-kuma.env.example`           | Kuma URL/layout knobs (password empty)                      |
-| `papita-sync-k8s-monitor.sh`                | Push compose/rules/dashboards into CT 231                   |
+| `papita-sync-k8s-monitor.sh`                | Push compose/rules into CT 231                              |
+| `papita-qdevice-grafana.sh`                 | On the QDevice Pi: Grafana + Infinity + guardrails          |
 | `papita-pve-node-exporter.sh`               | Install `prometheus-node-exporter` on PVE                   |
-| `papita-k8s-monitor-ct-firewall.sh`         | Guest fw for Grafana/Prometheus/AM                          |
+| `papita-k8s-monitor-ct-firewall.sh`         | Guest fw for Prometheus/AM                                  |
 | `papita-k8s-api-hosts.sh`                   | `api.k8s.oldtimers.lab` → `172.16.30.10`                    |
 | `papita-apply-k8s-metrics.sh`               | `kubectl apply` collectors                                  |
 | `papita-uptime-kuma-firewall.sh`            | Guest fw for Kuma `:3001`                                   |
 | `papita_uptime_kuma_bootstrap.py`           | Kuma monitors + optional Telegram template                  |
 | `firewall/231.fw` / `1004.fw`               | Guest firewall templates                                    |
-| `k8s-monitor/docker-compose.yml`            | Prometheus + Alertmanager + Grafana                         |
-| `k8s-monitor/prometheus/prometheus.yml`     | Scrape jobs (k8s SD + PVE `:9100`)                          |
+| `k8s-monitor/docker-compose.yml`            | Prometheus + Alertmanager                                   |
+| `k8s-monitor/prometheus/prometheus.yml`     | Scrape jobs (k8s SD + PVE/QDevice `:9100`)                  |
 | `k8s-monitor/prometheus/rules/*.yml`        | Recording rules and alerts                                  |
-| `k8s-monitor/grafana/provisioning/`         | Datasource + Papita dashboards JSON                         |
+| `qdevice-grafana/provisioning/`             | Pi Grafana datasources + dashboards (k8s/pve/scrutiny)      |
 | `k8s-monitor/alertmanager/alertmanager.yml` | Stub blackhole receiver                                     |
 | `kubernetes/*.yaml`                         | Namespace, Prometheus SA, kube-state-metrics, node-exporter |
 
@@ -186,7 +187,7 @@ Active rules live in `.cursor/rules/`.
 | Proxmox API (MCP)          | `PVE_*` env vars in `~/.cursor/mcp.json`                                  |
 | PVE Tailscale tags/routes  | `deploy/setup/misc/tailscale/default.*.list`                              |
 | PVE cluster host discovery | `deploy/python/misc/cluster/` + `deploy/python/datafiles/default.hosts.*` |
-| Lab metrics / Grafana      | `deploy/setup/misc/monitoring/` (secrets stay on CT 231 / Kuma)           |
+| Lab metrics / Grafana      | `deploy/setup/misc/monitoring/` (secrets stay on CT 231 / Pi / Kuma)      |
 | PVE setup manual           | `deploy/docs/setup-pve-node.usage.txt`                                    |
 | PVE step count / skip      | `PVE_SETUP_LAST_STEP`, `_skip_pve_step` in `setup-pve-node.sh`            |
 | SSH to PVE                 | `PAPITA_SSH_PASSWORD` env or SSH keys                                     |
