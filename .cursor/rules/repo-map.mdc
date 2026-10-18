@@ -44,7 +44,7 @@ papita-proxmox-lab/
 │   │   │   ├── qdevice-server-bootstrap.sh
 │   │   │   ├── papita-node-qdevice-client.sh
 │   │   │   └── papita-cluster-quorum-ha.sh
-│   │   └── misc/monitoring/           # Grafana/Prometheus/Kuma (no secrets)
+│   │   └── misc/monitoring/           # Prometheus/Grafana(Pi)/Kuma (no secrets)
 │   │       ├── k8s-monitor/           # CT 231 compose, scrape, rules, dashboards
 │   │       ├── kubernetes/            # kube-state-metrics, node-exporter, Prometheus SA
 │   │       └── papita-*.sh / papita_uptime_kuma_bootstrap.py

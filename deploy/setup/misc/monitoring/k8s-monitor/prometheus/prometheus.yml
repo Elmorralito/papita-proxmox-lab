@@ -135,3 +135,12 @@ scrape_configs:
         labels:
           cluster: pvecm-oldtimers
           role: pve-node
+
+  # Dedicated QDevice host (corosync-qnetd + Grafana); not a PVE member.
+  - job_name: qdevice
+    static_configs:
+      - targets:
+          - 172.16.0.99:9100
+        labels:
+          cluster: pvecm-oldtimers
+          role: qdevice

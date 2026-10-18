@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Proxmox CT firewall for k8s-monitor (LXC 231): Grafana / Prometheus / Alertmanager from LAN + Tailscale Grafana.
+# Proxmox CT firewall for k8s-monitor (LXC 231): Prometheus / Alertmanager from LAN (Grafana is on the QDevice Pi).
 set -euo pipefail
 
 VMID="${PAPITA_K8S_MONITOR_VMID:-231}"
@@ -25,10 +25,8 @@ else
 enable: 1
 
 [RULES]
-IN ACCEPT -source ${LAN_CIDR} -p tcp -dport 3000 -log nolog
 IN ACCEPT -source ${LAN_CIDR} -p tcp -dport 9090 -log nolog
 IN ACCEPT -source ${LAN_CIDR} -p tcp -dport 9093 -log nolog
-IN ACCEPT -source ${TS_CIDR} -p tcp -dport 3000 -log nolog
 IN ACCEPT -source ${LAN_CIDR} -p tcp -dport 22 -log nolog
 EOF
 fi

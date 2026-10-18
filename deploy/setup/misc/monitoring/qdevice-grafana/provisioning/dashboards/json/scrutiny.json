@@ -1,0 +1,607 @@
+{
+  "uid": "papita-scrutiny",
+  "title": "Papita TrueNAS disks (Scrutiny)",
+  "tags": ["truenas", "scrutiny", "papita"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5m",
+  "editable": true,
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "annotations": {
+    "list": []
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Disks monitored",
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "papita-scrutiny"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "papita-scrutiny"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/api/summary",
+          "url_options": {
+            "method": "GET",
+            "data": ""
+          },
+          "root_selector": "$filter($each(data.summary, function($v, $k) {\n  {\n    \"wwn\": $k,\n    \"device\": $v.device.device_name,\n    \"model\": $v.device.model_name,\n    \"serial\": $v.device.serial_number,\n    \"protocol\": $v.device.device_protocol,\n    \"capacity\": $v.device.capacity,\n    \"status\": $v.device.device_status,\n    \"failed\": $v.device.device_status > 0 ? 1 : 0,\n    \"archived\": $v.device.archived = true,\n    \"temp\": $v.smart.temp,\n    \"power_on_hours\": $v.smart.power_on_hours,\n    \"last_seen\": $v.smart.collector_date\n  }\n}), function($r) { $r.archived = false })",
+          "columns": [
+            {
+              "selector": "device",
+              "text": "Device",
+              "type": "string"
+            },
+            {
+              "selector": "model",
+              "text": "Model",
+              "type": "string"
+            },
+            {
+              "selector": "serial",
+              "text": "Serial",
+              "type": "string"
+            },
+            {
+              "selector": "protocol",
+              "text": "Protocol",
+              "type": "string"
+            },
+            {
+              "selector": "capacity",
+              "text": "Capacity",
+              "type": "number"
+            },
+            {
+              "selector": "status",
+              "text": "Status",
+              "type": "number"
+            },
+            {
+              "selector": "failed",
+              "text": "failed",
+              "type": "number"
+            },
+            {
+              "selector": "temp",
+              "text": "Temp",
+              "type": "number"
+            },
+            {
+              "selector": "power_on_hours",
+              "text": "Power-on",
+              "type": "number"
+            },
+            {
+              "selector": "last_seen",
+              "text": "Last collected",
+              "type": "timestamp"
+            },
+            {
+              "selector": "wwn",
+              "text": "WWN",
+              "type": "string"
+            }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": ["count"],
+          "fields": "/^failed$/"
+        },
+        "colorMode": "value"
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Disks failing",
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 8,
+        "y": 0
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "papita-scrutiny"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "papita-scrutiny"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/api/summary",
+          "url_options": {
+            "method": "GET",
+            "data": ""
+          },
+          "root_selector": "$filter($each(data.summary, function($v, $k) {\n  {\n    \"wwn\": $k,\n    \"device\": $v.device.device_name,\n    \"model\": $v.device.model_name,\n    \"serial\": $v.device.serial_number,\n    \"protocol\": $v.device.device_protocol,\n    \"capacity\": $v.device.capacity,\n    \"status\": $v.device.device_status,\n    \"failed\": $v.device.device_status > 0 ? 1 : 0,\n    \"archived\": $v.device.archived = true,\n    \"temp\": $v.smart.temp,\n    \"power_on_hours\": $v.smart.power_on_hours,\n    \"last_seen\": $v.smart.collector_date\n  }\n}), function($r) { $r.archived = false })",
+          "columns": [
+            {
+              "selector": "device",
+              "text": "Device",
+              "type": "string"
+            },
+            {
+              "selector": "model",
+              "text": "Model",
+              "type": "string"
+            },
+            {
+              "selector": "serial",
+              "text": "Serial",
+              "type": "string"
+            },
+            {
+              "selector": "protocol",
+              "text": "Protocol",
+              "type": "string"
+            },
+            {
+              "selector": "capacity",
+              "text": "Capacity",
+              "type": "number"
+            },
+            {
+              "selector": "status",
+              "text": "Status",
+              "type": "number"
+            },
+            {
+              "selector": "failed",
+              "text": "failed",
+              "type": "number"
+            },
+            {
+              "selector": "temp",
+              "text": "Temp",
+              "type": "number"
+            },
+            {
+              "selector": "power_on_hours",
+              "text": "Power-on",
+              "type": "number"
+            },
+            {
+              "selector": "last_seen",
+              "text": "Last collected",
+              "type": "timestamp"
+            },
+            {
+              "selector": "wwn",
+              "text": "WWN",
+              "type": "string"
+            }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": ["sum"],
+          "fields": "/^failed$/"
+        },
+        "colorMode": "value"
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Hottest disk",
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 16,
+        "y": 0
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "papita-scrutiny"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "papita-scrutiny"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/api/summary",
+          "url_options": {
+            "method": "GET",
+            "data": ""
+          },
+          "root_selector": "$filter($each(data.summary, function($v, $k) {\n  {\n    \"wwn\": $k,\n    \"device\": $v.device.device_name,\n    \"model\": $v.device.model_name,\n    \"serial\": $v.device.serial_number,\n    \"protocol\": $v.device.device_protocol,\n    \"capacity\": $v.device.capacity,\n    \"status\": $v.device.device_status,\n    \"failed\": $v.device.device_status > 0 ? 1 : 0,\n    \"archived\": $v.device.archived = true,\n    \"temp\": $v.smart.temp,\n    \"power_on_hours\": $v.smart.power_on_hours,\n    \"last_seen\": $v.smart.collector_date\n  }\n}), function($r) { $r.archived = false })",
+          "columns": [
+            {
+              "selector": "device",
+              "text": "Device",
+              "type": "string"
+            },
+            {
+              "selector": "model",
+              "text": "Model",
+              "type": "string"
+            },
+            {
+              "selector": "serial",
+              "text": "Serial",
+              "type": "string"
+            },
+            {
+              "selector": "protocol",
+              "text": "Protocol",
+              "type": "string"
+            },
+            {
+              "selector": "capacity",
+              "text": "Capacity",
+              "type": "number"
+            },
+            {
+              "selector": "status",
+              "text": "Status",
+              "type": "number"
+            },
+            {
+              "selector": "failed",
+              "text": "failed",
+              "type": "number"
+            },
+            {
+              "selector": "temp",
+              "text": "Temp",
+              "type": "number"
+            },
+            {
+              "selector": "power_on_hours",
+              "text": "Power-on",
+              "type": "number"
+            },
+            {
+              "selector": "last_seen",
+              "text": "Last collected",
+              "type": "timestamp"
+            },
+            {
+              "selector": "wwn",
+              "text": "WWN",
+              "type": "string"
+            }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 45
+              },
+              {
+                "color": "red",
+                "value": 55
+              }
+            ]
+          },
+          "unit": "celsius"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": ["max"],
+          "fields": "/^temp$/"
+        },
+        "colorMode": "value"
+      }
+    },
+    {
+      "id": 4,
+      "type": "table",
+      "title": "Disks (Scrutiny on TrueNAS)",
+      "gridPos": {
+        "h": 14,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "papita-scrutiny"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "papita-scrutiny"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/api/summary",
+          "url_options": {
+            "method": "GET",
+            "data": ""
+          },
+          "root_selector": "$filter($each(data.summary, function($v, $k) {\n  {\n    \"wwn\": $k,\n    \"device\": $v.device.device_name,\n    \"model\": $v.device.model_name,\n    \"serial\": $v.device.serial_number,\n    \"protocol\": $v.device.device_protocol,\n    \"capacity\": $v.device.capacity,\n    \"status\": $v.device.device_status,\n    \"failed\": $v.device.device_status > 0 ? 1 : 0,\n    \"archived\": $v.device.archived = true,\n    \"temp\": $v.smart.temp,\n    \"power_on_hours\": $v.smart.power_on_hours,\n    \"last_seen\": $v.smart.collector_date\n  }\n}), function($r) { $r.archived = false })",
+          "columns": [
+            {
+              "selector": "device",
+              "text": "Device",
+              "type": "string"
+            },
+            {
+              "selector": "model",
+              "text": "Model",
+              "type": "string"
+            },
+            {
+              "selector": "serial",
+              "text": "Serial",
+              "type": "string"
+            },
+            {
+              "selector": "protocol",
+              "text": "Protocol",
+              "type": "string"
+            },
+            {
+              "selector": "capacity",
+              "text": "Capacity",
+              "type": "number"
+            },
+            {
+              "selector": "status",
+              "text": "Status",
+              "type": "number"
+            },
+            {
+              "selector": "failed",
+              "text": "failed",
+              "type": "number"
+            },
+            {
+              "selector": "temp",
+              "text": "Temp",
+              "type": "number"
+            },
+            {
+              "selector": "power_on_hours",
+              "text": "Power-on",
+              "type": "number"
+            },
+            {
+              "selector": "last_seen",
+              "text": "Last collected",
+              "type": "timestamp"
+            },
+            {
+              "selector": "wwn",
+              "text": "WWN",
+              "type": "string"
+            }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Status"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "text": "Passed",
+                        "color": "green",
+                        "index": 0
+                      },
+                      "1": {
+                        "text": "Failed (SMART)",
+                        "color": "red",
+                        "index": 1
+                      },
+                      "2": {
+                        "text": "Failed (Scrutiny)",
+                        "color": "orange",
+                        "index": 2
+                      },
+                      "3": {
+                        "text": "Failed (SMART + Scrutiny)",
+                        "color": "red",
+                        "index": 3
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Capacity"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Temp"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "celsius"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 45
+                    },
+                    {
+                      "color": "red",
+                      "value": 55
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Power-on"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "h"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "failed"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "displayName": "Device",
+            "desc": false
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -72,15 +72,15 @@ Required: `-e dev\|prod`. Optional: `--env-file`, AWS SSO/MFA, `--pre-commit`, a
 
 ### Proxmox (`deploy/proxmox.sh`)
 
-| Action                         | Purpose                                                  |
-| ------------------------------ | -------------------------------------------------------- |
-| `setup-node`                   | SCP `deploy/setup/` to node, run `setup-pve-node.sh`     |
-| `setup-cluster-ha`             | QDevice client on all nodes + TrueNAS NFS + HA group     |
-| `setup-monitoring`             | Deploy Grafana/Prometheus tree to CT 231 + node-exporter |
-| `get-temp`                     | Cluster temperature via `sensors -j` (step 5)            |
-| `start-cluster`                | WoL peer nodes via `pvenode wakeonlan`                   |
-| `stop-cluster`                 | Per-node `pvesh stopall` + hypervisor shutdown           |
-| `cluster-nodes` / `local-node` | Discovery helpers                                        |
+| Action                         | Purpose                                              |
+| ------------------------------ | ---------------------------------------------------- |
+| `setup-node`                   | SCP `deploy/setup/` to node, run `setup-pve-node.sh` |
+| `setup-cluster-ha`             | QDevice client on all nodes + TrueNAS NFS + HA group |
+| `setup-monitoring`             | Deploy Prometheus/AM tree to CT 231 + node-exporter  |
+| `get-temp`                     | Cluster temperature via `sensors -j` (step 5)        |
+| `start-cluster`                | WoL peer nodes via `pvenode wakeonlan`               |
+| `stop-cluster`                 | Per-node `pvesh stopall` + hypervisor shutdown       |
+| `cluster-nodes` / `local-node` | Discovery helpers                                    |
 
 SSH: ControlMaster multiplexing; password via `PAPITA_SSH_PASSWORD` or keys. **Must source `utils.sh` before calling `log`.**
 

@@ -31,6 +31,16 @@ groups:
           summary: "PVE node-exporter down on {{ $labels.instance }}"
           description: "prometheus-node-exporter :9100 unreachable for 5m."
 
+      - alert: QDeviceHostDown
+        expr: up{job="qdevice"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          cluster: pvecm-oldtimers
+        annotations:
+          summary: "QDevice host {{ $labels.instance }} unreachable"
+          description: "node-exporter on the corosync-qnetd Pi is down for 5m; the cluster tie-breaker vote (and Grafana) may be gone."
+
       - alert: PVENodeHighCPU
         expr: papita:pve_cpu_busy_ratio > 0.85
         for: 15m
