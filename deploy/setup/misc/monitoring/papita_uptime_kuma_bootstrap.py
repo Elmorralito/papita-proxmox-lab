@@ -229,7 +229,7 @@ def main() -> int:
     bot_token = _env("TELEGRAM_BOT_TOKEN")
     chat_id = _env("TELEGRAM_CHAT_ID")
     pfsense_ip = _env("PFSENSE_IP", "172.16.0.1")
-    truenas_ip = _env("TRUENAS_IP", "172.16.0.100")
+    truenas_ip = _env("TRUENAS_IP", "172.16.0.236")
     pve_ips = _parse_ips(_env("PVE_NODE_IPS", "172.16.0.101,172.16.0.102,172.16.0.103"))
     creds_file = _env("UPTIME_KUMA_CREDENTIALS_FILE", "/root/deploy/misc/monitoring/uptime-kuma.credentials")
 

@@ -17,8 +17,8 @@ datasources:
     uid: papita-scrutiny
     type: yesoreyeram-infinity-datasource
     access: proxy
-    url: http://172.16.0.100:31054
+    url: http://172.16.0.236:31054
     editable: false
     jsonData:
       allowedHosts:
-        - http://172.16.0.100:31054
+        - http://172.16.0.236:31054

@@ -29,7 +29,7 @@ Versioned scripts, Prometheus scrape/rule config, Grafana dashboard JSON, Kubern
 - Prometheus: `http://172.16.20.11:9090`
 - Alertmanager: `http://172.16.20.11:9093`
 - PVE node-exporter: `172.16.0.101–104:9100`; QDevice Pi node-exporter: `172.16.0.99:9100` (job `qdevice`)
-- Scrutiny (TrueNAS app): `http://172.16.0.100:31054` (read by Grafana's Infinity datasource via `/api/summary`)
+- Scrutiny (TrueNAS app): `http://172.16.0.236:31054` (read by Grafana's Infinity datasource via `/api/summary`)
 - k8s API VIP: `https://172.16.30.10:6443`
 
 ## Apply (workstation)

@@ -410,7 +410,7 @@ This lab runs a **4-node** cluster (`pve-001` … `004`) on LAN `172.16.0.0/16`.
 | Component    | Lab default                                                                                | Role                                                        |
 | ------------ | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------- |
 | QDevice host | `172.16.0.99` (`deploy/setup/misc/cluster/default.qdevice.host`; Tailscale `100.81.26.61`) | Runs `corosync-qnetd` — **not** a PVE node, **not** TrueNAS |
-| TrueNAS NFS  | `172.16.0.100` (`default.truenas.nfs.env`)                                                 | Shared storage (`truenas-nfs-main` + misc content IDs)      |
+| TrueNAS NFS  | `172.16.0.236` (`default.truenas.nfs.env`)                                                 | Shared storage (`truenas-nfs-main` + misc content IDs)      |
 | PVE nodes    | `corosync-qdevice` + `softdog`                                                             | QDevice client + watchdog fencing                           |
 
 **Do not** point QDevice at `172.16.0.102` — that is `pve-002`. **Do not** enroll guests whose disks are on `local` / `local-lvm` (pfSense included).
@@ -444,7 +444,7 @@ Installs `corosync-qdevice` and loads **softdog** (`/dev/watchdog*`) for HA fenc
 
 #### Cluster-wide: QDevice + NFS + HA rules
 
-1. Edit `deploy/setup/misc/cluster/default.truenas.nfs.env` — set `TRUENAS_NFS_EXPORT` to your TrueNAS NFS path (TrueNAS **Sharing → NFS** on `172.16.0.100`).
+1. Edit `deploy/setup/misc/cluster/default.truenas.nfs.env` — set `TRUENAS_NFS_EXPORT` to your TrueNAS NFS path (TrueNAS **Sharing → NFS** on `172.16.0.236`).
 2. Ensure the NFS export allows all PVE node LAN IPs.
 3. From your workstation (main node LAN IP):
 
@@ -455,7 +455,7 @@ Installs `corosync-qdevice` and loads **softdog** (`/dev/watchdog*`) for HA fenc
 This deploys `misc/cluster/`, runs the node client on **every online member**, then on the entry host:
 
 - Adds cluster firewall allow for TrueNAS (if `cluster.fw` exists)
-- `pvesm add nfs` for `truenas-nfs-main` and misc content exports → `172.16.0.100`
+- `pvesm add nfs` for `truenas-nfs-main` and misc content exports → `172.16.0.236`
 - `pvecm qdevice setup <QDEVICE_IP>` when `172.16.0.99` is up with `corosync-qnetd` (Tailscale `100.81.26.61` only if LAN is unreachable)
 - PVE 9: `ha-manager rules add node-affinity papita-ha` (HA groups are gone; rules require `--resources`)
 
@@ -494,7 +494,7 @@ pvecm qdevice remove
 ```
 
 > [!WARNING]
-> Do **not** use TrueNAS (`172.16.0.100`) as the QDevice host. Do **not** leave `pvecm expected 1` as a permanent quorum workaround. Enable **softdog on all nodes before** adding HA resources.
+> Do **not** use TrueNAS (`172.16.0.236`) as the QDevice host. Do **not** leave `pvecm expected 1` as a permanent quorum workaround. Enable **softdog on all nodes before** adding HA resources.
 
 ---
 
@@ -1265,7 +1265,7 @@ In [Tailscale admin → DNS](https://login.tailscale.com/admin/dns):
 
 ## TrueNAS Scale — storage pools, Scrutiny, and Uptime Kuma
 
-This section covers **TrueNAS Scale** storage pool behaviour, the **Scrutiny** SMART app, and **Uptime Kuma** monitoring for a homelab with **pfSense** and a **3-node Proxmox VE** cluster (`pvenode-001` … `003`, LAN `172.16.0.0/16`, gateway `172.16.0.1`).
+This section covers **TrueNAS Scale** storage pool behaviour, the **Scrutiny** SMART app, and **Uptime Kuma** monitoring for a homelab with **pfSense** and a **4-node Proxmox VE** cluster (`pve-001` … `004`, LAN `172.16.0.0/16`, gateway `172.16.0.1`).
 
 **References:**
 

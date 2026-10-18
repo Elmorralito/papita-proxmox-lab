@@ -41,8 +41,8 @@ Expected shape:
         "TRUENAS_API_KEY": "<redacted>",
         "TRUENAS_VERIFY_SSL": "false",
         "TRUENAS_WS_PATH": "/websocket",
-        "TRUENAS_LAB_HA_POOL_NAME": "pve-cluster-oldtimers-ha-storage",
-        "TRUENAS_LAB_NFS_EXPORT": "/mnt/pve-cluster-oldtimers-ha-storage/pve-nfs",
+        "TRUENAS_LAB_HA_POOL_NAME": "main_data_storage",
+        "TRUENAS_LAB_NFS_EXPORT": "/mnt/main_data_storage",
         "TRUENAS_LAB_SCRUTINY_APP_NAME": "scrutiny",
         "TRUENAS_LOG_LEVEL": "INFO"
       }
@@ -65,7 +65,7 @@ Usage:
 1. Discover tools in namespace matching `truenas` / `truenas_`. If none: reload MCP from the profile `mcp.json`, then Fallback.
 2. Creds: profile `mcp.json` `env` first; else `TRUENAS_*`. Never print `TRUENAS_API_KEY`.
 3. Auth is the API key from TrueNAS UI → **My API Keys** (shown once). Prefer a dedicated service user. See [API_KEY_SETUP.md](../../../mcp/truenas-mcp/docs/API_KEY_SETUP.md).
-4. `TRUENAS_HOST` = NAS address, no `https://`. Lab default in repo docs: `172.16.0.100`. Live host may differ — use `mcp.json`, not the README, as source of truth.
+4. `TRUENAS_HOST` = NAS address, no `https://`. Lab default in repo docs: `172.16.0.236`. Live host may differ — use `mcp.json`, not the README, as source of truth.
 5. `TRUENAS_VERIFY_SSL` defaults **false** (self-signed homelab certs). Set `true` only with a trusted CA.
 6. Connect/auth fail after a SCALE upgrade → try `TRUENAS_WS_PATH=/api/v2.0/websocket` (25.04+ default is `/websocket`).
 7. HTTP 401 / WS auth error → key missing, revoked, or host unreachable. Confirm `:443` from this workstation (LAN or Tailscale). SSH to the NAS is often disabled; do not assume CLI fallback.

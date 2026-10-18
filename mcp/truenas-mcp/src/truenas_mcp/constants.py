@@ -2,9 +2,9 @@
 
 DEFAULT_WS_PATH = "/websocket"
 DEFAULT_WS_TIMEOUT_SEC = 60.0
-LAB_TRUENAS_HOST = "172.16.0.100"
-LAB_HA_POOL_NAME = "pve-cluster-oldtimers-ha-storage"
-LAB_NFS_EXPORT = "/mnt/pve-cluster-oldtimers-ha-storage/pve-nfs"
+LAB_TRUENAS_HOST = "172.16.0.236"
+LAB_HA_POOL_NAME = "main_data_storage"
+LAB_NFS_EXPORT = "/mnt/main_data_storage"
 LAB_SCRUTINY_APP_NAME = "scrutiny"
 LAB_CLUSTER_NAME = "pvecm-oldtimers"
 TNAS_TESTED_MAJOR_VERSION = "25"

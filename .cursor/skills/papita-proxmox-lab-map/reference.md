@@ -99,7 +99,7 @@ Last aligned to repo tree (~46 tracked files). Gitignored paths listed separatel
 | File                            | Role                                                          |
 | ------------------------------- | ------------------------------------------------------------- |
 | `default.qdevice.host`          | Dedicated QDevice IP (`corosync-qnetd`; not PVE, not TrueNAS) |
-| `default.truenas.nfs.env`       | TrueNAS NFS + HA group defaults (`172.16.0.100`)              |
+| `default.truenas.nfs.env`       | TrueNAS NFS + HA group defaults (`172.16.0.236`)              |
 | `qdevice-server-bootstrap.sh`   | Run on QDevice host: install `corosync-qnetd`                 |
 | `papita-node-qdevice-client.sh` | Per PVE node: `corosync-qdevice` + `softdog` (step 18)        |
 | `papita-cluster-quorum-ha.sh`   | Cluster: NFS storage, `pvecm qdevice setup`, HA group         |

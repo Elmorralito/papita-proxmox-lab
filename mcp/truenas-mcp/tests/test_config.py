@@ -15,45 +15,45 @@ def _isolate_truenas_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_settings_valid() -> None:
-    settings = TnasSettings(host="172.16.0.100", api_key="test-key", port=443)
-    assert settings.ws_uri == "wss://172.16.0.100:443/websocket"
+    settings = TnasSettings(host="172.16.0.236", api_key="test-key", port=443)
+    assert settings.ws_uri == "wss://172.16.0.236:443/websocket"
     assert settings.verify_ssl is False
     assert settings.log_level == "INFO"
 
 
 def test_settings_custom_ws_path() -> None:
     settings = TnasSettings(
-        host="172.16.0.100",
+        host="172.16.0.236",
         api_key="test-key",
         port=443,
         ws_path="/api/v2.0/websocket",
     )
-    assert settings.ws_uri == "wss://172.16.0.100:443/api/v2.0/websocket"
+    assert settings.ws_uri == "wss://172.16.0.236:443/api/v2.0/websocket"
 
 
 def test_settings_log_level_normalized() -> None:
-    settings = TnasSettings(host="172.16.0.100", api_key="test-key", log_level="debug")
+    settings = TnasSettings(host="172.16.0.236", api_key="test-key", log_level="debug")
     assert settings.log_level == "DEBUG"
 
 
 def test_settings_rejects_invalid_log_level() -> None:
     with pytest.raises(ValueError, match="Invalid log level"):
-        TnasSettings(host="172.16.0.100", api_key="k", log_level="VERBOSE")
+        TnasSettings(host="172.16.0.236", api_key="k", log_level="VERBOSE")
 
 
 def test_settings_rejects_scheme() -> None:
     with pytest.raises(ValueError, match="scheme"):
-        TnasSettings(host="https://172.16.0.100", api_key="k")
+        TnasSettings(host="https://172.16.0.236", api_key="k")
 
 
 def test_settings_requires_api_key() -> None:
     with pytest.raises(ValueError, match="TRUENAS_API_KEY"):
-        TnasSettings(host="172.16.0.100", api_key="")
+        TnasSettings(host="172.16.0.236", api_key="")
 
 
 def test_settings_rejects_placeholder_key() -> None:
     with pytest.raises(ValueError, match="placeholder"):
-        TnasSettings(host="172.16.0.100", api_key="REPLACE_FROM_SECRET_STORE")
+        TnasSettings(host="172.16.0.236", api_key="REPLACE_FROM_SECRET_STORE")
 
 
 def test_settings_allows_hostname() -> None:

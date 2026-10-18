@@ -54,7 +54,7 @@ class ConfirmInput(BaseModel):
 class CreateDatasetInput(ConfirmInput):
     """Create a ZFS dataset under a pool."""
 
-    pool: str = Field(description="Pool name (e.g. pve-cluster-oldtimers-ha-storage)")
+    pool: str = Field(description="Pool name (e.g. main_data_storage)")
     name: str = Field(description="Dataset name segment (e.g. pve-nfs)")
     dataset_type: str = Field(default="FILESYSTEM", description="ZFS dataset type")
 
