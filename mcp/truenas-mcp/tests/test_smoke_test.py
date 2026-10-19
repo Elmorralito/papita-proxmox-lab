@@ -47,13 +47,13 @@ def test_smoke_core_failed_when_auth_fails() -> None:
 
 
 def test_check_config_valid() -> None:
-    settings = TnasSettings(host="172.16.0.100", api_key="test-key")
+    settings = TnasSettings(host="172.16.0.236", api_key="test-key")
     assert _check_config_valid(settings)["status"] == "pass"
 
 
 @pytest.mark.asyncio
 async def test_run_smoke_tests_stops_after_auth_failure() -> None:
-    settings = TnasSettings(host="172.16.0.100", api_key="test-key")
+    settings = TnasSettings(host="172.16.0.236", api_key="test-key")
     client = AsyncMock()
     client.call.side_effect = RuntimeError("auth failed")
 
@@ -70,7 +70,7 @@ async def test_run_smoke_tests_stops_after_auth_failure() -> None:
 
 @pytest.mark.asyncio
 async def test_run_smoke_tests_basic_success() -> None:
-    settings = TnasSettings(host="172.16.0.100", api_key="test-key")
+    settings = TnasSettings(host="172.16.0.236", api_key="test-key")
 
     async def fake_call(method: str, params: list[Any] | None = None) -> Any:
         if method == "system.state":
@@ -78,11 +78,11 @@ async def test_run_smoke_tests_basic_success() -> None:
         if method == "system.info":
             return {"hostname": "nas", "version": "25.10.0"}
         if method == "pool.query":
-            return [{"name": "pve-cluster-oldtimers-ha-storage", "status": "ONLINE"}]
+            return [{"name": "main_data_storage", "status": "ONLINE"}]
         if method == "alert.list":
             return []
         if method == "sharing.nfs.query":
-            return [{"enabled": True, "path": "/mnt/pve-cluster-oldtimers-ha-storage/pve-nfs"}]
+            return [{"enabled": True, "path": "/mnt/main_data_storage"}]
         if method == "pool.dataset.query":
             return [{"name": "tank/data"}]
         if method == "disk.query":

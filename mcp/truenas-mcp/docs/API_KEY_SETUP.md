@@ -6,7 +6,7 @@ Create a dedicated local user and API key on TrueNAS. **Do not** use the primary
 
 - TrueNAS SCALE **25.04+** (WebSocket API at `wss://host/websocket`)
 - HTTPS enabled on TrueNAS (port **443**)
-- Workstation can reach TrueNAS on LAN (`172.16.0.100`) or Tailscale
+- Workstation can reach TrueNAS on LAN (`172.16.0.236`) or Tailscale
 
 ## 2. Create service user (recommended)
 
@@ -30,7 +30,7 @@ In `~/.cursor/mcp.json` (after `./deploy/mcp.sh cursor-sync`):
 ```json
 "truenas": {
   "env": {
-    "TRUENAS_HOST": "172.16.0.100",
+    "TRUENAS_HOST": "172.16.0.236",
     "TRUENAS_API_KEY": "paste-key-here",
     "TRUENAS_VERIFY_SSL": "false"
   }
@@ -40,7 +40,7 @@ In `~/.cursor/mcp.json` (after `./deploy/mcp.sh cursor-sync`):
 Or export for CLI smoke tests:
 
 ```bash
-export TRUENAS_HOST=172.16.0.100
+export TRUENAS_HOST=172.16.0.236
 export TRUENAS_API_KEY='your-key'
 export TRUENAS_VERIFY_SSL=false
 poetry run truenas-mcp-smoke

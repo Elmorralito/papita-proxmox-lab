@@ -32,14 +32,14 @@ See [docs/SMOKE_TESTS.md](./docs/SMOKE_TESTS.md) for the full matrix.
 
 | Variable                        | Default                                         | Description                                            |
 | ------------------------------- | ----------------------------------------------- | ------------------------------------------------------ |
-| `TRUENAS_HOST`                  | _(required)_                                    | Hostname or IP (e.g. `172.16.0.100` or Tailscale DNS)  |
+| `TRUENAS_HOST`                  | _(required)_                                    | Hostname or IP (e.g. `172.16.0.236` or Tailscale DNS)  |
 | `TRUENAS_PORT`                  | `443`                                           | HTTPS/WSS port                                         |
 | `TRUENAS_API_KEY`               | _(required)_                                    | API key from TrueNAS UI                                |
 | `TRUENAS_VERIFY_SSL`            | `false`                                         | Set `true` when using a trusted CA cert                |
 | `TRUENAS_WS_PATH`               | `/websocket`                                    | WebSocket path (`/api/v2.0/websocket` on older builds) |
 | `TRUENAS_WS_PING_INTERVAL_SEC`  | `30`                                            | WebSocket keepalive ping interval (`0` disables)       |
-| `TRUENAS_LAB_HA_POOL_NAME`      | `pve-cluster-oldtimers-ha-storage`              | Expected HA ZFS pool                                   |
-| `TRUENAS_LAB_NFS_EXPORT`        | `/mnt/pve-cluster-oldtimers-ha-storage/pve-nfs` | NFS export path                                        |
+| `TRUENAS_LAB_HA_POOL_NAME`      | `main_data_storage`              | Expected HA ZFS pool                                   |
+| `TRUENAS_LAB_NFS_EXPORT`        | `/mnt/main_data_storage` | NFS export path                                        |
 | `TRUENAS_LAB_SCRUTINY_APP_NAME` | `scrutiny`                                      | Scrutiny app name in `app.query`                       |
 | `TRUENAS_LAB_CONFIG_FILE`       | _(optional)_                                    | Path to `default.truenas.nfs.env` overlay              |
 | `TRUENAS_LOG_LEVEL`             | `INFO`                                          | stderr JSON log level                                  |

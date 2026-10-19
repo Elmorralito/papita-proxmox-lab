@@ -13,7 +13,7 @@ GRAFANA_UNIT="${PAPITA_GRAFANA_UNIT:-grafana-server}"
 GRAFANA_PORT="${PAPITA_GRAFANA_PORT:-3000}"
 GRAFANA_ROOT_URL="${PAPITA_GRAFANA_ROOT_URL:-http://172.16.0.99:${GRAFANA_PORT}}"
 PROMETHEUS_URL="${PAPITA_PROMETHEUS_URL:-http://172.16.20.11:9090}"
-SCRUTINY_URL="${PAPITA_SCRUTINY_URL:-http://172.16.0.100:31054}"
+SCRUTINY_URL="${PAPITA_SCRUTINY_URL:-http://172.16.0.236:31054}"
 INFINITY_PLUGIN="yesoreyeram-infinity-datasource"
 ENV_FILE=/etc/grafana/papita.env
 PROV_DIR=/etc/grafana/provisioning
@@ -152,6 +152,7 @@ echo "[INFO] Provisioning datasources and Papita dashboards..."
 install -d -m 0755 "${PROV_DIR}/datasources" "${PROV_DIR}/dashboards/json"
 sed \
     -e "s#http://172.16.20.11:9090#${PROMETHEUS_URL}#g" \
+    -e "s#http://172.16.0.236:31054#${SCRUTINY_URL}#g" \
     -e "s#http://172.16.0.100:31054#${SCRUTINY_URL}#g" \
     "${SRC}/provisioning/datasources/papita.yml" >"${PROV_DIR}/datasources/papita.yml"
 chmod 644 "${PROV_DIR}/datasources/papita.yml"

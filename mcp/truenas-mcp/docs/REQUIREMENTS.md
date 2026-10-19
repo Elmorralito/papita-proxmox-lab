@@ -16,7 +16,7 @@ Onboarding: [README.md](../README.md). API key setup: [API_KEY_SETUP.md](./API_K
 
 ## 1. Executive summary
 
-- **Goal:** Typed MCP server so agents **inspect** TrueNAS storage health in this lab without WebGUI or ad-hoc scripts — especially for **Proxmox HA NFS** on `172.16.0.100`.
+- **Goal:** Typed MCP server so agents **inspect** TrueNAS storage health in this lab without WebGUI or ad-hoc scripts — especially for **Proxmox HA NFS** on `172.16.0.236`.
 - **API:** Official TrueNAS middleware over **WebSocket JSON-RPC** (`wss://host/websocket`); REST deprecated in 25.04+, removed in 26.x.
 - **v1 delivered:** **Read-only** — 10 MCP tools (v0.1).
 - **v1.1 delivered:** +5 read tools (API key check, SMART, alert policies, reporting, apps/Scrutiny).
@@ -33,7 +33,7 @@ Onboarding: [README.md](../README.md). API key setup: [API_KEY_SETUP.md](./API_K
 | Source                    | Operation                    | Mechanism                           | Read / Write        | API mapping                                 | MCP v1                                                        |
 | ------------------------- | ---------------------------- | ----------------------------------- | ------------------- | ------------------------------------------- | ------------------------------------------------------------- |
 | `deploy/proxmox.sh`       | `setup-cluster-ha`           | SSH → `papita-cluster-quorum-ha.sh` | Write               | `pvesm add nfs`, ping NFS                   | **Partial** — NFS export verify via `truenas_list_nfs_shares` |
-| `default.truenas.nfs.env` | NFS server/export defaults   | Env file                            | Config              | `172.16.0.100`, export path                 | **Partial** — warnings in `truenas_system_summary`            |
+| `default.truenas.nfs.env` | NFS server/export defaults   | Env file                            | Config              | `172.16.0.236`, export path                 | **Partial** — warnings in `truenas_system_summary`            |
 | `docs/TIPSNTRICKS.md`     | Pool health, SMART, Scrutiny | Manual WebGUI + apps                | Read                | `pool.query`, `disk.*`, `smart.*`           | **Partial** — pools/disks; no Scrutiny API                    |
 | `docs/TIPSNTRICKS.md`     | HA verify                    | `pvesm status`, `ha-manager status` | Read                | PVE-side only                               | **N/A** — use proxmox-ve MCP                                  |
 | `docs/TIPSNTRICKS.md`     | Uptime Kuma / monitoring     | TrueNAS apps                        | Read                | No unified app health API                   | **N/A** — out of v1                                           |
@@ -44,7 +44,7 @@ Onboarding: [README.md](../README.md). API key setup: [API_KEY_SETUP.md](./API_K
 ```text
 Workstation (Cursor / deploy scripts)
     │
-    ├── LAN 172.16.0.0/16 ──► TrueNAS 172.16.0.100:443 (wss://)
+    ├── LAN 172.16.0.0/16 ──► TrueNAS 172.16.0.236:443 (wss://)
     │                             └── MCP entry point (API key)
     │
     └── Tailscale 100.x ──► optional (hostname allowed in TRUENAS_HOST)
@@ -93,7 +93,7 @@ Workstation (Cursor / deploy scripts)
 | BR-007 | **Revocable** API key access               | Must     | Rotation doc; dedicated service user               | **Doc**     | `API_KEY_SETUP.md`                                               |
 | BR-008 | Faster incident diagnosis                  | Should   | Summary aggregates alerts/pools/jobs               | **Met**     | `truenas_system_summary`                                         |
 | BR-009 | Complement **proxmox-ve MCP**              | Should   | Cross-hints in summary meta                        | **Met**     | `proxmox_hint` in `system.py`                                    |
-| BR-010 | **Papita conventions**                     | Must     | `172.16.0.100`, export path constants              | **Met**     | `constants.py`                                                   |
+| BR-010 | **Papita conventions**                     | Must     | `172.16.0.236`, export path constants              | **Met**     | `constants.py`                                                   |
 | BR-011 | Acknowledge **official MCP** exists        | Must     | README + this doc                                  | **Met**     | README § Official alternatives                                   |
 
 ---

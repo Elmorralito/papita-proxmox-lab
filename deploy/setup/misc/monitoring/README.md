@@ -9,7 +9,7 @@ Versioned scripts, Prometheus scrape/rule config, Grafana dashboard JSON, Kubern
 | `k8s-monitor/`                          | Docker Compose stack for LXC **231** (`172.16.20.11`): Prometheus, Alertmanager       |
 | `k8s-monitor/prometheus/prometheus.yml` | Scrape jobs: k8s API SD, kube-state-metrics proxy, PVE `:9100`                        |
 | `k8s-monitor/prometheus/rules/`         | Recording + alerting heuristics (`k8s.yml`, `pve.yml`)                                |
-| `qdevice-grafana/provisioning/`         | Grafana on the QDevice Pi: datasources + dashboards (`papita-k8s/pve/scrutiny`)       |
+| `qdevice-grafana/provisioning/`         | Grafana on the QDevice Pi: datasources + dashboards (`papita-k8s/pve/scrutiny/infra`) |
 | `papita-qdevice-grafana.sh`             | Run **on the QDevice Pi**: install Grafana, Infinity plugin, provisioning, guardrails |
 | `k8s-monitor/alertmanager/`             | Stub receiver (blackhole until Slack/email is wired)                                  |
 | `kubernetes/`                           | In-cluster kube-state-metrics, node-exporter (hostNetwork), Prometheus SA/RBAC        |
@@ -29,7 +29,7 @@ Versioned scripts, Prometheus scrape/rule config, Grafana dashboard JSON, Kubern
 - Prometheus: `http://172.16.20.11:9090`
 - Alertmanager: `http://172.16.20.11:9093`
 - PVE node-exporter: `172.16.0.101–104:9100`; QDevice Pi node-exporter: `172.16.0.99:9100` (job `qdevice`)
-- Scrutiny (TrueNAS app): `http://172.16.0.100:31054` (read by Grafana's Infinity datasource via `/api/summary`)
+- Scrutiny (TrueNAS app): `http://172.16.0.236:31054` (read by Grafana's Infinity datasource via `/api/summary`)
 - k8s API VIP: `https://172.16.30.10:6443`
 
 ## Apply (workstation)
@@ -65,4 +65,6 @@ Guardrails (corosync-qnetd keeps priority): Grafana gets `Nice=10`, `CPUWeight=5
 
 Knobs (env): `PAPITA_GRAFANA_VERSION` (pin + `apt-mark hold`), `PAPITA_PROMETHEUS_URL`, `PAPITA_SCRUTINY_URL`, `PAPITA_GRAFANA_PORT`, `PAPITA_GRAFANA_ROOT_URL`.
 
-The Scrutiny dashboard (`papita-scrutiny`) needs the Infinity plugin (Grafana ≥ 11.6). It shows the current status, temperature, and power-on hours for each disk. Temperature history stays in Scrutiny's own WebUI.
+Combined ops dashboard: **`papita-infra`** (`Papita infra (PVE + TrueNAS)`) — PVE Prometheus panels plus TrueNAS Scrutiny disks in one view. Standalone `papita-pve` and `papita-scrutiny` remain available.
+
+The Scrutiny panels need the Infinity plugin (Grafana ≥ 11.6). They show current status, temperature, and power-on hours per disk. Temperature history stays in Scrutiny's own WebUI.

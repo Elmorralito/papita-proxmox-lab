@@ -5,7 +5,7 @@
       "args": ["run", "truenas-mcp"],
       "cwd": "/absolute/path/to/papita-proxmox-lab",
       "env": {
-        "TRUENAS_HOST": "172.16.0.100",
+        "TRUENAS_HOST": "172.16.0.236",
         "TRUENAS_PORT": "443",
         "TRUENAS_API_KEY": "REPLACE_FROM_SECRET_STORE",
         "TRUENAS_VERIFY_SSL": "false",

@@ -24,7 +24,7 @@ _load_lab_defaults() {
         source "$nfs_env"
     fi
 
-    TRUENAS_NFS_SERVER="${TRUENAS_NFS_SERVER:-172.16.0.100}"
+    TRUENAS_NFS_SERVER="${TRUENAS_NFS_SERVER:-172.16.0.236}"
     TRUENAS_NFS_EXPORT="${TRUENAS_NFS_EXPORT:-/mnt/main/pve}"
     PVE_NFS_STORAGE_ID="${PVE_NFS_STORAGE_ID:-truenas-nfs}"
     PVE_NFS_CONTENT="${PVE_NFS_CONTENT:-images,rootdir,vzdump}"
