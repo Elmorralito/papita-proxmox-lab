@@ -1,0 +1,1130 @@
+{
+  "uid": "papita-infra",
+  "title": "Papita infra (PVE + TrueNAS)",
+  "tags": [
+    "papita",
+    "pve",
+    "truenas",
+    "scrutiny",
+    "infra"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "editable": true,
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "annotations": {
+    "list": []
+  },
+  "links": [
+    {
+      "title": "PVE-only dashboard",
+      "type": "link",
+      "url": "/d/papita-pve/papita-proxmox-ve-cluster",
+      "targetBlank": false
+    },
+    {
+      "title": "Scrutiny-only dashboard",
+      "type": "link",
+      "url": "/d/papita-scrutiny/papita-truenas-disks-scrutiny",
+      "targetBlank": false
+    },
+    {
+      "title": "Scrutiny WebUI",
+      "type": "link",
+      "url": "http://172.16.0.236:31054",
+      "targetBlank": true
+    }
+  ],
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Proxmox VE cluster",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 101,
+      "type": "stat",
+      "title": "PVE nodes up",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": ""
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(up{job=\"pve-nodes\"})",
+          "legendFormat": "{{instance}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": ""
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value"
+      }
+    },
+    {
+      "id": 102,
+      "type": "stat",
+      "title": "CPU busy % (avg)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": ""
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * avg(1 - rate(node_cpu_seconds_total{job=\"pve-nodes\",mode=\"idle\"}[5m]))",
+          "legendFormat": "{{instance}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": ""
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value"
+      }
+    },
+    {
+      "id": 103,
+      "type": "timeseries",
+      "title": "CPU busy % by node",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 9
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": ""
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * (1 - avg by (instance) (rate(node_cpu_seconds_total{job=\"pve-nodes\",mode=\"idle\"}[5m])))",
+          "legendFormat": "{{instance}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": ""
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "spanNulls": true
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 104,
+      "type": "timeseries",
+      "title": "Load average 5m",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 9
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": ""
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "node_load5{job=\"pve-nodes\"}",
+          "legendFormat": "{{instance}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": ""
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 105,
+      "type": "timeseries",
+      "title": "Memory used",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 17
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": ""
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "node_memory_MemTotal_bytes{job=\"pve-nodes\"} - node_memory_MemAvailable_bytes{job=\"pve-nodes\"}",
+          "legendFormat": "{{instance}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": ""
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "spanNulls": true
+          },
+          "unit": "bytes"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 106,
+      "type": "timeseries",
+      "title": "Memory available",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 17
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": ""
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "node_memory_MemAvailable_bytes{job=\"pve-nodes\"}",
+          "legendFormat": "{{instance}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": ""
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "spanNulls": true
+          },
+          "unit": "bytes"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 107,
+      "type": "timeseries",
+      "title": "Root filesystem used %",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 25
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": ""
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * (1 - node_filesystem_avail_bytes{job=\"pve-nodes\",mountpoint=\"/\"} / node_filesystem_size_bytes{job=\"pve-nodes\",mountpoint=\"/\"})",
+          "legendFormat": "{{instance}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": ""
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "spanNulls": true
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 108,
+      "type": "timeseries",
+      "title": "Disk IO (read+write)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 25
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": ""
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (instance) (rate(node_disk_read_bytes_total{job=\"pve-nodes\"}[5m]) + rate(node_disk_written_bytes_total{job=\"pve-nodes\"}[5m]))",
+          "legendFormat": "{{instance}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": ""
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "spanNulls": true
+          },
+          "unit": "Bps"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 109,
+      "type": "timeseries",
+      "title": "Network receive",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 33
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": ""
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (instance) (rate(node_network_receive_bytes_total{job=\"pve-nodes\",device!~\"lo|veth.*|fwbr.*|fwln.*|tap.*|vmbr.*dummy\"}[5m]))",
+          "legendFormat": "{{instance}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": ""
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "spanNulls": true
+          },
+          "unit": "Bps"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 110,
+      "type": "timeseries",
+      "title": "Network transmit",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 33
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": ""
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (instance) (rate(node_network_transmit_bytes_total{job=\"pve-nodes\",device!~\"lo|veth.*|fwbr.*|fwln.*|tap.*\"}[5m]))",
+          "legendFormat": "{{instance}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": ""
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "spanNulls": true
+          },
+          "unit": "Bps"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 111,
+      "type": "timeseries",
+      "title": "Uptime",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 41
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": ""
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "node_time_seconds{job=\"pve-nodes\"} - node_boot_time_seconds{job=\"pve-nodes\"}",
+          "legendFormat": "{{instance}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": ""
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "spanNulls": true
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 112,
+      "type": "timeseries",
+      "title": "Systemd units failed",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 41
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": ""
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "node_systemd_unit_state{job=\"pve-nodes\",state=\"failed\"}",
+          "legendFormat": "{{instance}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": ""
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "type": "row",
+      "title": "TrueNAS disks (Scrutiny)",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 49
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 201,
+      "type": "stat",
+      "title": "Disks monitored",
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 0,
+        "y": 50
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "papita-scrutiny"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "papita-scrutiny"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/api/summary",
+          "url_options": {
+            "method": "GET",
+            "data": ""
+          },
+          "root_selector": "$filter($each(data.summary, function($v, $k) {\n  {\n    \"wwn\": $k,\n    \"device\": $v.device.device_name,\n    \"model\": $v.device.model_name,\n    \"serial\": $v.device.serial_number,\n    \"protocol\": $v.device.device_protocol,\n    \"capacity\": $v.device.capacity,\n    \"status\": $v.device.device_status,\n    \"failed\": $v.device.device_status > 0 ? 1 : 0,\n    \"archived\": $v.device.archived = true,\n    \"temp\": $v.smart.temp,\n    \"power_on_hours\": $v.smart.power_on_hours,\n    \"last_seen\": $v.smart.collector_date\n  }\n}), function($r) { $r.archived = false })",
+          "columns": [
+            {
+              "selector": "device",
+              "text": "Device",
+              "type": "string"
+            },
+            {
+              "selector": "model",
+              "text": "Model",
+              "type": "string"
+            },
+            {
+              "selector": "serial",
+              "text": "Serial",
+              "type": "string"
+            },
+            {
+              "selector": "protocol",
+              "text": "Protocol",
+              "type": "string"
+            },
+            {
+              "selector": "capacity",
+              "text": "Capacity",
+              "type": "number"
+            },
+            {
+              "selector": "status",
+              "text": "Status",
+              "type": "number"
+            },
+            {
+              "selector": "failed",
+              "text": "failed",
+              "type": "number"
+            },
+            {
+              "selector": "temp",
+              "text": "Temp",
+              "type": "number"
+            },
+            {
+              "selector": "power_on_hours",
+              "text": "Power-on",
+              "type": "number"
+            },
+            {
+              "selector": "last_seen",
+              "text": "Last collected",
+              "type": "timestamp"
+            },
+            {
+              "selector": "wwn",
+              "text": "WWN",
+              "type": "string"
+            }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "count"
+          ],
+          "fields": "/^failed$/"
+        },
+        "colorMode": "value"
+      }
+    },
+    {
+      "id": 202,
+      "type": "stat",
+      "title": "Disks failing",
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 8,
+        "y": 50
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "papita-scrutiny"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "papita-scrutiny"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/api/summary",
+          "url_options": {
+            "method": "GET",
+            "data": ""
+          },
+          "root_selector": "$filter($each(data.summary, function($v, $k) {\n  {\n    \"wwn\": $k,\n    \"device\": $v.device.device_name,\n    \"model\": $v.device.model_name,\n    \"serial\": $v.device.serial_number,\n    \"protocol\": $v.device.device_protocol,\n    \"capacity\": $v.device.capacity,\n    \"status\": $v.device.device_status,\n    \"failed\": $v.device.device_status > 0 ? 1 : 0,\n    \"archived\": $v.device.archived = true,\n    \"temp\": $v.smart.temp,\n    \"power_on_hours\": $v.smart.power_on_hours,\n    \"last_seen\": $v.smart.collector_date\n  }\n}), function($r) { $r.archived = false })",
+          "columns": [
+            {
+              "selector": "device",
+              "text": "Device",
+              "type": "string"
+            },
+            {
+              "selector": "model",
+              "text": "Model",
+              "type": "string"
+            },
+            {
+              "selector": "serial",
+              "text": "Serial",
+              "type": "string"
+            },
+            {
+              "selector": "protocol",
+              "text": "Protocol",
+              "type": "string"
+            },
+            {
+              "selector": "capacity",
+              "text": "Capacity",
+              "type": "number"
+            },
+            {
+              "selector": "status",
+              "text": "Status",
+              "type": "number"
+            },
+            {
+              "selector": "failed",
+              "text": "failed",
+              "type": "number"
+            },
+            {
+              "selector": "temp",
+              "text": "Temp",
+              "type": "number"
+            },
+            {
+              "selector": "power_on_hours",
+              "text": "Power-on",
+              "type": "number"
+            },
+            {
+              "selector": "last_seen",
+              "text": "Last collected",
+              "type": "timestamp"
+            },
+            {
+              "selector": "wwn",
+              "text": "WWN",
+              "type": "string"
+            }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "sum"
+          ],
+          "fields": "/^failed$/"
+        },
+        "colorMode": "value"
+      }
+    },
+    {
+      "id": 203,
+      "type": "stat",
+      "title": "Hottest disk",
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 16,
+        "y": 50
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "papita-scrutiny"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "papita-scrutiny"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/api/summary",
+          "url_options": {
+            "method": "GET",
+            "data": ""
+          },
+          "root_selector": "$filter($each(data.summary, function($v, $k) {\n  {\n    \"wwn\": $k,\n    \"device\": $v.device.device_name,\n    \"model\": $v.device.model_name,\n    \"serial\": $v.device.serial_number,\n    \"protocol\": $v.device.device_protocol,\n    \"capacity\": $v.device.capacity,\n    \"status\": $v.device.device_status,\n    \"failed\": $v.device.device_status > 0 ? 1 : 0,\n    \"archived\": $v.device.archived = true,\n    \"temp\": $v.smart.temp,\n    \"power_on_hours\": $v.smart.power_on_hours,\n    \"last_seen\": $v.smart.collector_date\n  }\n}), function($r) { $r.archived = false })",
+          "columns": [
+            {
+              "selector": "device",
+              "text": "Device",
+              "type": "string"
+            },
+            {
+              "selector": "model",
+              "text": "Model",
+              "type": "string"
+            },
+            {
+              "selector": "serial",
+              "text": "Serial",
+              "type": "string"
+            },
+            {
+              "selector": "protocol",
+              "text": "Protocol",
+              "type": "string"
+            },
+            {
+              "selector": "capacity",
+              "text": "Capacity",
+              "type": "number"
+            },
+            {
+              "selector": "status",
+              "text": "Status",
+              "type": "number"
+            },
+            {
+              "selector": "failed",
+              "text": "failed",
+              "type": "number"
+            },
+            {
+              "selector": "temp",
+              "text": "Temp",
+              "type": "number"
+            },
+            {
+              "selector": "power_on_hours",
+              "text": "Power-on",
+              "type": "number"
+            },
+            {
+              "selector": "last_seen",
+              "text": "Last collected",
+              "type": "timestamp"
+            },
+            {
+              "selector": "wwn",
+              "text": "WWN",
+              "type": "string"
+            }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 45
+              },
+              {
+                "color": "red",
+                "value": 55
+              }
+            ]
+          },
+          "unit": "celsius"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "max"
+          ],
+          "fields": "/^temp$/"
+        },
+        "colorMode": "value"
+      }
+    },
+    {
+      "id": 204,
+      "type": "table",
+      "title": "Disks (Scrutiny on TrueNAS)",
+      "gridPos": {
+        "h": 14,
+        "w": 24,
+        "x": 0,
+        "y": 55
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "papita-scrutiny"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "papita-scrutiny"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/api/summary",
+          "url_options": {
+            "method": "GET",
+            "data": ""
+          },
+          "root_selector": "$filter($each(data.summary, function($v, $k) {\n  {\n    \"wwn\": $k,\n    \"device\": $v.device.device_name,\n    \"model\": $v.device.model_name,\n    \"serial\": $v.device.serial_number,\n    \"protocol\": $v.device.device_protocol,\n    \"capacity\": $v.device.capacity,\n    \"status\": $v.device.device_status,\n    \"failed\": $v.device.device_status > 0 ? 1 : 0,\n    \"archived\": $v.device.archived = true,\n    \"temp\": $v.smart.temp,\n    \"power_on_hours\": $v.smart.power_on_hours,\n    \"last_seen\": $v.smart.collector_date\n  }\n}), function($r) { $r.archived = false })",
+          "columns": [
+            {
+              "selector": "device",
+              "text": "Device",
+              "type": "string"
+            },
+            {
+              "selector": "model",
+              "text": "Model",
+              "type": "string"
+            },
+            {
+              "selector": "serial",
+              "text": "Serial",
+              "type": "string"
+            },
+            {
+              "selector": "protocol",
+              "text": "Protocol",
+              "type": "string"
+            },
+            {
+              "selector": "capacity",
+              "text": "Capacity",
+              "type": "number"
+            },
+            {
+              "selector": "status",
+              "text": "Status",
+              "type": "number"
+            },
+            {
+              "selector": "failed",
+              "text": "failed",
+              "type": "number"
+            },
+            {
+              "selector": "temp",
+              "text": "Temp",
+              "type": "number"
+            },
+            {
+              "selector": "power_on_hours",
+              "text": "Power-on",
+              "type": "number"
+            },
+            {
+              "selector": "last_seen",
+              "text": "Last collected",
+              "type": "timestamp"
+            },
+            {
+              "selector": "wwn",
+              "text": "WWN",
+              "type": "string"
+            }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Status"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "text": "Passed",
+                        "color": "green",
+                        "index": 0
+                      },
+                      "1": {
+                        "text": "Failed (SMART)",
+                        "color": "red",
+                        "index": 1
+                      },
+                      "2": {
+                        "text": "Failed (Scrutiny)",
+                        "color": "orange",
+                        "index": 2
+                      },
+                      "3": {
+                        "text": "Failed (SMART + Scrutiny)",
+                        "color": "red",
+                        "index": 3
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Capacity"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Temp"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "celsius"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 45
+                    },
+                    {
+                      "color": "red",
+                      "value": 55
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Power-on"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "h"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "failed"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "displayName": "Device",
+            "desc": false
+          }
+        ]
+      }
+    }
+  ]
+}
