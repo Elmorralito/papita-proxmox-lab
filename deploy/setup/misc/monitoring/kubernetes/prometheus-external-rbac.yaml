@@ -23,6 +23,7 @@ rules:
       - nodes/metrics
       - nodes/proxy
       - services
+      - services/proxy
       - endpoints
       - pods
       - namespaces

@@ -67,6 +67,33 @@ Work in **Datacenter → Permissions** unless noted. Order matters: role → gro
 | Name       | `MCPAgent`                              |
 | Privileges | `Sys.Audit`, `VM.Audit`, `VM.PowerMgmt` |
 
+#### Guest-agent file read (optional, scoped)
+
+Used to verify SSH host keys via QEMU guest agent (`agent/file-read` of
+`/etc/ssh/ssh_host_*_key.pub`) without granting `VM.GuestAgent.Unrestricted`
+(exec / arbitrary agent commands).
+
+| Field      | Value                      |
+| ---------- | -------------------------- |
+| Name       | `MCPGuestAgentFileRead`    |
+| Privileges | `VM.GuestAgent.FileRead`   |
+
+**Do not** add this to `MCPAgentRead` at path `/` unless every VM should allow
+agent file reads. Prefer per-VM paths (lab: terraform k8s QEMU `240`–`246`).
+
+With **privilege separation** enabled, assign the role to **both** the user and
+the token (effective privileges are the intersection):
+
+```bash
+pveum role add MCPGuestAgentFileRead -privs "VM.GuestAgent.FileRead"
+for vmid in 240 241 242 243 244 245 246; do
+  pveum acl modify "/vms/${vmid}" -user svcpve@pve -role MCPGuestAgentFileRead
+  pveum acl modify "/vms/${vmid}" -token 'svcpve@pve!cursor' -role MCPGuestAgentFileRead
+done
+```
+
+(Substitute your MCP user/token ids if different.)
+
 Required privileges for common MCP tools:
 
 | Tool / endpoint                                           | Privilege                          |
@@ -76,6 +103,7 @@ Required privileges for common MCP tools:
 | `pve_get_node_status`, network detail                     | `Sys.Audit` on `/nodes/{node}`     |
 | `pve_list_guests`, `pve_get_guest_status`                 | `VM.Audit` on `/`                  |
 | `pve_start_guest`, `pve_shutdown_guest`                   | `VM.PowerMgmt` on `/`              |
+| Guest agent `file-read` (SSH host-key verify)             | `VM.GuestAgent.FileRead` on `/vms/{vmid}` (user **and** token when privsep on) |
 
 ---
 
@@ -233,6 +261,7 @@ See [SMOKE_TESTS.md](./SMOKE_TESTS.md) and [../../README.md](../../README.md).
 | `Configuration error: host Field required` | Set `PVE_*` in `mcp.json` `env`                                   |
 | HTTP 403 on cluster config / network       | Run `pve_check_token`; assign role to **token** at `/` (step 6)   |
 | User in group but token still 403          | Privilege separation on — token ACL is separate from group ACL    |
+| HTTP 403 on `agent/file-read`              | Need `VM.GuestAgent.FileRead` on `/vms/{vmid}` for **user and token** (privsep ∩); role `MCPGuestAgentFileRead` — not Unrestricted |
 | Poetry / script errors                     | `./deploy/mcp.sh update`; set `cwd` to repo root                  |
 | TLS errors                                 | `PVE_VERIFY_SSL=false` only during initial self-signed cert setup |
 
