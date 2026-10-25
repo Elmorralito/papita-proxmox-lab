@@ -53,11 +53,11 @@ Exit code **0** when `core_passed` is true (warnings on lab-specific checks are 
 
 ## Extended checks (`--extended`)
 
-| Check                     | Optional | Notes                                   |
-| ------------------------- | -------- | --------------------------------------- |
-| `disk_temperature_alerts` | **yes**  | May need extra API perms on some builds |
-| `reporting_graph`         | **yes**  | `reporting.get_data` cpu graph          |
-| `*_tool`                  | no       | MCP tool wrapper smoke (5 tools)        |
+| Check                     | Optional | Notes                                                           |
+| ------------------------- | -------- | --------------------------------------------------------------- |
+| `disk_temperature_alerts` | **yes**  | May need extra API perms on some builds                         |
+| `reporting_graph`         | **yes**  | `reporting.get_data` cpu graph                                  |
+| `*_tool`                  | no       | MCP tool wrapper smoke (8 tools, incl. `list_nfs_clients_tool`) |
 
 ## Lab-specific configuration
 

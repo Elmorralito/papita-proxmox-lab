@@ -42,9 +42,10 @@ See [docs/SMOKE_TESTS.md](./docs/SMOKE_TESTS.md) for the full matrix.
 > `"TRUENAS_VERIFY_SSL": "false"` explicitly while the NAS still uses a self-signed cert.
 | `TRUENAS_WS_PATH`               | `/websocket`                                    | WebSocket path (`/api/v2.0/websocket` on older builds) |
 | `TRUENAS_WS_PING_INTERVAL_SEC`  | `30`                                            | WebSocket keepalive ping interval (`0` disables)       |
-| `TRUENAS_LAB_HA_POOL_NAME`      | `main_data_storage`              | Expected HA ZFS pool                                   |
-| `TRUENAS_LAB_NFS_EXPORT`        | `/mnt/main_data_storage` | NFS export path                                        |
+| `TRUENAS_LAB_HA_POOL_NAME`      | `main_data_storage`                             | Expected HA ZFS pool                                   |
+| `TRUENAS_LAB_NFS_EXPORT`        | `/mnt/main_data_storage`                        | NFS export path                                        |
 | `TRUENAS_LAB_SCRUTINY_APP_NAME` | `scrutiny`                                      | Scrutiny app name in `app.query`                       |
+| `TRUENAS_LAB_PVE_NODES`         | `pve-001=172.16.0.101,…,pve-004=172.16.0.104`   | `node=IP` pairs to name NFS clients                    |
 | `TRUENAS_LAB_CONFIG_FILE`       | _(optional)_                                    | Path to `default.truenas.nfs.env` overlay              |
 | `TRUENAS_LOG_LEVEL`             | `INFO`                                          | stderr JSON log level                                  |
 
@@ -52,23 +53,24 @@ See [docs/SMOKE_TESTS.md](./docs/SMOKE_TESTS.md) for the full matrix.
 
 ## Read tools (v1 + v1.1)
 
-| Tool                          | TrueNAS method(s)                       | Purpose                             |
-| ----------------------------- | --------------------------------------- | ----------------------------------- |
-| `truenas_get_system_info`     | `system.info`, `system.state`           | Version, uptime, middleware state   |
-| `truenas_check_api_key`       | `system.state`, `system.info`           | Auth validation + session metadata  |
-| `truenas_list_alerts`         | `alert.list`                            | Active alerts                       |
-| `truenas_list_alert_policies` | `alert.list_policies`                   | Alert notification policies         |
-| `truenas_list_pools`          | `pool.query`                            | ZFS pool health                     |
-| `truenas_list_datasets`       | `pool.dataset.query`                    | Dataset space / mount points        |
-| `truenas_list_disks`          | `disk.query`, `disk.temperature_alerts` | Disk inventory + thermal alerts     |
-| `truenas_list_smart_results`  | `smart.test.results`                    | SMART tests (complements Scrutiny)  |
-| `truenas_get_reporting_data`  | `reporting.get_data`                    | CPU/memory/disk graphs              |
-| `truenas_list_apps`           | `app.query`                             | Scrutiny + Tailscale inventory      |
-| `truenas_list_jobs`           | `core.get_jobs`                         | Scrubs, replication, updates        |
-| `truenas_list_nfs_shares`     | `sharing.nfs.query`                     | NFS exports; lab HA path validation |
-| `truenas_list_scrub_tasks`    | `pool.scrub.query`                      | Scrub schedules                     |
-| `truenas_system_summary`      | _(aggregate)_                           | Operator dashboard                  |
-| `truenas_run_smoke_tests`     | _(smoke)_                               | Post-install verification           |
+| Tool                          | TrueNAS method(s)                               | Purpose                                          |
+| ----------------------------- | ----------------------------------------------- | ------------------------------------------------ |
+| `truenas_get_system_info`     | `system.info`, `system.state`                   | Version, uptime, middleware state                |
+| `truenas_check_api_key`       | `system.state`, `system.info`                   | Auth validation + session metadata               |
+| `truenas_list_alerts`         | `alert.list`                                    | Active alerts                                    |
+| `truenas_list_alert_policies` | `alert.list_policies`                           | Alert notification policies                      |
+| `truenas_list_pools`          | `pool.query`                                    | ZFS pool health                                  |
+| `truenas_list_datasets`       | `pool.dataset.query`                            | Dataset space / mount points                     |
+| `truenas_list_disks`          | `disk.query`, `disk.temperature_alerts`         | Disk inventory + thermal alerts                  |
+| `truenas_list_smart_results`  | `smart.test.results`                            | SMART tests (complements Scrutiny)               |
+| `truenas_get_reporting_data`  | `reporting.get_data`                            | CPU/memory/disk graphs                           |
+| `truenas_list_apps`           | `app.query`                                     | Scrutiny + Tailscale inventory                   |
+| `truenas_list_jobs`           | `core.get_jobs`                                 | Scrubs, replication, updates                     |
+| `truenas_list_nfs_shares`     | `sharing.nfs.query`                             | NFS exports; lab HA path validation              |
+| `truenas_list_nfs_clients`    | `nfs.get_nfs3_clients` / `nfs.get_nfs4_clients` | Connected clients → PVE nodes; NAS shutdown gate |
+| `truenas_list_scrub_tasks`    | `pool.scrub.query`                              | Scrub schedules                                  |
+| `truenas_system_summary`      | _(aggregate)_                                   | Operator dashboard                               |
+| `truenas_run_smoke_tests`     | _(smoke)_                                       | Post-install verification                        |
 
 ## Write tools (v2, gated)
 
@@ -79,6 +81,15 @@ All write tools require **`confirm=true`**.
 | `truenas_create_dataset`   | `pool.dataset.create` | Create ZFS dataset       |
 | `truenas_update_nfs_share` | `sharing.nfs.update`  | Enable/disable NFS share |
 | `truenas_dismiss_alert`    | `alert.dismiss`       | Dismiss active alert     |
+
+## Power tools (destructive — [MCP_POWER_PLAN.md](../../docs/MCP_POWER_PLAN.md))
+
+| Tool               | TrueNAS method    | Guards                                                                                                                                                                                                                                                   |
+| ------------------ | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `truenas_shutdown` | `system.shutdown` | `confirm` + `reason`; refuses on NFS clients outside `expected_clients` or a running scrub/resilver/replication/OS-update job (`force` overrides); `delay_s`; `plan_only`; on a dropped connection it reconnects to confirm the pending job (`verified`) |
+| `truenas_reboot`   | `system.reboot`   | Same as `truenas_shutdown`                                                                                                                                                                                                                               |
+
+TrueNAS is reachable only through the LAN router guest on the entry PVE node, so in a full-lab shutdown call `truenas_shutdown(delay_s≈300, expected_clients=["172.16.0.101"])` **before** `pve_shutdown_node(<entry>, allow_entry_host=true)`. A dropped connection during the call is reported as success (`connection_dropped=true`). The API key needs a role that allows `system.shutdown` ([API_KEY_SETUP.md](./docs/API_KEY_SETUP.md)).
 
 ## Lab monitoring split
 

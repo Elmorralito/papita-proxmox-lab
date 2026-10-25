@@ -35,7 +35,7 @@ Last aligned to repo tree (~46 tracked files). Gitignored paths listed separatel
 | File                       | Role                                                                                                                                    |
 | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
 | `toolkit.sh`               | Main CLI: `build`, `devsync`, `test`, `proxmox`, AWS auth, pre-commit                                                      |
-| `proxmox.sh`               | SSH to PVE: `setup-node`, `setup-cluster-ha`, `setup-monitoring`, `get-temp`, `start-cluster`, `stop-cluster` |
+| `proxmox.sh`               | SSH to PVE: `setup-node`, `setup-cluster-ha`, `setup-monitoring`, `get-temp`, `start-cluster`, `stop-cluster`, `wake-lab` |
 | `mcp.sh`                   | Install / update / smoke / cursor-sync / skills-sync for MCP servers + agent skills |
 | `utils.sh`                 | Shared helpers: `log`, `prompt_pve_start`, `prompt_until_*`, `prompt_crontab_schedule`, AWS auth, `run_command`                         |
 | `usage.sh`                 | Help text: `usage_toolkit`, `usage_proxmox`, `usage_setup_pve_node`                                                  |

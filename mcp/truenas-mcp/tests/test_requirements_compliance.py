@@ -19,6 +19,7 @@ REQUIRED_READ_TOOLS: dict[str, ToolClass] = {
     "truenas_list_apps": ToolClass.READ,
     "truenas_list_jobs": ToolClass.READ,
     "truenas_list_nfs_shares": ToolClass.READ,
+    "truenas_list_nfs_clients": ToolClass.READ,
     "truenas_list_scrub_tasks": ToolClass.READ,
     "truenas_system_summary": ToolClass.READ,
     "truenas_run_smoke_tests": ToolClass.READ,
@@ -30,7 +31,13 @@ REQUIRED_WRITE_TOOLS: dict[str, ToolClass] = {
     "truenas_dismiss_alert": ToolClass.WRITE,
 }
 
-REQUIRED_TOOLS = {**REQUIRED_READ_TOOLS, **REQUIRED_WRITE_TOOLS}
+# FR-902 reversed: only the guarded power tools are destructive (docs/MCP_POWER_PLAN.md).
+REQUIRED_DESTRUCTIVE_TOOLS: dict[str, ToolClass] = {
+    "truenas_shutdown": ToolClass.DESTRUCTIVE,
+    "truenas_reboot": ToolClass.DESTRUCTIVE,
+}
+
+REQUIRED_TOOLS = {**REQUIRED_READ_TOOLS, **REQUIRED_WRITE_TOOLS, **REQUIRED_DESTRUCTIVE_TOOLS}
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -39,8 +46,9 @@ def register_all_tools() -> None:
     create_server()
 
 
-def test_no_destructive_tools() -> None:
-    assert ToolClass.DESTRUCTIVE not in TOOL_REGISTRY.values()
+def test_only_approved_destructive_tools() -> None:
+    destructive = {name for name, cls in TOOL_REGISTRY.items() if cls == ToolClass.DESTRUCTIVE}
+    assert destructive == set(REQUIRED_DESTRUCTIVE_TOOLS)
 
 
 def test_tool_catalog_complete() -> None:

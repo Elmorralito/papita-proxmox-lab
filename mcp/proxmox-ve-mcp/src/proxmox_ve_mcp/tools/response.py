@@ -4,6 +4,7 @@ Provides success and error payload builders plus decorators that wrap async tool
 implementations with timing, structured logging, and consistent exception handling.
 """
 
+import inspect
 import json
 import time
 from collections.abc import Awaitable, Callable
@@ -15,6 +16,17 @@ from proxmox_ve_mcp.logging_config import log_tool_event
 from proxmox_ve_mcp.tools.meta import tool_meta
 
 F = TypeVar("F", bound=Callable[..., Awaitable[Any]])
+
+
+def audit_values(
+    signature: inspect.Signature, fields: tuple[str, ...], args: tuple[Any, ...], kwargs: dict[str, Any]
+) -> dict[str, Any]:
+    """Pick *fields* from a call, whether they were passed positionally or by keyword."""
+    try:
+        bound: dict[str, Any] = dict(signature.bind_partial(*args, **kwargs).arguments)
+    except TypeError:
+        bound = kwargs
+    return {field: bound[field] for field in fields if field in bound}
 
 
 def ok_response(
@@ -125,13 +137,13 @@ def write_tool_handler(
 ) -> Callable[[F], F]:
     """Wrap mutating tools with audit logging and error JSON.
 
-    Like :func:`tool_handler`, but logs selected keyword arguments from *audit_fields* on
-    both success and failure for traceability of write operations.
+    Like :func:`tool_handler`, but logs selected arguments from *audit_fields* on both
+    success and failure for traceability of write operations.
 
     Args:
         tool_name: Name used for logging and error payload ``meta``.
         mutating: When ``True``, included in log events as a mutating operation.
-        audit_fields: Keyword argument names to capture from the tool invocation (for
+        audit_fields: Argument names (positional or keyword) to capture from the tool invocation (for
             example ``node``, ``vmid``).
 
     Returns:
@@ -139,14 +151,16 @@ def write_tool_handler(
     """
 
     def decorator(func: F) -> F:
+        signature = inspect.signature(func)
+
         @wraps(func)
         async def wrapper(*args: Any, **kwargs: Any) -> str:
             """Execute the tool, log timing, and return JSON errors instead of raising."""
             started = time.perf_counter()
+            audit = audit_values(signature, audit_fields, args, kwargs)
             try:
                 result = await func(*args, **kwargs)
                 duration_ms = int((time.perf_counter() - started) * 1000)
-                audit = {field: kwargs.get(field) for field in audit_fields if field in kwargs}
                 log_tool_event(
                     tool_name,
                     duration_ms=duration_ms,
@@ -157,7 +171,6 @@ def write_tool_handler(
                 return result
             except Exception as exc:
                 duration_ms = int((time.perf_counter() - started) * 1000)
-                audit = {field: kwargs.get(field) for field in audit_fields if field in kwargs}
                 log_tool_event(
                     tool_name,
                     duration_ms=duration_ms,

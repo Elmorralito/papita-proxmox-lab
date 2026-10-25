@@ -1,5 +1,7 @@
 """Tests for cluster MCP tools."""
 
+import json
+
 import httpx
 import pytest
 import respx
@@ -77,5 +79,63 @@ async def test_pve_cluster_health_tool(init_pve) -> None:
             json={"data": [{"node": "pvenode-001", "ring0_addr": "10.0.0.11"}]},
         )
     )
+    respx.get("https://pve.local:8006/api2/json/cluster/status").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "data": [
+                    {"type": "cluster", "name": "pvecm-test", "nodes": 1, "quorate": 1, "version": 3},
+                    {"type": "node", "name": "pvenode-001", "online": 1, "local": 1, "ip": "10.0.0.11"},
+                ]
+            },
+        )
+    )
+    respx.get("https://pve.local:8006/api2/json/cluster/config/qdevice").mock(
+        return_value=httpx.Response(200, json={"data": {"State": "Connected"}})
+    )
     result = await pve_cluster_health_impl()
-    assert '"approx_all_nodes_online": true' in result
+    data = json.loads(result)["data"]
+    assert data["approx_all_nodes_online"] is True
+    assert data["quorate"] is True
+    assert data["entry_node"] == "pvenode-001"
+    assert data["cluster_name"] == "pvecm-test"
+    assert data["qdevice"] == {"configured": True, "status": {"State": "Connected"}}
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_pve_cluster_health_not_quorate(init_pve) -> None:
+    respx.get("https://pve.local:8006/api2/json/cluster/resources", params={"type": "node"}).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "data": [
+                    {"type": "node", "node": "pvenode-001", "status": "online"},
+                    {"type": "node", "node": "pvenode-002", "status": "offline"},
+                ]
+            },
+        )
+    )
+    respx.get("https://pve.local:8006/api2/json/cluster/config/nodes").mock(
+        return_value=httpx.Response(200, json={"data": [{"node": "pvenode-001"}, {"node": "pvenode-002"}]})
+    )
+    respx.get("https://pve.local:8006/api2/json/cluster/status").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "data": [
+                    {"type": "cluster", "name": "pvecm-test", "nodes": 2, "quorate": 0},
+                    {"type": "node", "name": "pvenode-001", "online": 1, "local": 1},
+                    {"type": "node", "name": "pvenode-002", "online": 0, "local": 0},
+                ]
+            },
+        )
+    )
+    respx.get("https://pve.local:8006/api2/json/cluster/config/qdevice").mock(
+        return_value=httpx.Response(500, json={"data": None, "message": "no qdevice"})
+    )
+    payload = json.loads(await pve_cluster_health_impl())
+    assert payload["ok"] is True
+    assert payload["data"]["quorate"] is False
+    assert payload["data"]["qdevice"] == {"configured": None}
+    assert any("NOT quorate" in w for w in payload["warnings"])

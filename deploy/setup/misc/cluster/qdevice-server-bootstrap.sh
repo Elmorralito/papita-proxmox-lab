@@ -12,10 +12,10 @@ if command -v pvecm >/dev/null 2>&1; then
     exit 1
 fi
 
-echo "[INFO] Installing corosync-qnetd..."
+echo "[INFO] Installing corosync-qnetd and wakeonlan (cold start: deploy/proxmox.sh wake-lab)..."
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y corosync-qnetd
+apt-get install -y corosync-qnetd wakeonlan
 
 systemctl enable --now corosync-qnetd
 systemctl is-active corosync-qnetd

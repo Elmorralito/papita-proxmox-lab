@@ -15,6 +15,10 @@ Create a dedicated local user and API key on TrueNAS. **Do not** use the primary
 3. Grant **minimum** privileges needed for read-only inspection (or full read for homelab simplicity)
 4. Disable shell / SMB if not required
 
+### Power tools (`truenas_shutdown` / `truenas_reboot`)
+
+`system.shutdown` / `system.reboot` are admin-level methods; a read-only role gets an access-denied error. For the power tools, grant the service user a privilege that allows them (on SCALE 25 typically **Full Admin**, or a custom privilege including those methods). The guards also call `nfs.get_nfs3_clients`, `nfs.get_nfs4_clients`, and `core.get_jobs` (read). Keep these tools off Cursor auto-run allowlists.
+
 ## 3. Generate API key
 
 1. Log into TrueNAS WebUI
