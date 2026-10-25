@@ -30,6 +30,8 @@ services:
     command:
       - --config.file=/etc/alertmanager/alertmanager.yml
       - --storage.path=/alertmanager
+      # Single-instance lab: disable gossip mesh (avoids crash when Docker has no private IP yet)
+      - --cluster.listen-address=
     ports:
       - "9093:9093"
     volumes:

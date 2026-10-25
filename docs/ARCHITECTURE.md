@@ -269,7 +269,7 @@ Work performed to reach the state in §8. Guests **100/101 were not migrated**; 
 - `HA_AUTO_ENROLL_NFS_GUESTS=0`.
 - QDevice host file (`172.16.0.99`).
 - NFS host ACL: `.103` (`pve-003`) write-verified on `truenas-nfs-main` (2026-09-23).
-- Cloud-init QEMU template: VMID **9000** `ubuntu-2404-cloud` on `truenas-nfs-main`; snippets enabled on `truenas-nfs-media`.
+- Cloud-init QEMU template: VMID **9000** `debian-13-genericcloud` on `truenas-nfs-main`; snippets enabled on `truenas-nfs-media`.
 
 ---
 
