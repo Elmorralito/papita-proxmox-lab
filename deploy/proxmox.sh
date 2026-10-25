@@ -136,11 +136,30 @@ get_cluster_nodes() {
         return 1
     fi
     # shellcheck disable=SC2207
+    # Online-only: SSH/HA/temp loops should not target powered-off peers.
+    # start_cluster uses get_cluster_nodes_for_wol() so offline members still get WoL.
     CLUSTER_NODE_IDS=($(jq -r '.[] | select(.type == "node" and .status == "online") | .node // empty' <<<"${json_out}" 2>/dev/null || true))
     if [[ ${#CLUSTER_NODE_IDS[@]} -eq 0 ]]; then
         log "WARN" "No cluster nodes parsed from JSON (empty array)."
     else
         log "INFO" "Cluster node ids:"
+        log "TRACE" "${CLUSTER_NODE_IDS[*]}"
+    fi
+}
+
+# All cluster members (any status) for Wake-on-LAN.
+get_cluster_nodes_for_wol() {
+    local json_out
+    if ! json_out=$(ssh "${SSH_COMMON_OPTS[@]}" "$TARGET_USERNAME@$IP_ADDRESS" "pvesh get /cluster/resources --type node --output-format json"); then
+        log "ERROR" "pvesh get /cluster/resources failed on $IP_ADDRESS."
+        return 1
+    fi
+    # shellcheck disable=SC2207
+    CLUSTER_NODE_IDS=($(jq -r '.[] | select(.type == "node") | .node // empty' <<<"${json_out}" 2>/dev/null || true))
+    if [[ ${#CLUSTER_NODE_IDS[@]} -eq 0 ]]; then
+        log "WARN" "No cluster nodes parsed from JSON (empty array)."
+    else
+        log "INFO" "Cluster node ids (incl. offline for WoL):"
         log "TRACE" "${CLUSTER_NODE_IDS[*]}"
     fi
 }
@@ -187,7 +206,7 @@ start_cluster() {
         return 255
     fi
     log "INFO" "Local node: $local_node"
-    get_cluster_nodes
+    get_cluster_nodes_for_wol
     if [[ ${#CLUSTER_NODE_IDS[@]} -eq 0 ]]; then
         log "WARN" "No cluster nodes found."
         return 255
@@ -200,13 +219,16 @@ start_cluster() {
             continue
         fi
         log "INFO" "Sending Wake-on-LAN to cluster node: $node"
-        ssh "${SSH_COMMON_OPTS[@]}" "$TARGET_USERNAME@$IP_ADDRESS" "pvenode wakeonlan \"${node}\"" || {
-            log "ERROR" "Failed to send Wake-on-LAN to cluster node: $node"
-            ((ERROR_COUNT++))
-        }
+        # Capture stderr: missing wakeonlan MAC is a common gap (setup never ran / config wiped).
+        if ! wol_out=$(ssh "${SSH_COMMON_OPTS[@]}" "$TARGET_USERNAME@$IP_ADDRESS" "pvenode wakeonlan \"${node}\"" 2>&1); then
+            log "ERROR" "Failed to send Wake-on-LAN to cluster node: $node — ${wol_out}"
+            ERROR_COUNT=$((ERROR_COUNT + 1))
+        else
+            log "INFO" "${wol_out}"
+        fi
     done
     log "INFO" "Wake-on-LAN sent to cluster nodes."
-    return $ERROR_COUNT
+    return "$ERROR_COUNT"
 }
 
 stop_cluster() {
