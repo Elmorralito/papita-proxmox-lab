@@ -1,6 +1,6 @@
 # papita-proxmox-lab
 
-Hybrid **Proxmox VE** homelab: on-prem PVE nodes on **Tailscale** with **pfSense** advertising the lab LAN to the tailnet for remote admin. Bash deploy scripts orchestrate node bootstrap and cluster operations. **Cursor MCP servers** under [`mcp/`](./mcp/) expose structured Proxmox and pfSense APIs to AI agents.
+Hybrid **Proxmox VE** homelab: on-prem PVE nodes on **Tailscale** with an **OpenWrt** (or pfSense) LAN router advertising `172.16.0.0/16` to the tailnet. Bash deploy scripts orchestrate node bootstrap and cluster operations. **Cursor MCP servers** under [`mcp/`](./mcp/) expose Proxmox, pfSense, TrueNAS, and OpenWrt APIs to AI agents.
 
 Network diagram source: [`docs/Diagrams.drawio`](./docs/Diagrams.drawio) (export to `docs/Diagrams-Network.png` for a static image).
 
@@ -11,20 +11,22 @@ Network diagram source: [`docs/Diagrams.drawio`](./docs/Diagrams.drawio) (export
 | Concern             | Where it lives                                                                                                                                              | What it does                                                                                              |
 | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
 | **Workstation CLI** | [`deploy/toolkit.sh`](./deploy/toolkit.sh)                                                                                                                  | Single entrypoint: Python dev tooling, Proxmox SSH deploy, optional AWS SSO/MFA                           |
-| **PVE bootstrap**   | [`deploy/setup/setup-pve-node.sh`](./deploy/setup/setup-pve-node.sh)                                                                                        | Interactive 18-step node setup (APT, WoL, sensors, hosts, Tailscale, hooks, QDevice client, backups, TLS) |
-| **Cluster ops**     | [`deploy/proxmox.sh`](./deploy/proxmox.sh)                                                                                                                  | SSH to nodes: `setup-node`, `setup-cluster-ha`, `get-temp`, `start-cluster`, `stop-cluster`               |
-| **Tailnet + LAN**   | [`deploy/tailscale-pfsense-lan.sh`](./deploy/tailscale-pfsense-lan.sh)                                                                                      | Approve pfSense routes, patch Tailscale ACLs, verify admin path to main PVE                               |
+| **PVE bootstrap**   | [`deploy/setup/setup-pve-node.sh`](./deploy/setup/setup-pve-node.sh)                                                                                        | Interactive **19-step** node setup (APT, WoL, sensors, hosts, Tailscale, hooks, QDevice, backups, TLS, node-exporter) |
+| **Cluster ops**     | [`deploy/proxmox.sh`](./deploy/proxmox.sh)                                                                                                                  | SSH to nodes: `setup-node`, `setup-cluster-ha`, `setup-monitoring`, `get-temp`, `start-cluster`, `stop-cluster` |
+| **Tailnet + LAN**   | [`deploy/tailscale-pfsense-lan.sh`](./deploy/tailscale-pfsense-lan.sh)                                                                                      | Approve router routes, patch Tailscale ACLs, verify admin path to main PVE                               |
 | **pfSense pfREST**  | [`deploy/pfsense-restapi-access.sh`](./deploy/pfsense-restapi-access.sh) · [`deploy/pfsense-firewall-tailscale.sh`](./deploy/pfsense-firewall-tailscale.sh) | Bootstrap REST API access and apply agreed Tailscale-tab firewall rules via pfREST                        |
+| **Monitoring**      | [`deploy/setup/misc/monitoring/`](./deploy/setup/misc/monitoring/)                                                                                          | Prometheus/Alertmanager on CT **231**; Grafana on QDevice Pi `172.16.0.99:3000`                          |
 | **Cursor MCP**      | [`mcp/`](./mcp/) · [`deploy/mcp.sh`](./deploy/mcp.sh)                                                                                                       | Pre-install MCP packages, sync Cursor configs, install agent skills (user/project)                        |
-| **Runbooks**        | [`docs/TIPSNTRICKS.md`](./docs/TIPSNTRICKS.md)                                                                                                              | Ceph, cluster join, pfSense, Tailscale, VM clipboard, MCP smoke, maintenance                              |
+| **Runbooks**        | [`docs/TIPSNTRICKS.md`](./docs/TIPSNTRICKS.md) · [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md)                                                            | Ceph, cluster, Tailscale, MCP smoke, HA/QDevice/NFS architecture                                          |
 
 **Lab topology (default):**
 
-- **LAN:** `172.16.0.0/16` (gateway `172.16.0.1` on pfSense)
+- **LAN:** `172.16.0.0/16` (gateway `172.16.0.1` on OpenWrt; pfSense VM optional/legacy)
 - **Main PVE admin node:** `172.16.0.101` (LAN + optional MagicDNS TLS on step 17)
-- **Tailscale:** all PVE nodes join the tailnet for remote admin; pfSense is the **subnet router** for LAN; workers do not advertise routes
-- **Remote admin:** reach Proxmox via pfSense subnet route and/or main-node Tailscale TLS — not worker `:8006` on the tailnet
-- **AI agents (Cursor):** MCP over stdio to `proxmox-ve-mcp` (`:8006`), `pfsense-mcp` (pfREST `:443`), and `truenas-mcp` — run `./deploy/mcp.sh install` once so Cursor can spawn them; agents do not install packages at runtime
+- **Tailscale:** all PVE nodes join the tailnet for remote admin; **OpenWrt** (`openwrt-pi`) is the usual **subnet router** for LAN (pfSense remains supported); workers do not advertise routes
+- **Remote admin:** reach Proxmox via LAN subnet route and/or main-node Tailscale TLS — not worker `:8006` on the tailnet
+- **Observability:** Prometheus on CT `172.16.20.11:9090`; Grafana on QDevice Pi `172.16.0.99:3000` (not on CT 231)
+- **AI agents (Cursor):** MCP over stdio to `proxmox-ve`, `pfsense`, `truenas`, and `openwrt` — run `./deploy/mcp.sh install` once so Cursor can spawn them; agents do not install packages at runtime
 
 ---
 
@@ -34,7 +36,7 @@ Network diagram source: [`docs/Diagrams.drawio`](./docs/Diagrams.drawio) (export
                     ┌─────────────────────────────────────────┐
                     │  Workstation (this repo)                 │
                     │  deploy/toolkit.sh · deploy/mcp.sh       │
-                    │  Cursor ──► proxmox-ve / pfsense / truenas MCP │
+                    │  Cursor ──► proxmox-ve / pfsense / truenas / openwrt MCP │
                     └───────┬─────────────────────────────┘
                             │
               deploy/proxmox.sh
@@ -79,9 +81,11 @@ papita-proxmox-lab/
 │   ├── utils.sh / usage.sh         # Shared logging, prompts, help text
 │   ├── setup/                      # Copied to /root/deploy on each PVE node
 │   │   ├── setup-pve-node.sh       # 19-step interactive bootstrap
+│   │   ├── apt-dependencies.list   # Step 1 packages (includes gnupg for Tailscale apt)
 │   │   ├── post-startup-proc.sh / pre-shutdown-proc.sh
 │   │   ├── misc/tailscale/         # default tags, routes, LAN fallback lists
-│   │   └── misc/monitoring/        # Grafana/Prometheus/Kuma (no secrets)
+│   │   ├── misc/cluster/           # QDevice + TrueNAS NFS + HA helpers
+│   │   └── misc/monitoring/        # Prometheus (CT 231) + Grafana (QDevice Pi) + Kuma
 │   ├── python/                     # Copied to /root/deploy/python on nodes
 │   │   ├── misc/cluster/           # discover_hosts.py, domain_pattern.py (step 7)
 │   │   └── datafiles/              # default.hosts.*, domain suffix lists
@@ -92,11 +96,14 @@ papita-proxmox-lab/
 │   ├── README.md                   # Install guide (scope, update, smoke)
 │   ├── proxmox-ve-mcp/             # Proxmox VE REST — 21 tools (read + gated write)
 │   ├── pfsense-mcp/                # pfSense pfREST — 7 read-only tools + policy framework
-│   └── truenas-mcp/                # TrueNAS WebSocket — storage health + gated writes
+│   ├── truenas-mcp/                # TrueNAS WebSocket — storage health + gated writes
+│   └── openwrt-mcp/                # OpenWrt firewall plan/approve/apply + watchdog
 ├── docs/
 │   ├── TIPSNTRICKS.md              # Operational runbooks
+│   ├── ARCHITECTURE.md             # Cluster / HA / NFS end-state
 │   └── Diagrams.drawio
-├── pyproject.toml                  # Poetry workspace (MCP path deps + linters)
+├── pyproject.toml                  # Poetry workspace (MCP path deps + linters + security floors)
+├── poetry.lock                     # Tracked — Dependabot / reproducible installs
 └── .pre-commit-config.yaml
 ```
 
@@ -150,7 +157,7 @@ After `git pull` when MCP code or skills changed: `./deploy/mcp.sh update`. Relo
 
 ### PVE node prerequisites
 
-Nodes are prepared by **`setup-node`** (or run [`deploy/setup/setup-pve-node.sh`](./deploy/setup/setup-pve-node.sh) locally on the node). Step 1 installs packages from [`deploy/setup/apt-dependencies.list`](./deploy/setup/apt-dependencies.list) (`jq`, `lm-sensors`, `chrony`, `smartmontools`, `postfix`, `python3`, …).
+Nodes are prepared by **`setup-node`** (or run [`deploy/setup/setup-pve-node.sh`](./deploy/setup/setup-pve-node.sh) locally on the node). Step 1 installs packages from [`deploy/setup/apt-dependencies.list`](./deploy/setup/apt-dependencies.list) (`jq`, `gnupg`, `lm-sensors`, `chrony`, `smartmontools`, `postfix`, `python3`, `corosync-qdevice`, …). `gnupg` is required for the signed Tailscale apt repo in step 8.
 
 ---
 
@@ -187,9 +194,10 @@ Run `./deploy/install-git-hooks.sh` once to keep both configs updated after `git
 | ------------ | ---------------- | ------------------------------------------------------------------------------------- |
 | `proxmox-ve` | `proxmox-ve-mcp` | `PVE_HOST`, `PVE_API_TOKEN` or split `PVE_USER` / `PVE_TOKEN_ID` / `PVE_TOKEN_SECRET` |
 | `pfsense`    | `pfsense-mcp`    | `PFSENSE_HOST` (IPv4/IPv6 only), `PFSENSE_API_KEY`, optional `PFSENSE_LOG_LEVEL`      |
-| `truenas`    | `truenas-mcp`    | See [`mcp/truenas-mcp/`](./mcp/truenas-mcp/) `.env.example` / `mcp.json.example`      |
+| `truenas`    | `truenas-mcp`    | `TRUENAS_HOST`, `TRUENAS_API_KEY`; `TRUENAS_VERIFY_SSL` defaults **true** (set `false` only for self-signed lab certs) |
+| `openwrt`    | `openwrt-mcp`    | See [`mcp/openwrt-mcp/`](./mcp/openwrt-mcp/) — plan/approve/apply with watchdog                                  |
 
-Setup guides: [proxmox-ve-mcp/docs/PVE_TOKEN_SETUP.md](./mcp/proxmox-ve-mcp/docs/PVE_TOKEN_SETUP.md), [pfsense-mcp/docs/PFSENSE_API_KEY_SETUP.md](./mcp/pfsense-mcp/docs/PFSENSE_API_KEY_SETUP.md), [truenas-mcp/docs/API_KEY_SETUP.md](./mcp/truenas-mcp/docs/API_KEY_SETUP.md).
+Setup guides: [proxmox-ve-mcp/docs/PVE_TOKEN_SETUP.md](./mcp/proxmox-ve-mcp/docs/PVE_TOKEN_SETUP.md), [pfsense-mcp/docs/PFSENSE_API_KEY_SETUP.md](./mcp/pfsense-mcp/docs/PFSENSE_API_KEY_SETUP.md), [truenas-mcp/docs/API_KEY_SETUP.md](./mcp/truenas-mcp/docs/API_KEY_SETUP.md), [openwrt-mcp/README.md](./mcp/openwrt-mcp/README.md).
 
 ### SSH to PVE
 
@@ -286,9 +294,9 @@ Policy reference: [pfsense-mcp/docs/POLICY.md](./mcp/pfsense-mcp/docs/POLICY.md)
 | ------------------------------ | ------------------------------------------------------ |
 | `setup-node`                   | Replace remote `/root/deploy`, run `setup-pve-node.sh` |
 | `setup-cluster-ha`             | QDevice + TrueNAS NFS + HA group (see TIPSNTRICKS)     |
-| `setup-monitoring`             | Deploy `misc/monitoring` to CT 231 + node-exporter     |
+| `setup-monitoring`             | Deploy `misc/monitoring` to CT 231 + node-exporter on members |
 | `get-temp`                     | Cluster-wide `sensors -j` table                        |
-| `start-cluster`                | WoL peer nodes via `pvenode wakeonlan`                 |
+| `start-cluster`                | WoL **offline** peers via `pvenode wakeonlan` (online-only lists skip sleeping nodes) |
 | `stop-cluster`                 | `pvesh stopall` + shutdown per node                    |
 | `cluster-nodes` / `local-node` | Discovery helpers                                      |
 
@@ -306,14 +314,14 @@ Controlled by `PVE_SETUP_LAST_STEP=19`. At the first prompt, enter `y`, `n`, a s
 
 | Step | Topic                                                                         |
 | ---- | ----------------------------------------------------------------------------- |
-| 1    | APT, dependencies, unattended-upgrades, upgrade cron, optional microcode      |
+| 1    | APT, dependencies (incl. `gnupg`), unattended-upgrades, upgrade cron, optional microcode |
 | 2    | Hibernate / sleep off (WoL-friendly poweroff)                                 |
 | 3    | Wake-on-LAN                                                                   |
 | 4    | Locales                                                                       |
 | 5    | lm-sensors (enables `get-temp`)                                               |
 | 6    | chrony NTP                                                                    |
 | 7    | `/etc/hosts` cluster peers via DNS (`discover_hosts.py`) — **before `pvecm`** |
-| 8    | Tailscale install, sysctl, optional `cluster.fw`, optional NAT                |
+| 8    | Tailscale via **signed pkgs.tailscale.com apt** (GPG fingerprint + `signed-by`), sysctl, optional `cluster.fw` / NAT |
 | 9    | `tailscale up` (main vs worker route policy)                                  |
 | 10   | Post-startup systemd (quorum wait, Ceph noout unset, main-node WoL)           |
 | 11   | Pre-shutdown systemd (optional `pvesh stopall`, Ceph noout)                   |
@@ -324,9 +332,9 @@ Controlled by `PVE_SETUP_LAST_STEP=19`. At the first prompt, enter `y`, `n`, a s
 | 16   | vzdump backup cron                                                            |
 | 17   | Tailscale TLS cert for UI `:8006` (**main node only**)                        |
 | 18   | QDevice client (`corosync-qdevice`) + softdog watchdog (HA fencing prep)      |
-| 19   | prometheus-node-exporter `:9100` (Grafana PVE dashboard)                      |
+| 19   | prometheus-node-exporter `:9100` (scraped by Prometheus on CT 231)            |
 
-After all nodes complete step 18, run **`./deploy/proxmox.sh setup-cluster-ha --ip-address 172.16.0.101`**. Push Prometheus/Alertmanager from [`deploy/setup/misc/monitoring/`](./deploy/setup/misc/monitoring/) with **`./deploy/proxmox.sh setup-monitoring --ip-address 172.16.0.101`**.
+After all nodes complete step 18, run **`./deploy/proxmox.sh setup-cluster-ha --ip-address 172.16.0.101`**. Push Prometheus/Alertmanager (CT 231) + node-exporter with **`./deploy/proxmox.sh setup-monitoring --ip-address 172.16.0.101`**. Install Grafana on the QDevice Pi separately — see [`deploy/setup/misc/monitoring/README.md`](./deploy/setup/misc/monitoring/README.md).
 
 ### Tailscale + lab LAN router
 
@@ -390,14 +398,17 @@ MCP packages emit **structured JSON logs on stderr** (`PVE_LOG_LEVEL` / `PFSENSE
 
 | Document                                                                        | Contents                                                                      |
 | ------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| [**Architecture**](./docs/ARCHITECTURE.md)                                      | Cluster / HA / QDevice / TrueNAS NFS end-state                                |
 | [**MCP install guide**](./mcp/README.md)                                        | `deploy/mcp.sh` install/update, `--scope`, Cursor sync, smoke                 |
 | [**Proxmox VE MCP**](./mcp/proxmox-ve-mcp/README.md)                            | 21 tools, token setup, smoke catalog, requirements                            |
 | [**pfSense MCP**](./mcp/pfsense-mcp/README.md)                                  | 7 read tools, pfREST setup, policy framework                                  |
-| [**TrueNAS MCP**](./mcp/truenas-mcp/README.md)                                  | WebSocket API, storage health, gated writes                                   |
+| [**TrueNAS MCP**](./mcp/truenas-mcp/README.md)                                  | WebSocket API, storage health, gated writes; `TRUENAS_VERIFY_SSL` default true |
+| [**OpenWrt MCP**](./mcp/openwrt-mcp/README.md)                                  | Firewall plan → approve → apply + watchdog                                    |
 | [**pfSense lab policy**](./mcp/pfsense-mcp/docs/POLICY.md)                      | Tailscale firewall, REST API access, endpoint privilege domains               |
-| [**Proxmox Tips & Tricks**](./docs/TIPSNTRICKS.md)                              | Ceph, cluster destroy/join, corosync, pfSense, Tailscale ACLs, MCP, Fedora VM |
+| [**Lab monitoring**](./deploy/setup/misc/monitoring/README.md)                  | Prometheus CT 231, Grafana on QDevice Pi, Uptime Kuma                         |
+| [**Proxmox Tips & Tricks**](./docs/TIPSNTRICKS.md)                              | Ceph, cluster, Tailscale/OpenWrt, TrueNAS, MCP, maintenance                   |
 | [**PVE setup manual**](./deploy/docs/setup-pve-node.usage.txt)                  | Full 19-step reference (shown in `less` during setup)                         |
-| [**Tailscale / pfSense manual**](./deploy/docs/tailscale-pfsense-lan.usage.txt) | ACL grants, verify, pfSense checklist                                         |
+| [**Tailscale / LAN router manual**](./deploy/docs/tailscale-pfsense-lan.usage.txt) | ACL grants, verify, OpenWrt/pfSense checklist                              |
 | [**Network diagram**](./docs/Diagrams.drawio)                                   | Editable architecture (draw.io)                                               |
 
 ---
@@ -406,11 +417,14 @@ MCP packages emit **structured JSON logs on stderr** (`PVE_LOG_LEVEL` / `PFSENSE
 
 | Area                                 | State                                                           |
 | ------------------------------------ | --------------------------------------------------------------- |
-| PVE bootstrap + cluster scripts      | Active (`setup-pve-node.sh`, `proxmox.sh`)                      |
-| Tailscale / pfSense automation       | Active (`tailscale-pfsense-lan.sh`, `pfsense-*` pfREST helpers) |
-| **Cursor MCP — Proxmox VE**          | Active (`proxmox-ve-mcp` v0.1.0a5 — read + gated write)         |
-| **Cursor MCP — pfSense**             | Active (`pfsense-mcp` v0.1.0a1 — read-only + lab policy verify) |
+| PVE bootstrap + cluster scripts      | Active (`setup-pve-node.sh`, `proxmox.sh` — 19 steps)           |
+| Monitoring stack                     | Active (Prometheus/Alertmanager CT 231; Grafana on QDevice Pi)  |
+| Tailscale / LAN router automation    | Active (`tailscale-pfsense-lan.sh`; OpenWrt primary, pfSense helpers) |
+| **Cursor MCP — Proxmox VE**          | Active (`proxmox-ve-mcp` — read + gated write)                  |
+| **Cursor MCP — pfSense**             | Active (`pfsense-mcp` — read-only + lab policy verify)          |
 | **Cursor MCP — TrueNAS**             | Active (`truenas-mcp` — storage health + gated writes)          |
+| **Cursor MCP — OpenWrt**             | Active (`openwrt-mcp` — plan/approve/apply + watchdog)          |
+| `poetry.lock`                        | Tracked (Dependabot / reproducible installs)                    |
 | Legacy Python app packages (`libs/`) | Referenced by toolkit; not in repository                        |
 
 ---

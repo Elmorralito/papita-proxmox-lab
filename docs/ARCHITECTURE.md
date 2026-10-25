@@ -1,6 +1,6 @@
 # Papita Proxmox Lab — Architecture
 
-Operator-facing description of the **current** end state for cluster `pvecm-oldtimers`: Proxmox VE nodes, HA/QDevice, pfSense, and TrueNAS NFS shared storage.
+Operator-facing description of the **current** end state for cluster `pvecm-oldtimers`: Proxmox VE nodes, HA/QDevice, OpenWrt (LAN / Tailscale subnet router), optional pfSense VM, and TrueNAS NFS shared storage.
 
 Runbooks and troubleshooting live in [TIPSNTRICKS.md](./TIPSNTRICKS.md). Network diagram: [Diagrams.drawio](./Diagrams.drawio). Deploy automation: `deploy/` (see `.cursor/rules/repo-map.mdc`).
 
@@ -12,20 +12,22 @@ Runbooks and troubleshooting live in [TIPSNTRICKS.md](./TIPSNTRICKS.md). Network
 Workstation (Tailscale / LAN)
         │
         ├─► Proxmox UI :8006  (cluster pvecm-oldtimers)
-        ├─► pfSense WebGUI / Tailscale subnet router
-        └─► TrueNAS SCALE 172.16.0.100  (NFS → PVE shared storage)
+        ├─► OpenWrt openwrt-pi  (LAN gw + Tailscale subnet router for 172.16.0.0/16)
+        ├─► Grafana :3000 on QDevice Pi 172.16.0.99
+        └─► TrueNAS SCALE 172.16.0.236  (NFS → PVE shared storage)
 
-LAN 172.16.0.0/16  ◄── pfSense LAN (vmbr0)
-WAN / upstream     ◄── pfSense WAN (vmbr1 → 192.168.78.0/24)
+LAN 172.16.0.0/16  ◄── OpenWrt LAN (gateway 172.16.0.1)
 ```
 
 | Role | Host / ID | Notes |
 |------|-----------|--------|
 | PVE cluster | `pvecm-oldtimers` | Corosync on LAN `ring0` |
-| PVE nodes | `pve-001` … `pve-004` | All four online (verified) |
-| Firewall / router | VM `100` `pfSense-FW001` | On `pve-001`, disks on `local-lvm` |
-| Shared storage | TrueNAS `172.16.0.100` | Pool `main_data_storage` → NFS |
-| QDevice | `172.16.0.99` | `corosync-qnetd` only — **not** TrueNAS |
+| PVE nodes | `pve-001` … `pve-004` | LAN `.101`–`.104` |
+| LAN / Tailscale router | OpenWrt `openwrt-pi` | Advertises `172.16.0.0/16`; managed via `openwrt-mcp` |
+| Legacy firewall VM | VM `100` `pfSense-FW001` | Optional; `local-lvm` on `pve-001` |
+| Shared storage | TrueNAS `172.16.0.236` | Pool `main_data_storage` → NFS |
+| QDevice | `172.16.0.99` | `corosync-qnetd` + Grafana (guardrailed) — **not** TrueNAS |
+| Metrics | CT `231` `172.16.20.11` | Prometheus `:9090`, Alertmanager `:9093` |
 
 ---
 
@@ -36,8 +38,8 @@ WAN / upstream     ◄── pfSense WAN (vmbr1 → 192.168.78.0/24)
 | Segment | CIDR / range | Purpose |
 |---------|--------------|---------|
 | Homelab LAN | `172.16.0.0/16` | PVE management, corosync `ring0`, NFS clients, guest LAN |
-| Upstream / WAN bridge | `192.168.78.0/24` | Physical uplink behind pfSense WAN |
-| Tailscale CGNAT | `100.64.0.0/10` | Remote admin; pfSense advertises `172.16.0.0/16` |
+| Upstream / WAN bridge | `192.168.78.0/24` | Physical uplink (legacy pfSense WAN path; OpenWrt may use its own WAN) |
+| Tailscale CGNAT | `100.64.0.0/10` | Remote admin; OpenWrt advertises `172.16.0.0/16` |
 
 ### 2.2 Proxmox bridges (typical node)
 
@@ -57,20 +59,22 @@ Node LAN IPs (corosync `ring0_addr`):
 | `pve-003` | `172.16.0.103` |
 | `pve-004` | `172.16.0.104` |
 
-TrueNAS NFS server: **`172.16.0.100`**. Lab LAN gateway for clients is typically **`172.16.0.1`** (pfSense LAN) — see Tailscale/pfSense notes in TIPSNTRICKS.
+TrueNAS NFS server: **`172.16.0.236`** (`default.truenas.nfs.env`). Lab LAN gateway for clients is **`172.16.0.1`** (OpenWrt) — see Tailscale / OpenWrt notes in TIPSNTRICKS.
 
-### 2.3 pfSense placement
+### 2.3 LAN router and legacy pfSense
 
-VM **100** `pfSense-FW001`:
+**Current:** OpenWrt `openwrt-pi` is the LAN gateway (`172.16.0.1`) and Tailscale subnet router for `172.16.0.0/16`. Agents change its firewall only via `openwrt-mcp`.
 
-| NIC | Bridge | Role |
+**Legacy / optional:** VM **100** `pfSense-FW001` (disks on `local-lvm`) may still exist for lab experiments; do not assume it advertises Tailscale routes.
+
+| NIC (pfSense VM) | Bridge | Role |
 |-----|--------|------|
 | `net0` | `vmbr1` | WAN (upstream) |
 | `net1` | `vmbr0` | LAN (`172.16.0.0/16`) |
 
 Disk: `local-lvm:vm-100-disk-0` on `pve-001`. **`onboot=1`**. Not HA-eligible while disks remain local (see §5).
 
-Tailscale: pfSense joins the tailnet as a **subnet router** advertising `172.16.0.0/16`. Details: TIPSNTRICKS § pfSense / Tailscale.
+Tailscale: **OpenWrt** joins the tailnet as the **subnet router** advertising `172.16.0.0/16`. Details: TIPSNTRICKS § Tailscale / OpenWrt.
 
 ---
 
@@ -85,10 +89,11 @@ Tailscale: pfSense joins the tailnet as a **subnet router** advertising `172.16.
 
 Orchestration entrypoints:
 
-- `deploy/toolkit.sh` → `deploy/proxmox.sh` (setup-node, setup-cluster-ha, start/stop-cluster, …)
-- Node bootstrap: `deploy/setup/setup-pve-node.sh` (18 steps; QDevice client + softdog in step 18)
+- `deploy/toolkit.sh` → `deploy/proxmox.sh` (setup-node, setup-cluster-ha, setup-monitoring, start/stop-cluster, …)
+- Node bootstrap: `deploy/setup/setup-pve-node.sh` (**19** steps; QDevice client + softdog in step 18; node-exporter in step 19)
+- Monitoring: `./deploy/proxmox.sh setup-monitoring` → CT 231; Grafana via `papita-qdevice-grafana.sh` on `.99`
 
-Cursor MCP: `proxmox-ve` (`mcp/proxmox-ve-mcp`) for REST reads and gated guest power — not for `pvecm` / WoL / sensors.
+Cursor MCP: `proxmox-ve`, `pfsense`, `truenas`, `openwrt` under `mcp/` — not for `pvecm` / WoL / sensors.
 
 ---
 
@@ -115,7 +120,7 @@ Config overlays:
 | Bootstrap | `deploy/setup/misc/cluster/qdevice-server-bootstrap.sh` |
 | Clients | `corosync-qdevice` on each PVE node |
 
-**Do not** run QDevice on TrueNAS (`172.16.0.100`). TrueNAS is NFS only.
+**Do not** run QDevice on TrueNAS (`172.16.0.236`). TrueNAS is NFS (and Scrutiny) only. The QDevice Pi may also host Grafana with cgroup/nice guardrails so `corosync-qnetd` stays privileged.
 
 Quorum math (4 PVE + QDevice): 5 votes → quorum 3 → cluster can remain quorate with **2 PVE nodes + QDevice**. Confirm live with SSH `pvecm status` (REST `pve_cluster_health` is approximate only).
 
@@ -155,7 +160,7 @@ Future HA guests: place disks on **`truenas-nfs-main`**, then enroll under `papi
 
 ### 6.2 NFS exports (TrueNAS → PVE)
 
-Server: **`172.16.0.100`**. Options (PVE): `vers=4.1,hard,nconnect=4`.
+Server: **`172.16.0.236`**. Options (PVE): `vers=4.1,hard,nconnect=4`.
 
 | Export path | PVE storage ID | Content | Purpose |
 |-------------|----------------|---------|---------|
@@ -184,11 +189,11 @@ Package `mcp/truenas-mcp` — pool/dataset/NFS reads and gated writes. Does **no
 
 ## 7. How the pieces connect
 
-1. **LAN** (`vmbr0` / `172.16.0.0/16`): PVE nodes, TrueNAS NFS, corosync, pfSense LAN.
-2. **WAN** (`vmbr1`): pfSense upstream only.
-3. **Shared storage path:** TrueNAS ZFS `main_data_storage` → NFS exports → PVE storage IDs → guest disks / media.
-4. **HA path:** QDevice (`172.16.0.99`) + softdog + NFS on `truenas-nfs-main` + HA rule `papita-ha`.
-5. **Remote access:** Tailscale via pfSense subnet routes (and/or node Tailscale from setup steps 8–9 / 17).
+1. **LAN** (`vmbr0` / `172.16.0.0/16`): PVE nodes, TrueNAS NFS, corosync, OpenWrt gateway.
+2. **Shared storage path:** TrueNAS ZFS `main_data_storage` → NFS exports → PVE storage IDs → guest disks / media.
+3. **HA path:** QDevice (`172.16.0.99`) + softdog + NFS on `truenas-nfs-main` + HA rule `papita-ha`.
+4. **Remote access:** Tailscale via OpenWrt subnet routes (and/or node Tailscale from setup steps 8–9 / 17).
+5. **Metrics:** Prometheus/Alertmanager on CT 231; Grafana on QDevice Pi; PVE node-exporter `:9100` (setup step 19).
 
 ---
 
@@ -211,7 +216,7 @@ True `pvecm` / QDevice vote detail still requires SSH (`pvecm status`) — not f
 
 | Storage ID | Type | Export / path | Content | Shared | `pve-001` status |
 |------------|------|---------------|---------|--------|------------------|
-| `truenas-nfs-main` | nfs | `172.16.0.100:/mnt/main_data_storage` | `images,rootdir` | yes | active; ≈**5.31 TiB** free |
+| `truenas-nfs-main` | nfs | `172.16.0.236:/mnt/main_data_storage` | `images,rootdir` | yes | active; ≈**5.31 TiB** free (capacity snapshot; re-check live) |
 | `truenas-nfs-media` | nfs | `…:/mnt/main_data_storage/ct-templates` | `iso,vztmpl,import` | yes | active; ≈124 MiB used (CT template) |
 | `truenas-nfs-logs` | nfs | `…:/mnt/main_data_storage/logs` | `backup` | yes | active |
 | `local-lvm` | lvmthin | (per node) | `images,rootdir` | no | — |
@@ -281,7 +286,7 @@ Work performed to reach the state in §8. Guests **100/101 were not migrated**; 
 | True quorum | SSH `pvecm status` — not REST alone |
 | Enroll HA guest | Disks on `truenas-nfs-main` first; leave `HA_AUTO_ENROLL_NFS_GUESTS=0` unless intentional |
 | Expand capacity | Grow `main_data_storage` (larger disks / add vdevs); do not split “free space” across pools via quotas |
-| QDevice vs NFS | Separate hosts: `.99` vs `.100` |
+| QDevice vs NFS | Separate hosts: `.99` (qnetd + Grafana) vs `.236` (TrueNAS NFS) |
 | Diagrams / deep runbooks | [Diagrams.drawio](./Diagrams.drawio), [TIPSNTRICKS.md](./TIPSNTRICKS.md) |
 
 ---

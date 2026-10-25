@@ -8,7 +8,7 @@ Last aligned to repo tree (~46 tracked files). Gitignored paths listed separatel
 
 | File                      | Role                                                                                      |
 | ------------------------- | ----------------------------------------------------------------------------------------- |
-| `README.md`               | Project title; links to network diagram and `docs/TIPSNTRICKS.md`                         |
+| `README.md`               | Project overview; MCP, monitoring, 19-step bootstrap, doc index                           |
 | `LICENSE`                 | License text                                                                              |
 | `pyproject.toml`          | Poetry config (`package-mode=false`); black/isort/flake8/mypy/pylint/interrogate settings |
 | `poetry.lock`             | Locked deps (tracked — Dependabot / reproducible security pins)                           |
@@ -35,7 +35,7 @@ Last aligned to repo tree (~46 tracked files). Gitignored paths listed separatel
 | File                       | Role                                                                                                                                    |
 | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
 | `toolkit.sh`               | Main CLI: `build`, `devsync`, `test`, `proxmox`, AWS auth, pre-commit                                                      |
-| `proxmox.sh`               | SSH to PVE: `setup-node` (SCP `deploy/setup/`, `utils.sh`, `usage.sh`, `docs/setup-pve-node.usage.txt`), `get-temp`, cluster start/stop |
+| `proxmox.sh`               | SSH to PVE: `setup-node`, `setup-cluster-ha`, `setup-monitoring`, `get-temp`, `start-cluster`, `stop-cluster` |
 | `mcp.sh`                   | Install / update / smoke / cursor-sync / skills-sync for MCP servers + agent skills |
 | `utils.sh`                 | Shared helpers: `log`, `prompt_pve_start`, `prompt_until_*`, `prompt_crontab_schedule`, AWS auth, `run_command`                         |
 | `usage.sh`                 | Help text: `usage_toolkit`, `usage_proxmox`, `usage_setup_pve_node`                                                  |
@@ -152,7 +152,8 @@ Deployed to `/root/deploy/python/` on PVE nodes (`misc/cluster/` + `datafiles/`)
 
 | File              | Role                                    |
 | ----------------- | --------------------------------------- |
-| `TIPSNTRICKS.md`  | Ceph, OSD, cluster maintenance runbooks |
+| `TIPSNTRICKS.md`  | Ceph, OSD, Tailscale/OpenWrt, TrueNAS, metrics stack, MCP runbooks |
+| `ARCHITECTURE.md` | HA / QDevice / NFS / OpenWrt end-state |
 | `Diagrams.drawio` | Network/architecture diagram (editable) |
 
 Referenced in README but may be exported separately: `docs/Diagrams-Network.png`
