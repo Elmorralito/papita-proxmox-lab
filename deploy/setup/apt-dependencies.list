@@ -3,6 +3,7 @@
 
 curl
 jq
+gnupg
 locales
 unattended-upgrades
 lm-sensors

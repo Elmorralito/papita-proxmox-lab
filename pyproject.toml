@@ -11,9 +11,14 @@ proxmox-ve-mcp = { path = "./mcp/proxmox-ve-mcp", develop = true }
 pfsense-mcp = { path = "./mcp/pfsense-mcp", develop = true }
 truenas-mcp = { path = "./mcp/truenas-mcp", develop = true }
 openwrt-mcp = { path = "./mcp/openwrt-mcp", develop = true }
+# Security floor pins (transitive via mcp SDK / httpx stack; Dependabot GHSA).
+# Keep floors in sync with open GitHub Dependabot alerts on this repo.
+PyJWT = ">=2.15.0"
+anyio = ">=4.14.2"
+cryptography = ">=50.0.0"
 
 [tool.poetry.group.pre-commit.dependencies]
-black = "^24.4.2"
+black = "^26.3.1"
 mypy = "^1.14.1"
 pre-commit = "^3.7.1"
 pylint = "^3.2.6"
@@ -25,8 +30,8 @@ poetry = "^2.2.1"
 interrogate = "^1.7.0"
 
 [tool.poetry.group.test.dependencies]
-pytest = "^8.3.1"
-pytest-asyncio = "^0.25.0"
+pytest = "^9.0.3"
+pytest-asyncio = "^1.4.1"
 respx = "^0.22.0"
 
 [tool.pylint.'MESSAGES CONTROL']

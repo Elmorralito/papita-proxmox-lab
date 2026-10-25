@@ -49,11 +49,7 @@ def script_router(transport, *, apply_ok=True, after_ok=True):
     def inspect(_):
         if not state["applied"]:
             return before
-        extra = (
-            {"nft_rules": ["mcp_allow_metrics", "mcp_allow_alt"]}
-            if after_ok
-            else {"nft_loaded": False}
-        )
+        extra = {"nft_rules": ["mcp_allow_metrics", "mcp_allow_alt"]} if after_ok else {"nft_loaded": False}
         return {**before, "config_revision": NEW_REV, **extra}
 
     def apply(_):
@@ -66,9 +62,9 @@ def script_router(transport, *, apply_ok=True, after_ok=True):
 
     transport.handlers.update(
         inspect=inspect,
-        apply=apply
-        if apply_ok
-        else {"ok": False, "error": {"code": "VALIDATION_FAILED", "message": "fw4 check failed"}},
+        apply=(
+            apply if apply_ok else {"ok": False, "error": {"code": "VALIDATION_FAILED", "message": "fw4 check failed"}}
+        ),
         confirm={"ok": True, "state": "confirmed"},
         rollback=rollback,
         status={"ok": True, "state": "applied_unconfirmed", "new_revision": NEW_REV},

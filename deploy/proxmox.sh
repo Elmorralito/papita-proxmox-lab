@@ -518,8 +518,9 @@ fi
 
 # Unix domain socket paths must stay short (e.g. macOS ~104 chars). Avoid long TMPDIR
 # (/var/folders/...) and cm-%r@%h:%p (OpenSSH may lengthen it further).
-_ssh_mux_base="$(mktemp -u "/tmp/papita-pm.XXXXXX")"
-SSH_MUX_SOCKET="${_ssh_mux_base}-%C"
+# Use a real temp dir (not mktemp -u) to avoid TOCTOU on the ControlPath prefix.
+_ssh_mux_dir="$(mktemp -d /tmp/papita-pm.XXXXXX)"
+SSH_MUX_SOCKET="${_ssh_mux_dir}/%C"
 # One authenticated session; scp and later ssh reuse it (single password prompt if needed).
 SSH_COMMON_OPTS=(
     -o ControlMaster=auto
@@ -674,6 +675,9 @@ get_cluster_temperature() {
 
 _proxmox_ssh_cleanup() {
     ssh "${SSH_COMMON_OPTS[@]}" -O exit "${TARGET_USERNAME}@${IP_ADDRESS}" 2>/dev/null || true
+    if [[ -n "${_ssh_mux_dir:-}" && -d "${_ssh_mux_dir}" ]]; then
+        rm -rf -- "${_ssh_mux_dir}"
+    fi
 }
 trap _proxmox_ssh_cleanup EXIT
 

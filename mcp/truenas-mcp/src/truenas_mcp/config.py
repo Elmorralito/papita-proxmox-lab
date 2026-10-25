@@ -38,8 +38,11 @@ class TnasSettings(BaseSettings):
     port: int = Field(default=443, ge=1, le=65535)
     api_key: str = Field(description="TrueNAS API key from My API Keys in the web UI")
     verify_ssl: bool = Field(
-        default=False,
-        description="Verify TLS certificate (homelab often uses self-signed certs)",
+        default=True,
+        description=(
+            "Verify TLS certificate for wss:// (default true). "
+            "Set TRUENAS_VERIFY_SSL=false only for trusted-LAN self-signed certs."
+        ),
     )
     ws_path: str = Field(
         default=DEFAULT_WS_PATH,

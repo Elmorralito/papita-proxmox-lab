@@ -27,6 +27,8 @@ Create a dedicated local user and API key on TrueNAS. **Do not** use the primary
 
 In `~/.cursor/mcp.json` (after `./deploy/mcp.sh cursor-sync`):
 
+Code default for `TRUENAS_VERIFY_SSL` is **true**. Keep `"false"` only while the NAS uses a self-signed cert on a trusted LAN; switch to `"true"` once you trust the CA (or Tailscale HTTPS cert).
+
 ```json
 "truenas": {
   "env": {
@@ -42,7 +44,7 @@ Or export for CLI smoke tests:
 ```bash
 export TRUENAS_HOST=172.16.0.236
 export TRUENAS_API_KEY='your-key'
-export TRUENAS_VERIFY_SSL=false
+export TRUENAS_VERIFY_SSL=false   # omit or set true when the cert is trusted
 poetry run truenas-mcp-smoke
 ```
 

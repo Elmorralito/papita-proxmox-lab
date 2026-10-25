@@ -134,7 +134,7 @@ Step skip: `_skip_pve_step N` when `START_FROM_STEP > N`. Menu max: `PVE_SETUP_L
 |------|------|
 | `pyproject.toml` | Poetry (package-mode=false); black/isort/flake8/mypy/pylint/interrogate settings |
 | `.pre-commit-config.yaml` | trailing-ws, yaml/toml, shellcheck, isort, black, flake8, pylint, mypy |
-| `.gitignore` | `.env`, `poetry.lock`, drawio backups, monitoring tokens/grafana.env |
+| `.gitignore` | `.env`, drawio backups, monitoring tokens/grafana.env (`poetry.lock` is tracked) |
 
 ## Conventions for agents
 
