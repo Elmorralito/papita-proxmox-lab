@@ -33,6 +33,8 @@ class PveApiError(Exception):
         pve_errors: Any = None,
         pve_message: str | None = None,
         endpoint: str | None = None,
+        code: str | None = None,
+        hint: str | None = None,
     ) -> None:
         """Initialize a Proxmox API error with optional response metadata.
 
@@ -42,12 +44,16 @@ class PveApiError(Exception):
             pve_errors: Structured errors from the Proxmox JSON ``errors`` field.
             pve_message: Raw ``message`` field from the Proxmox JSON body (often permission text).
             endpoint: API path that was requested when the error occurred.
+            code: Explicit error code for transport failures (overrides status-based mapping).
+            hint: Actionable hint for transport failures (overrides permission hints).
         """
         super().__init__(message)
         self.status_code = status_code
         self.pve_errors = pve_errors
         self.pve_message = pve_message
         self.endpoint = endpoint
+        self.code = code
+        self.hint = hint
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the error for MCP JSON tool responses.
@@ -57,6 +63,7 @@ class PveApiError(Exception):
         * ``401`` → ``PVE_UNAUTHORIZED``
         * ``403`` → ``PVE_FORBIDDEN`` (includes ``hint``, ``required_path``, ``required_privilege``)
         * ``>= 500`` → ``PVE_SERVER_ERROR``
+        * explicit ``code`` (transport failures, e.g. ``PVE_DNS_ERROR``) when set
         * otherwise → ``PVE_ERROR``
 
         Returns:
@@ -64,7 +71,7 @@ class PveApiError(Exception):
             ``message``, ``status_code``, ``pve_errors``, and optional ``pve_message``,
             ``endpoint``, and ``hint`` keys.
         """
-        code = "PVE_ERROR"
+        code = self.code or "PVE_ERROR"
         if self.status_code == 401:
             code = "PVE_UNAUTHORIZED"
         elif self.status_code == 403:
@@ -83,7 +90,7 @@ class PveApiError(Exception):
         if self.endpoint:
             body["endpoint"] = self.endpoint
 
-        hint = permission_hint(
+        hint = self.hint or permission_hint(
             status_code=self.status_code,
             message=self.pve_message,
             endpoint=self.endpoint,

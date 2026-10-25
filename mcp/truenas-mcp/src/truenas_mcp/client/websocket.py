@@ -5,16 +5,70 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import socket
 import ssl
 from typing import Any
 
 import websockets
 from websockets.asyncio.client import ClientConnection
+from websockets.exceptions import InvalidHandshake, InvalidURI
 
 from truenas_mcp.client.errors import TnasApiError
 from truenas_mcp.config import TnasSettings
 
 logger = logging.getLogger("truenas_mcp.client.websocket")
+
+_UNREACHABLE_HINT = (
+    "Host did not answer. TrueNAS is reachable only through the LAN router guest "
+    "(pfSense/OpenWrt) or its Tailscale device; check that both are up."
+)
+
+
+def classify_connect_error(exc: BaseException, settings: TnasSettings) -> TnasApiError:
+    """Map a connect/handshake failure to an actionable :class:`TnasApiError`."""
+    target = f"{settings.host}:{settings.port}"
+    if isinstance(exc, TnasApiError):
+        return exc
+    if isinstance(exc, socket.gaierror):
+        return TnasApiError(
+            f"TRUENAS_HOST '{settings.host}' does not resolve: {exc}",
+            code="DNS_ERROR",
+            hint="Check the Tailscale device name (MagicDNS) or use the LAN IP 172.16.0.100.",
+        )
+    if isinstance(exc, ConnectionRefusedError):
+        return TnasApiError(
+            f"Connection refused by {target}",
+            code="CONNECTION_REFUSED",
+            hint="Host is up but nothing listens on TRUENAS_PORT; check the port and the TrueNAS web service.",
+        )
+    if isinstance(exc, ssl.SSLError):
+        return TnasApiError(
+            f"TLS handshake with {target} failed: {exc}",
+            code="TLS_ERROR",
+            hint="Set TRUENAS_VERIFY_SSL=false for self-signed certs, or install a trusted certificate.",
+        )
+    if isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
+        return TnasApiError(
+            f"Timed out connecting to {target}",
+            code="CONNECT_TIMEOUT",
+            hint=_UNREACHABLE_HINT,
+        )
+    if isinstance(exc, (InvalidHandshake, InvalidURI)):
+        return TnasApiError(
+            f"WebSocket handshake with {settings.ws_uri} failed: {exc}",
+            code="HANDSHAKE_ERROR",
+            hint="Check TRUENAS_WS_PATH (/websocket on SCALE 25+, /api/v2.0/websocket on older builds).",
+        )
+    if isinstance(exc, OSError):
+        return TnasApiError(
+            f"Cannot connect to {target}: {exc or type(exc).__name__}",
+            code="CONNECTION_ERROR",
+            hint=_UNREACHABLE_HINT,
+        )
+    return TnasApiError(
+        f"Unexpected error connecting to {target}: {type(exc).__name__}: {exc}",
+        code="CONNECTION_ERROR",
+    )
 
 
 class TnasClient:
@@ -130,7 +184,11 @@ class TnasClient:
     async def call(self, method: str, params: list[Any] | None = None) -> Any:
         """Invoke a TrueNAS middleware method and return the result payload."""
         async with self._lock:
-            await self._ensure_connected()
+            try:
+                await self._ensure_connected()
+            except Exception as exc:
+                await self.aclose()
+                raise classify_connect_error(exc, self._settings) from exc
             assert self._ws is not None
             req_id = self._next_id()
             payload = {

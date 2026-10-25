@@ -132,7 +132,7 @@ cp mcp/proxmox-ve-mcp/mcp.json.example ~/.cursor/mcp.json
 
 ```bash
 ./deploy/mcp.sh smoke              # basic (6 checks)
-./deploy/mcp.sh smoke --extended   # full (13 checks)
+./deploy/mcp.sh smoke --extended   # full (17 checks)
 ```
 
 Or directly (with `PVE_*` exported):

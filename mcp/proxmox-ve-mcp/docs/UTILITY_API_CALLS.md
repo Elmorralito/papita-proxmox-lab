@@ -53,16 +53,24 @@ Legend: **R** = read, **W** = write (requires `confirm=true` in MCP).
 
 ### Cluster & version
 
-| MCP tool                             | HTTP | REST path                                      | Query / body                                             | API viewer                                                                                         |
-| ------------------------------------ | ---- | ---------------------------------------------- | -------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| `pve_get_version` **R**              | GET  | `/version`                                     | —                                                        | [version](https://pve.proxmox.com/pve-docs/api-viewer/#/version)                                   |
-| `pve_list_nodes` **R**               | GET  | `/cluster/resources`                           | `type=node`                                              | [cluster/resources](https://pve.proxmox.com/pve-docs/api-viewer/#/cluster/resources)               |
-| `pve_get_cluster_config_nodes` **R** | GET  | `/cluster/config/nodes`                        | —                                                        | [cluster/config/nodes](https://pve.proxmox.com/pve-docs/api-viewer/#/cluster/config/nodes)         |
-| `pve_get_cluster_options` **R**      | GET  | `/cluster/options`                             | —                                                        | [cluster/options](https://pve.proxmox.com/pve-docs/api-viewer/#/cluster/options)                   |
-| `pve_list_tasks` **R**               | GET  | `/cluster/tasks`                               | `statusfilter`, `start`, `limit`                         | [cluster/tasks](https://pve.proxmox.com/pve-docs/api-viewer/#/cluster/tasks)                       |
-| `pve_get_task_log` **R**             | GET  | `/nodes/{node}/tasks/{upid}/log`               | —                                                        | [nodes/…/tasks/…/log](https://pve.proxmox.com/pve-docs/api-viewer/#/nodes/{node}/tasks/{upid}/log) |
-| `pve_list_resources` **R**           | GET  | `/cluster/resources`                           | `type`, `start`, `limit`; MCP filters `node` client-side | [cluster/resources](https://pve.proxmox.com/pve-docs/api-viewer/#/cluster/resources)               |
-| `pve_cluster_health` **R**           | GET  | `/cluster/resources` + `/cluster/config/nodes` | Derived summary (no single upstream endpoint)            | [cluster](https://pve.proxmox.com/pve-docs/api-viewer/#/cluster)                                   |
+| MCP tool                             | HTTP | REST path                                                                                      | Query / body                                             | API viewer                                                                                         |
+| ------------------------------------ | ---- | ---------------------------------------------------------------------------------------------- | -------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `pve_get_version` **R**              | GET  | `/version`                                                                                     | —                                                        | [version](https://pve.proxmox.com/pve-docs/api-viewer/#/version)                                   |
+| `pve_list_nodes` **R**               | GET  | `/cluster/resources`                                                                           | `type=node`                                              | [cluster/resources](https://pve.proxmox.com/pve-docs/api-viewer/#/cluster/resources)               |
+| `pve_get_cluster_config_nodes` **R** | GET  | `/cluster/config/nodes`                                                                        | —                                                        | [cluster/config/nodes](https://pve.proxmox.com/pve-docs/api-viewer/#/cluster/config/nodes)         |
+| `pve_get_cluster_options` **R**      | GET  | `/cluster/options`                                                                             | —                                                        | [cluster/options](https://pve.proxmox.com/pve-docs/api-viewer/#/cluster/options)                   |
+| `pve_list_tasks` **R**               | GET  | `/cluster/tasks`                                                                               | `statusfilter`, `start`, `limit`                         | [cluster/tasks](https://pve.proxmox.com/pve-docs/api-viewer/#/cluster/tasks)                       |
+| `pve_get_task_log` **R**             | GET  | `/nodes/{node}/tasks/{upid}/log`                                                               | —                                                        | [nodes/…/tasks/…/log](https://pve.proxmox.com/pve-docs/api-viewer/#/nodes/{node}/tasks/{upid}/log) |
+| `pve_list_resources` **R**           | GET  | `/cluster/resources`                                                                           | `type`, `start`, `limit`; MCP filters `node` client-side | [cluster/resources](https://pve.proxmox.com/pve-docs/api-viewer/#/cluster/resources)               |
+| `pve_cluster_health` **R**           | GET  | `/cluster/resources` + `/cluster/config/nodes` + `/cluster/status` + `/cluster/config/qdevice` | Quorum, entry node (`local=1`), QDevice, online counts   | [cluster](https://pve.proxmox.com/pve-docs/api-viewer/#/cluster)                                   |
+
+### HA and bounded waits (read)
+
+| MCP tool                     | HTTP | REST path                                                                                                  | Notes                                                              | Privilege   |
+| ---------------------------- | ---- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ | ----------- |
+| `pve_get_ha_status` **R**    | GET  | `/cluster/ha/status/current`, `/cluster/ha/resources`, `/cluster/ha/rules` (PVE 9) or `/cluster/ha/groups` | Plus `/cluster/options` → `ha.shutdown_policy` (must be `freeze`)  | `Sys.Audit` |
+| `pve_wait_for_task` **R**    | GET  | `/nodes/{node}/tasks/{upid}/status`, `…/log`                                                               | Polls ≤120 s; `finished=false` on timeout (re-call)                | `Sys.Audit` |
+| `pve_wait_nodes_state` **R** | GET  | `/cluster/status`                                                                                          | Polls ≤120 s; for `offline`, API connection loss = offline_assumed | `Sys.Audit` |
 
 ### Nodes & guests (read)
 
@@ -93,6 +101,18 @@ Legend: **R** = read, **W** = write (requires `confirm=true` in MCP).
 | `pve_stopall_guests` **W** | POST | `/nodes/{node}/stopall`                             | `timeout` (seconds) | `VM.PowerMgmt` |
 
 API viewer: [status/start](https://pve.proxmox.com/pve-docs/api-viewer/#/nodes/{node}/qemu/{vmid}/status/start), [status/shutdown](https://pve.proxmox.com/pve-docs/api-viewer/#/nodes/{node}/qemu/{vmid}/status/shutdown), [stopall](https://pve.proxmox.com/pve-docs/api-viewer/#/nodes/{node}/stopall).
+
+### Node power (write / destructive)
+
+| MCP tool                  | HTTP | REST path                                       | Body                             | Privilege       |
+| ------------------------- | ---- | ----------------------------------------------- | -------------------------------- | --------------- |
+| `pve_stop_guest` **D**    | POST | `/nodes/{node}/{guest_type}/{vmid}/status/stop` | `overrule-shutdown=1` (optional) | `VM.PowerMgmt`  |
+| `pve_shutdown_node` **D** | POST | `/nodes/{node}/status`                          | `command=shutdown` \| `reboot`   | `Sys.PowerMgmt` |
+| `pve_wake_on_lan` **W**   | POST | `/nodes/{node}/wakeonlan`                       | — (returns the MAC sent)         | `Sys.PowerMgmt` |
+
+`pve_shutdown_cluster` **D** composes these calls: `GET /cluster/status`, `/cluster/resources?type=vm`, `/cluster/ha/status/current` (HA-managed guests, entry-node fence risk), `/cluster/tasks` (reuses in-flight `stopall` / `qmshutdown` tasks on re-call), then `POST /nodes/{peer}/stopall` (or per-guest `status/shutdown forceStop=1` for the non-HA guests on a peer that also hosts HA guests), `POST .../status/shutdown` per entry-node guest, `POST /nodes/{peer}/status command=shutdown`, and finally the entry node.
+
+`pve_shutdown_node` pre-reads `/cluster/status` (entry node, members), `/cluster/options` (`ha.shutdown_policy`), `/cluster/config/qdevice` (vote counted only when `State=Connected`), `/cluster/ha/status/current` (only when quorum would be lost), and `/nodes/{node}/{qemu,lxc}` before posting. `pve_shutdown_guest`, `pve_stop_guest`, and `pve_stopall_guests` also read `/cluster/ha/status/current` to warn about HA-managed guests. The WoL packet is sent by the node serving the API (entry node) using the MAC in the target's node config (`pvenode config set -wakeonlan`).
 
 ---
 

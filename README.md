@@ -262,7 +262,7 @@ Options: `--scope user|project|both`, `--no-sync`, `--no-skills`, `--server NAME
 ./deploy/mcp.sh update                                     # after git pull
 ./deploy/mcp.sh skills-sync --scope both                   # skills only
 ./deploy/mcp.sh smoke --server proxmox-ve-mcp              # 6 basic checks
-./deploy/mcp.sh smoke --server proxmox-ve-mcp --extended   # 13 checks (guests, storage, Ceph)
+./deploy/mcp.sh smoke --server proxmox-ve-mcp --extended   # extended checks (guests, storage, HA, power permissions)
 ./deploy/mcp.sh smoke --server pfsense-mcp                 # 9 checks (core + lab policy)
 ./deploy/mcp.sh smoke --server truenas-mcp
 ```

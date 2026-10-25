@@ -33,6 +33,7 @@ _load_lab_defaults() {
     HA_GROUP_NAME="${HA_GROUP_NAME:-papita-ha}"
     HA_NODES="${HA_NODES:-}"
     HA_AUTO_ENROLL_NFS_GUESTS="${HA_AUTO_ENROLL_NFS_GUESTS:-0}"
+    HA_SHUTDOWN_POLICY="${HA_SHUTDOWN_POLICY:-freeze}"
 }
 
 # list_file_active_lines from deploy/utils.sh when sourced from proxmox remote path.
@@ -347,7 +348,43 @@ _verify_fencing() {
     fi
 }
 
+_current_ha_shutdown_policy() {
+    pvesh get /cluster/options --output-format json 2>/dev/null | jq -r '
+        .ha as $ha
+        | (if ($ha | type) == "object" then $ha.shutdown_policy
+           elif ($ha | type) == "string" then ($ha | capture("shutdown_policy=(?<p>[a-z_]+)").p)?
+           else null end) // "conditional"' 2>/dev/null || true
+}
+
+_ensure_ha_shutdown_policy() {
+    local desired="${HA_SHUTDOWN_POLICY:-}"
+    case "$desired" in
+        freeze | failover | migrate | conditional) ;;
+        *)
+            _log ERROR "Invalid HA_SHUTDOWN_POLICY '${desired}' (freeze|failover|migrate|conditional)."
+            return 1
+            ;;
+    esac
+    if ! command -v pvesh >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
+        _log WARN "pvesh/jq not found; set manually: pvesh set /cluster/options --ha shutdown_policy=${desired}"
+        return 0
+    fi
+
+    local current
+    current="$(_current_ha_shutdown_policy)"
+    if [[ "$current" == "$desired" ]]; then
+        _log INFO "HA shutdown_policy already '${desired}'."
+        return 0
+    fi
+    if pvesh set /cluster/options --ha "shutdown_policy=${desired}" 2>/dev/null; then
+        _log INFO "HA shutdown_policy: '${current:-unknown}' → '${desired}'."
+        return 0
+    fi
+    _log WARN "Could not set HA shutdown_policy (cluster not quorate?). Run: pvesh set /cluster/options --ha shutdown_policy=${desired}"
+}
+
 _ensure_ha_group() {
+    _ensure_ha_shutdown_policy
     _ensure_ha_resources
     _ensure_ha_rule
 }
@@ -390,6 +427,7 @@ main() {
     fi
     _log INFO "  HA group:       ${HA_GROUP_NAME}"
     _log INFO "  HA nodes:       ${HA_NODES:-<all cluster members>}"
+    _log INFO "  HA shutdown:    ${HA_SHUTDOWN_POLICY}"
 
     _ensure_cluster_firewall_nfs
     _ensure_nfs_storage

@@ -1,5 +1,6 @@
 """Pydantic input schemas for TrueNAS MCP tools."""
 
+import ipaddress
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -71,6 +72,23 @@ class DismissAlertInput(ConfirmInput):
     """Dismiss an active alert."""
 
     alert_id: str = Field(min_length=1, description="Alert uuid from alert.list")
+
+
+class PowerInput(BaseModel):
+    """Guarded NAS shutdown/reboot request."""
+
+    reason: str = Field(min_length=3, max_length=200, description="Why the NAS is powered off (logged on the NAS)")
+    delay_s: int = Field(default=0, ge=0, le=3600, description="Seconds TrueNAS waits before powering off")
+    force: bool = Field(default=False, description="Skip the NFS-client and running-job guards")
+    expected_clients: list[str] = Field(
+        default_factory=list, description="Client IPs allowed to stay connected (e.g. the entry PVE node)"
+    )
+
+    @field_validator("expected_clients")
+    @classmethod
+    def check_ips(cls, value: list[str]) -> list[str]:
+        """Require literal IP addresses."""
+        return [str(ipaddress.ip_address(ip.strip())) for ip in value]
 
 
 class WriteJobOptions(BaseModel):

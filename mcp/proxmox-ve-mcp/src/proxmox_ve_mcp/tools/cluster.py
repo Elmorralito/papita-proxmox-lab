@@ -160,9 +160,44 @@ async def pve_list_resources_impl(
     )
 
 
+async def cluster_quorum(client: Any, warnings: list[str]) -> dict[str, Any]:
+    """Read true quorum and the API entry node from ``GET /cluster/status``."""
+    try:
+        entries = normalize_list(await client.get("/cluster/status"))
+    except Exception as exc:
+        warnings.append(f"Could not load /cluster/status (quorum unknown): {exc}")
+        return {"quorate": None, "entry_node": None}
+
+    cluster = next((e for e in entries if e.get("type") == "cluster"), None)
+    local = next((e for e in entries if e.get("type") == "node" and e.get("local")), None)
+    if cluster is None:
+        warnings.append("No cluster entry in /cluster/status (standalone node?); quorum unknown.")
+    quorate = bool(cluster.get("quorate")) if cluster is not None else None
+    if quorate is False:
+        warnings.append("Cluster is NOT quorate: /etc/pve is read-only; guest starts and config writes fail.")
+    return {
+        "quorate": quorate,
+        "cluster_name": cluster.get("name") if cluster else None,
+        "cluster_member_count": cluster.get("nodes") if cluster else None,
+        "entry_node": local.get("name") if local else None,
+    }
+
+
+async def qdevice_status(client: Any, warnings: list[str]) -> dict[str, Any]:
+    """Best-effort QDevice status from ``GET /cluster/config/qdevice``."""
+    try:
+        raw = await client.get("/cluster/config/qdevice")
+    except Exception as exc:
+        warnings.append(f"Could not load /cluster/config/qdevice: {exc}")
+        return {"configured": None}
+    if not raw:
+        return {"configured": False}
+    return {"configured": True, "status": raw}
+
+
 @tool_handler("pve_cluster_health")
 async def pve_cluster_health_impl() -> str:
-    """Cluster health summary; approximate quorum (no pvecm in v1)."""
+    """Cluster health summary with true quorum from ``/cluster/status``."""
     started = time.perf_counter()
     client = get_client()
     settings = get_settings()
@@ -185,19 +220,19 @@ async def pve_cluster_health_impl() -> str:
 
     if offline:
         warnings.append("Offline nodes: " + ", ".join(n.get("node", "?") for n in offline))
-    if config_nodes and online_count < expected_count:
-        warnings.append(
-            "Approximate quorum: not all configured nodes are online "
-            "(true quorum requires pvecm; not available via REST in v1)."
-        )
+
+    quorum = await cluster_quorum(client, warnings)
+    qdevice = await qdevice_status(client, warnings)
 
     summary = {
+        **quorum,
         "online_count": online_count,
         "offline_count": len(offline),
         "expected_node_count": expected_count,
         "approx_all_nodes_online": approx_quorate,
         "online_nodes": [n.get("node") for n in online],
         "offline_nodes": [n.get("node") for n in offline],
+        "qdevice": qdevice,
         "api_entry_host": settings.host,
         "bash_only_workflows": BASH_ONLY_WORKFLOWS,
     }

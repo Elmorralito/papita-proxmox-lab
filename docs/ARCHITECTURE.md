@@ -131,6 +131,7 @@ Quorum math (4 PVE + QDevice): 5 votes → quorum 3 → cluster can remain quora
 | Rule / group name | `papita-ha` |
 | `HA_NODES` | `pve-001,pve-003,pve-002,pve-004` |
 | `HA_AUTO_ENROLL_NFS_GUESTS` | `0` |
+| `HA_SHUTDOWN_POLICY`        | `freeze` — HA guests are not recovered elsewhere on node shutdown/reboot; required by MCP power tools (`pve_get_ha_status`) |
 
 Auto-enroll is **off**: guests on `local` / `local-lvm` (pfSense **100**, Fedora **101**) must **not** be HA-enrolled until disks move to shared NFS.
 

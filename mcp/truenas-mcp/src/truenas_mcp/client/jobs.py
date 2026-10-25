@@ -21,7 +21,7 @@ async def wait_for_job(
     last: dict[str, Any] = {}
 
     while asyncio.get_running_loop().time() < deadline:
-        raw = await client.call("core.get_jobs")
+        raw = await client.call("core.get_jobs", [[["id", "=", job_id]]])
         jobs = raw if isinstance(raw, list) else []
         for job in jobs:
             if not isinstance(job, dict):
