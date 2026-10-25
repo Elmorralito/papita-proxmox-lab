@@ -35,7 +35,11 @@ See [docs/SMOKE_TESTS.md](./docs/SMOKE_TESTS.md) for the full matrix.
 | `TRUENAS_HOST`                  | _(required)_                                    | Hostname or IP (e.g. `172.16.0.236` or Tailscale DNS)  |
 | `TRUENAS_PORT`                  | `443`                                           | HTTPS/WSS port                                         |
 | `TRUENAS_API_KEY`               | _(required)_                                    | API key from TrueNAS UI                                |
-| `TRUENAS_VERIFY_SSL`            | `false`                                         | Set `true` when using a trusted CA cert                |
+| `TRUENAS_VERIFY_SSL`            | `true`                                          | Set `false` only for trusted-LAN self-signed certs     |
+
+> **Upgrade note:** older releases defaulted `TRUENAS_VERIFY_SSL` to `false`. If your
+> Cursor `mcp.json` omits the variable, TLS verification is now **on**. Keep
+> `"TRUENAS_VERIFY_SSL": "false"` explicitly while the NAS still uses a self-signed cert.
 | `TRUENAS_WS_PATH`               | `/websocket`                                    | WebSocket path (`/api/v2.0/websocket` on older builds) |
 | `TRUENAS_WS_PING_INTERVAL_SEC`  | `30`                                            | WebSocket keepalive ping interval (`0` disables)       |
 | `TRUENAS_LAB_HA_POOL_NAME`      | `main_data_storage`              | Expected HA ZFS pool                                   |

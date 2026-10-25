@@ -19,8 +19,14 @@ def test_ssh_argv_is_strict_and_has_no_shell(settings):
 def test_signature_roundtrip_and_tamper(tmp_path):
     key, pub = tmp_path / "a.key", tmp_path / "a.pub"
     grant_mod.generate_keypair(key, pub, b"a long enough passphrase")
-    plan = {"plan_id": "plan_1", "digest": "sha256:ab", "state_precondition": "sha256:cd", "router_id": "r1",
-            "policy_revision": 1, "expires_at": 4_000_000_000}
+    plan = {
+        "plan_id": "plan_1",
+        "digest": "sha256:ab",
+        "state_precondition": "sha256:cd",
+        "router_id": "r1",
+        "policy_revision": 1,
+        "expires_at": 4_000_000_000,
+    }
     payload, _ = grant_mod.build_payload(plan=plan, requester="c", approver="me")
     text, sig = grant_mod.sign_payload(payload, key, b"a long enough passphrase")
     assert grant_mod.verify_signature(text, sig, pub)

@@ -85,8 +85,7 @@ _default_tags() {
 
 # Lab PVE nodes typically have IPv4-only default route (via 172.16.0.1) while
 # resolvers still return AAAA. Dual-stack curl then fails with "Could not
-# resolve host" or a resolve timeout against tailscale.com. PATH wrapper so
-# install.sh's own curl invocations stay on IPv4 too.
+# resolve host" / resolve timeouts. PATH wrapper forces IPv4 for key/list fetches.
 _papita_ipv4_curl_wrap_dir() {
     local wrap_dir="${1:-/tmp/papita-curl4}"
     mkdir -p "$wrap_dir"
@@ -98,8 +97,30 @@ WRAP
     printf '%s' "$wrap_dir"
 }
 
+# Official Tailscale packaging key fingerprint (pkgs.tailscale.com stable debian).
+# Override PAPITA_TAILSCALE_APT_FINGERPRINT only after verifying a Tailscale key rotation
+# (compare gpg --show-keys fingerprint to Tailscale's published packaging docs).
+PAPITA_TAILSCALE_APT_FINGERPRINT_DEFAULT="2596A99EAAB33821893C0A79458CA832957F5868"
+PAPITA_TAILSCALE_KEYRING_PATH="/usr/share/keyrings/tailscale-archive-keyring.gpg"
+
+# Probe pkgs.tailscale.com for a usable Debian codename (HEAD on the noarmor key URL).
+_papita_tailscale_resolve_codename() {
+    local wrap_dir="$1"
+    local detected candidate
+    detected="$(. /etc/os-release 2>/dev/null; printf '%s' "${VERSION_CODENAME:-}")"
+    for candidate in "$detected" trixie bookworm; do
+        [[ -n "$candidate" ]] || continue
+        if PATH="${wrap_dir}:${PATH}" curl -fsSIL --retry 2 --retry-delay 1 --connect-timeout 10 \
+            "https://pkgs.tailscale.com/stable/debian/${candidate}.noarmor.gpg" >/dev/null 2>&1; then
+            printf '%s' "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
 _install_tailscale_pkg() {
-    local wrap_dir installer
+    local wrap_dir codename key_url list_url key_tmp list_tmp fp expected_fp signed_by
     if command -v tailscale >/dev/null 2>&1; then
         log INFO "Tailscale already installed; skipping download."
         return 0
@@ -108,22 +129,84 @@ _install_tailscale_pkg() {
         log ERROR "curl not found (step 1). Cannot download Tailscale."
         return 1
     fi
+    if ! command -v gpg >/dev/null 2>&1; then
+        log ERROR "gpg not found. Install gnupg (setup step 1 apt-dependencies) before Tailscale."
+        return 1
+    fi
+
+    # Prefer signed apt repo over curl|sh install.sh (supply-chain hardening).
     wrap_dir="$(_papita_ipv4_curl_wrap_dir /tmp/papita-curl4)"
-    installer="$(mktemp /tmp/tailscale-install.XXXXXX.sh)"
-    log INFO "Downloading Tailscale installer over IPv4 (this node has no IPv6 default route)..."
+    if ! codename="$(_papita_tailscale_resolve_codename "$wrap_dir")"; then
+        log ERROR "No Tailscale apt repo found for this Debian release (tried VERSION_CODENAME, trixie, bookworm)."
+        return 1
+    fi
+    key_url="https://pkgs.tailscale.com/stable/debian/${codename}.noarmor.gpg"
+    list_url="https://pkgs.tailscale.com/stable/debian/${codename}.tailscale-keyring.list"
+    expected_fp="$(printf '%s' "${PAPITA_TAILSCALE_APT_FINGERPRINT:-$PAPITA_TAILSCALE_APT_FINGERPRINT_DEFAULT}" | tr -d '[:space:]:' | tr '[:lower:]' '[:upper:]')"
+
+    key_tmp="$(mktemp /tmp/tailscale-key.XXXXXX.gpg)"
+    list_tmp="$(mktemp /tmp/tailscale-list.XXXXXX.list)"
+
+    log INFO "Installing Tailscale from signed apt repo (${codename}) over IPv4..."
     if ! PATH="${wrap_dir}:${PATH}" curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 20 \
-        https://tailscale.com/install.sh -o "$installer"; then
-        log ERROR "Failed to download https://tailscale.com/install.sh. Check DNS (nameserver 172.16.0.1) and IPv4 HTTPS egress."
-        rm -f "$installer"
+        "$key_url" -o "$key_tmp"; then
+        log ERROR "Failed to download Tailscale apt key: ${key_url}"
+        rm -f -- "$key_tmp" "$list_tmp"
         return 1
     fi
-    if ! PATH="${wrap_dir}:${PATH}" sh "$installer"; then
-        log ERROR "Failed to install Tailscale."
-        rm -f "$installer"
+    fp="$(gpg --show-keys --with-colons "$key_tmp" 2>/dev/null | awk -F: '/^fpr:/{print $10; exit}')"
+    fp="$(printf '%s' "$fp" | tr -d '[:space:]:' | tr '[:lower:]' '[:upper:]')"
+    if [[ -z "$fp" || "$fp" != "$expected_fp" ]]; then
+        log ERROR "Tailscale apt key fingerprint mismatch (got=${fp:-empty} expected=${expected_fp})."
+        log ERROR "If Tailscale rotated keys, verify the new fingerprint then set PAPITA_TAILSCALE_APT_FINGERPRINT."
+        rm -f -- "$key_tmp" "$list_tmp"
         return 1
     fi
-    rm -f "$installer"
-    log INFO "Tailscale installed."
+    if ! PATH="${wrap_dir}:${PATH}" curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 20 \
+        "$list_url" -o "$list_tmp"; then
+        log ERROR "Failed to download Tailscale apt source list: ${list_url}"
+        rm -f -- "$key_tmp" "$list_tmp"
+        return 1
+    fi
+    # Refuse unexpected destinations / unsigned sources in the list file.
+    if ! grep -qE 'https://pkgs\.tailscale\.com/' "$list_tmp"; then
+        log ERROR "Tailscale apt list does not reference https://pkgs.tailscale.com/; refusing to install."
+        rm -f -- "$key_tmp" "$list_tmp"
+        return 1
+    fi
+    if grep -qE 'http://' "$list_tmp"; then
+        log ERROR "Tailscale apt list contains non-HTTPS URIs; refusing to install."
+        rm -f -- "$key_tmp" "$list_tmp"
+        return 1
+    fi
+    # Official lists use deb [signed-by=/usr/share/keyrings/...]; accept either case.
+    signed_by="$(grep -oiE 'signed-by=[^][:space:]]+' "$list_tmp" | head -1 | cut -d= -f2- | tr -d ']' || true)"
+    if [[ -z "$signed_by" ]]; then
+        log ERROR "Tailscale apt list missing signed-by=; refusing to install."
+        rm -f -- "$key_tmp" "$list_tmp"
+        return 1
+    fi
+    if [[ "$signed_by" != "$PAPITA_TAILSCALE_KEYRING_PATH" ]]; then
+        log ERROR "Tailscale apt list signed-by=${signed_by} (expected ${PAPITA_TAILSCALE_KEYRING_PATH}); refusing."
+        rm -f -- "$key_tmp" "$list_tmp"
+        return 1
+    fi
+
+    install -d -m 0755 /usr/share/keyrings
+    install -m 0644 "$key_tmp" "$PAPITA_TAILSCALE_KEYRING_PATH"
+    install -m 0644 "$list_tmp" /etc/apt/sources.list.d/tailscale.list
+    rm -f -- "$key_tmp" "$list_tmp"
+
+    export DEBIAN_FRONTEND=noninteractive
+    if ! apt-get update -qq; then
+        log ERROR "apt-get update failed after adding Tailscale repo."
+        return 1
+    fi
+    if ! apt-get install -y -qq tailscale; then
+        log ERROR "apt-get install tailscale failed."
+        return 1
+    fi
+    log INFO "Tailscale installed from pkgs.tailscale.com (${codename}, key fp ${expected_fp})."
     return 0
 }
 

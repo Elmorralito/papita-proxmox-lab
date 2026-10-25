@@ -73,6 +73,13 @@ def _env(name: str, default: str = "") -> str:
     return os.environ.get(name, default).strip()
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw = _env(name)
+    if not raw:
+        return default
+    return raw.lower() in {"1", "true", "yes", "on"}
+
+
 def _gen_password(length: int = 24) -> str:
     alphabet = string.ascii_letters + string.digits
     return "".join(secrets.choice(alphabet) for _ in range(length))
@@ -232,11 +239,13 @@ def main() -> int:
     truenas_ip = _env("TRUENAS_IP", "172.16.0.236")
     pve_ips = _parse_ips(_env("PVE_NODE_IPS", "172.16.0.101,172.16.0.102,172.16.0.103"))
     creds_file = _env("UPTIME_KUMA_CREDENTIALS_FILE", "/root/deploy/misc/monitoring/uptime-kuma.credentials")
+    # Default verify on for https://; http:// ignores TLS. Opt out with UPTIME_KUMA_SSL_VERIFY=false.
+    ssl_verify = _env_bool("UPTIME_KUMA_SSL_VERIFY", default=True)
 
     creds_path = Path(creds_file) if creds_file else None
 
-    print(f"Connecting to {url}")
-    with UptimeKumaApi(url, ssl_verify=False, timeout=30) as api:
+    print(f"Connecting to {url} (ssl_verify={ssl_verify})")
+    with UptimeKumaApi(url, ssl_verify=ssl_verify, timeout=30) as api:
         _ensure_admin(api, username, password, creds_path)
 
         notification_ids: list[int] = []

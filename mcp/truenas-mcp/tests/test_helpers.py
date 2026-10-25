@@ -15,12 +15,8 @@ def test_pool_health_warnings_degraded() -> None:
 
 
 def test_dataset_used_ratio_from_parsed_bytes() -> None:
-    assert dataset_used_ratio(
-        {"used": {"parsed": 90}, "available": {"parsed": 10}}
-    ) == 0.9
-    assert dataset_used_ratio(
-        {"used": {"parsed": 100}, "available": {"parsed": 0}}
-    ) == 1.0
+    assert dataset_used_ratio({"used": {"parsed": 90}, "available": {"parsed": 10}}) == 0.9
+    assert dataset_used_ratio({"used": {"parsed": 100}, "available": {"parsed": 0}}) == 1.0
     assert dataset_used_ratio({"used": {"parsed": "n/a"}}) is None
 
 

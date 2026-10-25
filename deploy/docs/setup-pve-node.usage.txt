@@ -67,6 +67,12 @@ Failure behavior
 
 --- Step 8 — Tailscale (install + forwarding + firewall + optional NAT) ---
   y/c/n install flow; sysctl forwarding; 8.1 cluster.fw Tailscale ACCEPT rule; 8.2 optional NAT masq.
+  Install uses the signed pkgs.tailscale.com apt repo (not curl|sh): downloads the Debian
+  keyring, verifies GPG fingerprint 2596A99EAAB33821893C0A79458CA832957F5868, checks the
+  sources list uses https://pkgs.tailscale.com with signed-by= the installed keyring, then
+  apt-get install tailscale. Requires gnupg from step 1. Codename: VERSION_CODENAME with
+  fallback probe of trixie/bookworm. If Tailscale rotates packaging keys, set
+  PAPITA_TAILSCALE_APT_FINGERPRINT to the new fingerprint after verifying Tailscale docs.
   Installer is fetched with curl -4 (PATH wrapper) because lab nodes often have AAAA
   for tailscale.com but no IPv6 default route — dual-stack curl then fails to resolve.
   Skip download if tailscale is already on PATH. All cluster nodes install Tailscale

@@ -82,8 +82,14 @@ class ContainerRouter:
 
     async def call(self, payload: dict[str, Any], timeout: float | None = None) -> dict[str, Any]:
         proc = await asyncio.create_subprocess_exec(
-            "docker", "exec", "-i", self.name, "/usr/libexec/openwrt-mcp-agent",
-            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            "docker",
+            "exec",
+            "-i",
+            self.name,
+            "/usr/libexec/openwrt-mcp-agent",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
         out, err = await asyncio.wait_for(proc.communicate(json.dumps(payload).encode()), timeout or 120)
         try:
@@ -105,9 +111,14 @@ def router(tmp_path_factory):
 @pytest.fixture
 def cctx(router, tmp_path) -> AppContext:
     settings = OpenwrtSettings(
-        host="100.78.68.87", ssh_key_path=tmp_path / "id", known_hosts_path=tmp_path / "kh",
-        state_dir=tmp_path / "state", approver_key_path=router.key, approver_pubkey_path=router.pub,
-        probe_host="", verify_deadline_sec=30,
+        host="100.78.68.87",
+        ssh_key_path=tmp_path / "id",
+        known_hosts_path=tmp_path / "kh",
+        state_dir=tmp_path / "state",
+        approver_key_path=router.key,
+        approver_pubkey_path=router.pub,
+        probe_host="",
+        verify_deadline_sec=30,
     )
     # Reset router state between tests
     router.sh(
@@ -125,34 +136,47 @@ def approve(ctx: AppContext, plan_id: str, passphrase: bytes = PASS) -> dict:
     plan = ctx.store.require_plan(plan_id)
     payload, nonce = grant_mod.build_payload(plan=plan, requester="mcp-client", approver="tester")
     text, sig = grant_mod.sign_payload(payload, ctx.settings.approver_key_path, passphrase)
-    ctx.store.add_grant(plan_id=plan_id, nonce=nonce, payload=text, signature=sig, approver="tester",
-                        expires_at=payload["expires_at"])
+    ctx.store.add_grant(
+        plan_id=plan_id, nonce=nonce, payload=text, signature=sig, approver="tester", expires_at=payload["expires_at"]
+    )
     return {"payload": text, "signature": sig}
 
 
 async def plan(ctx: AppContext, key="idem-key-0001", port=8080, rule="allow-alt") -> dict:
-    out = json.loads(await firewall_plan_rule_impl(ctx, router_id="openwrt-pi", rule_id=rule,
-                                                   idempotency_key=key, dest_port=port))
+    out = json.loads(
+        await firewall_plan_rule_impl(ctx, router_id="openwrt-pi", rule_id=rule, idempotency_key=key, dest_port=port)
+    )
     assert out["isError"] is False, out
     return out["structuredContent"]
 
 
 def _op(port=8080, rule="allow-alt"):
-    return {"type": "firewall.rule.upsert", "rule_id": rule,
-            "fields": {
-                "template": "allow_tcp_from_lan",
-                "src": "lan",
-                "proto": "tcp",
-                "dest_port": port,
-                "family": "ipv4",
-            }}
+    return {
+        "type": "firewall.rule.upsert",
+        "rule_id": rule,
+        "fields": {
+            "template": "allow_tcp_from_lan",
+            "src": "lan",
+            "proto": "tcp",
+            "dest_port": port,
+            "family": "ipv4",
+        },
+    }
 
 
 async def raw_apply(router, ctx, plan_row, grant, **overrides):
-    req = {"v": 1, "op": "apply", "plan_id": plan_row["plan_id"], "plan_digest": plan_row["digest"],
-           "router_id": plan_row["router_id"], "policy_revision": plan_row["policy_revision"],
-           "state_precondition": plan_row["state_precondition"], "operations": plan_row["operations"],
-           "recovery": plan_row["recovery"], "grant": grant}
+    req = {
+        "v": 1,
+        "op": "apply",
+        "plan_id": plan_row["plan_id"],
+        "plan_digest": plan_row["digest"],
+        "router_id": plan_row["router_id"],
+        "policy_revision": plan_row["policy_revision"],
+        "state_precondition": plan_row["state_precondition"],
+        "operations": plan_row["operations"],
+        "recovery": plan_row["recovery"],
+        "grant": grant,
+    }
     req.update(overrides)
     return await router.call(req)
 
@@ -163,6 +187,7 @@ def err_code(resp: dict) -> str:
 
 
 # ------------------------------------------------------------------ happy path
+
 
 async def test_inspect_real_agent(router, cctx):
     snap = await cctx.agent.inspect()
@@ -196,6 +221,7 @@ async def test_manual_rollback_restores_exact_config(router, cctx):
 
 
 # ------------------------------------------------------------------ fault tests
+
 
 async def test_unconfirmed_change_is_rolled_back_by_watchdog_alone(router, cctx):
     before = router.sh("sha256sum /etc/config/firewall")
@@ -232,7 +258,7 @@ async def test_reboot_while_unconfirmed_is_reconciled(router, cctx):
     approve(cctx, p["plan_id"])
     await apply_plan_impl(cctx, p["plan_id"], p["plan_digest"])
     # Simulate a reboot: the journal now belongs to a different boot.
-    router.sh("sed -i 's/\"boot_id\": \"[^\"]*\"/\"boot_id\": \"previous-boot\"/' /etc/openwrt-mcp/journal/active.json")
+    router.sh('sed -i \'s/"boot_id": "[^"]*"/"boot_id": "previous-boot"/\' /etc/openwrt-mcp/journal/active.json')
     for _ in range(15):
         await asyncio.sleep(1)
         if router.sh("test -f /etc/openwrt-mcp/journal/active.json && echo y", check=False).strip() != "y":
@@ -247,22 +273,23 @@ async def test_killed_agent_mid_apply_is_recovered(router, cctx):
     p = await plan(cctx)
     approve(cctx, p["plan_id"])
     cur = router.sh("sha256sum /etc/config/firewall | cut -d' ' -f1").strip()
-    router.sh("cp /etc/config/firewall /etc/openwrt-mcp/journal/plan_killed.bak; "
-              "printf '\\n# half applied\\n' >> /etc/config/firewall; "
-              "BOOT=$(cat /proc/sys/kernel/random/boot_id); UP=$(cut -d. -f1 /proc/uptime); "
-              "echo '{\"plan_id\":\"plan_deadbeef\",\"state\":\"armed\","
-              "\"backup\":\"/etc/openwrt-mcp/journal/plan_killed.bak\","
-              f"\"pre_revision\":\"sha256:{cur}\",\"new_revision\":null,"
-              "\"boot_id\":\"'$BOOT'\",\"deadline_uptime\":'$((UP+2))'}' "
-              "> /etc/openwrt-mcp/journal/active.json")
+    router.sh(
+        "cp /etc/config/firewall /etc/openwrt-mcp/journal/plan_killed.bak; "
+        "printf '\\n# half applied\\n' >> /etc/config/firewall; "
+        "BOOT=$(cat /proc/sys/kernel/random/boot_id); UP=$(cut -d. -f1 /proc/uptime); "
+        'echo \'{"plan_id":"plan_deadbeef","state":"armed",'
+        '"backup":"/etc/openwrt-mcp/journal/plan_killed.bak",'
+        f'"pre_revision":"sha256:{cur}","new_revision":null,'
+        '"boot_id":"\'$BOOT\'","deadline_uptime":\'$((UP+2))\'}\' '
+        "> /etc/openwrt-mcp/journal/active.json"
+    )
     # new_revision is null: the half-applied file hash matches neither revision -> needs_manual, not a blind overwrite.
     await asyncio.sleep(8)
     state = json.loads(router.sh("cat /etc/openwrt-mcp/journal/active.json"))["state"]
     assert state == "needs_manual"
     assert router.sh("sha256sum /etc/config/firewall") != before  # untouched: operator decides
     router.sh(
-        "/usr/libexec/openwrt-mcp-agent --clear; "
-        "cp /etc/openwrt-mcp/journal/plan_killed.bak /etc/config/firewall"
+        "/usr/libexec/openwrt-mcp-agent --clear; " "cp /etc/openwrt-mcp/journal/plan_killed.bak /etc/config/firewall"
     )
 
 
@@ -281,8 +308,8 @@ async def test_watchdog_unavailable_refuses_to_mutate(router, cctx):
 async def test_reload_failure_rolls_back(router, cctx):
     router.sh(
         "mv /sbin/fw4 /sbin/fw4.real; "
-        "printf '#!/bin/sh\\n[ \"$2\" = reload ] && exit 1\\n"
-        "exec /sbin/fw4.real \"$@\"\\n' > /sbin/fw4; chmod +x /sbin/fw4"
+        'printf \'#!/bin/sh\\n[ "$2" = reload ] && exit 1\\n'
+        'exec /sbin/fw4.real "$@"\\n\' > /sbin/fw4; chmod +x /sbin/fw4'
     )
     try:
         before = router.sh("sha256sum /etc/config/firewall")
@@ -298,9 +325,11 @@ async def test_reload_failure_rolls_back(router, cctx):
 
 async def test_reload_hang_times_out_and_rolls_back(router, cctx):
     """fw4 reload hangs on the first call only (the agent's 60 s timeout must fire, then recovery runs)."""
-    router.sh("mv /sbin/fw4 /sbin/fw4.real; rm -f /tmp/hung; printf '#!/bin/sh\\n"
-              "if [ \"$2\" = reload ] && [ ! -e /tmp/hung ]; then touch /tmp/hung; sleep 300; fi\\n"
-              "exec /sbin/fw4.real \"$@\"\\n' > /sbin/fw4; chmod +x /sbin/fw4")
+    router.sh(
+        "mv /sbin/fw4 /sbin/fw4.real; rm -f /tmp/hung; printf '#!/bin/sh\\n"
+        'if [ "$2" = reload ] && [ ! -e /tmp/hung ]; then touch /tmp/hung; sleep 300; fi\\n'
+        'exec /sbin/fw4.real "$@"\\n\' > /sbin/fw4; chmod +x /sbin/fw4'
+    )
     try:
         before = router.sh("sha256sum /etc/config/firewall")
         p = await plan(cctx)
@@ -315,6 +344,7 @@ async def test_reload_hang_times_out_and_rolls_back(router, cctx):
 
 
 # ------------------------------------------------------------------ router-side authorization (negative)
+
 
 async def test_replayed_grant_is_refused_by_router(router, cctx):
     p = await plan(cctx)
@@ -369,14 +399,17 @@ async def test_pending_uci_changes_refused(router, cctx):
     router.sh("uci revert firewall")
 
 
-@pytest.mark.parametrize("mutate,code", [
-    (lambda f: f.update(dest_port=22), "OPERATION_PROHIBITED"),
-    (lambda f: f.update(src="wan"), "OPERATION_PROHIBITED"),
-    (lambda f: f.update(proto="udp"), "OPERATION_PROHIBITED"),
-    (lambda f: f.update(src_ip="8.8.8.0/24"), "OPERATION_PROHIBITED"),
-    (lambda f: f.update(shell_cmd="id"), "BAD_REQUEST"),
-    (lambda f: f.update(template="allow_any"), "OPERATION_PROHIBITED"),
-])
+@pytest.mark.parametrize(
+    "mutate,code",
+    [
+        (lambda f: f.update(dest_port=22), "OPERATION_PROHIBITED"),
+        (lambda f: f.update(src="wan"), "OPERATION_PROHIBITED"),
+        (lambda f: f.update(proto="udp"), "OPERATION_PROHIBITED"),
+        (lambda f: f.update(src_ip="8.8.8.0/24"), "OPERATION_PROHIBITED"),
+        (lambda f: f.update(shell_cmd="id"), "BAD_REQUEST"),
+        (lambda f: f.update(template="allow_any"), "OPERATION_PROHIBITED"),
+    ],
+)
 async def test_agent_reauthorizes_independently_of_service(router, cctx, mutate, code):
     op = _op()
     mutate(op["fields"])
@@ -411,8 +444,9 @@ async def test_agent_refuses_to_touch_foreign_sections(router, cctx):
 
 async def test_validate_op_stages_checks_and_reverts(router, cctx):
     snap = await cctx.agent.inspect()
-    resp = await router.call({"v": 1, "op": "validate", "operations": [_op()],
-                              "state_precondition": snap["config_revision"]})
+    resp = await router.call(
+        {"v": 1, "op": "validate", "operations": [_op()], "state_precondition": snap["config_revision"]}
+    )
     assert resp["ok"] is True, resp
     assert (await cctx.agent.inspect())["pending_changes"] is False
 
@@ -421,12 +455,23 @@ async def test_digest_vector_matches_python(router, cctx):
     """Canonical JSON + sha256 in ucode must equal Python's (cross-language contract)."""
     ops = [_op()]
     rec = {"mode": "auto_revert", "deadline_s": 30}
-    expected = plan_digest(router_id="openwrt-pi", operations=ops, state_precondition="sha256:aa",
-                           policy_revision=1, recovery=rec)
-    resp = await router.call({"v": 1, "op": "apply", "plan_id": "plan_00000000", "plan_digest": expected,
-                              "router_id": "openwrt-pi", "policy_revision": 1, "state_precondition": "sha256:aa",
-                              "operations": ops, "recovery": rec,
-                              "grant": {"payload": "{}", "signature": "x"}})
+    expected = plan_digest(
+        router_id="openwrt-pi", operations=ops, state_precondition="sha256:aa", policy_revision=1, recovery=rec
+    )
+    resp = await router.call(
+        {
+            "v": 1,
+            "op": "apply",
+            "plan_id": "plan_00000000",
+            "plan_digest": expected,
+            "router_id": "openwrt-pi",
+            "policy_revision": 1,
+            "state_precondition": "sha256:aa",
+            "operations": ops,
+            "recovery": rec,
+            "grant": {"payload": "{}", "signature": "x"},
+        }
+    )
     # Passing the digest check means the failure comes LATER (grant), not from a digest mismatch.
     assert resp["error"]["message"] != "plan digest does not match request contents"
     assert err_code(resp) == "APPROVAL_INVALID" and "signature" in resp["error"]["message"]

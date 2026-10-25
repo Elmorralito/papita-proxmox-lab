@@ -17,8 +17,13 @@ def _isolate_truenas_env(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_settings_valid() -> None:
     settings = TnasSettings(host="172.16.0.236", api_key="test-key", port=443)
     assert settings.ws_uri == "wss://172.16.0.236:443/websocket"
-    assert settings.verify_ssl is False
+    assert settings.verify_ssl is True
     assert settings.log_level == "INFO"
+
+
+def test_settings_verify_ssl_can_disable() -> None:
+    settings = TnasSettings(host="172.16.0.236", api_key="test-key", verify_ssl=False)
+    assert settings.verify_ssl is False
 
 
 def test_settings_custom_ws_path() -> None:

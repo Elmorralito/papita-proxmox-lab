@@ -177,7 +177,7 @@ Documented in `BASH_ONLY_WORKFLOWS` (`constants.py`).
 | TR-003 | WebSocket client; persistent session | Must     | **Met**     | `client/websocket.py`                         |
 | TR-004 | `auth.login_with_api_key`            | Must     | **Met**     | `_connect_and_auth()`                         |
 | TR-005 | `TRUENAS_HOST`, port 443             | Must     | **Met**     | `config.py`                                   |
-| TR-006 | `TRUENAS_VERIFY_SSL`                 | Should   | **Met**     | Default `false` for homelab                   |
+| TR-006 | `TRUENAS_VERIFY_SSL`                 | Should   | **Met**     | Default `true`; set `false` for self-signed   |
 | TR-007 | Configurable `TRUENAS_WS_PATH`       | Must     | **Met**     | `/websocket` default                          |
 | TR-008 | Map API errors to tool JSON          | Must     | **Met**     | `TnasApiError`                                |
 | TR-009 | Tool naming `truenas_*`              | Must     | **Met**     | `register.py`                                 |

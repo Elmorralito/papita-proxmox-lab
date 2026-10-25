@@ -50,17 +50,14 @@ def test_tool_catalog_complete() -> None:
 
 
 def test_write_tools_are_gated() -> None:
-    assert set(REQUIRED_WRITE_TOOLS) == {
-        name for name, cls in TOOL_REGISTRY.items() if cls == ToolClass.WRITE
-    }
+    assert set(REQUIRED_WRITE_TOOLS) == {name for name, cls in TOOL_REGISTRY.items() if cls == ToolClass.WRITE}
 
 
 def test_runbook_refs_for_ha_and_nfs() -> None:
     assert "truenas_list_nfs_shares" in RUNBOOK_REFS
     assert "truenas_list_apps" in RUNBOOK_REFS
     assert (
-        "Path B" in RUNBOOK_REFS["truenas_system_summary"]
-        or "quorum" in RUNBOOK_REFS["truenas_system_summary"].lower()
+        "Path B" in RUNBOOK_REFS["truenas_system_summary"] or "quorum" in RUNBOOK_REFS["truenas_system_summary"].lower()
     )
 
 

@@ -11,10 +11,10 @@ Last aligned to repo tree (~46 tracked files). Gitignored paths listed separatel
 | `README.md`               | Project title; links to network diagram and `docs/TIPSNTRICKS.md`                         |
 | `LICENSE`                 | License text                                                                              |
 | `pyproject.toml`          | Poetry config (`package-mode=false`); black/isort/flake8/mypy/pylint/interrogate settings |
-| `poetry.lock`             | Locked dev deps (gitignored — regenerate locally)                                         |
+| `poetry.lock`             | Locked deps (tracked — Dependabot / reproducible security pins)                           |
 | `.python-version`         | Python version pin (3.14)                                                                 |
 | `.pre-commit-config.yaml` | Hooks: trailing-ws, yaml/toml, shellcheck, isort, black, flake8, pylint, mypy             |
-| `.gitignore`              | `.env`, `poetry.lock`, drawio backups                                                     |
+| `.gitignore`              | `.env`, drawio backups (poetry.lock tracked)                                              |
 
 ---
 
