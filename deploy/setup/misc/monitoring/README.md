@@ -68,3 +68,19 @@ Knobs (env): `PAPITA_GRAFANA_VERSION` (pin + `apt-mark hold`), `PAPITA_PROMETHEU
 Combined ops dashboard: **`papita-infra`** (`Papita infra (PVE + TrueNAS)`) — PVE Prometheus panels plus TrueNAS Scrutiny disks in one view. Standalone `papita-pve` and `papita-scrutiny` remain available.
 
 The Scrutiny panels need the Infinity plugin (Grafana ≥ 11.6). They show current status, temperature, and power-on hours per disk. Temperature history stays in Scrutiny's own WebUI.
+
+## Alertmanager (single instance)
+
+Compose sets `--cluster.listen-address=` on Alertmanager so a lone CT instance does not attempt gossip. Without that flag, a single-node Alertmanager can flap or leave Prometheus unable to post alerts reliably after Docker network recreates.
+
+## Uptime Kuma bootstrap TLS
+
+`papita_uptime_kuma_bootstrap.py` verifies HTTPS by default (`UPTIME_KUMA_SSL_VERIFY=true`). Set `UPTIME_KUMA_SSL_VERIFY=false` only for trusted-LAN self-signed Kuma endpoints.
+
+## Troubleshooting CT 231
+
+| Symptom | Likely cause | Fix |
+|---------|--------------|-----|
+| Prometheus UI up but scrapes empty / Alertmanager unreachable | Docker compose project network detached after orphan cleanup | Re-run `./deploy/proxmox.sh setup-monitoring --ip-address 172.16.0.101` (or `pct exec 231 -- bash -lc 'cd /root/k8s-monitor && docker compose up -d --remove-orphans'`) |
+| Grafana 404 / old CT Grafana | Stack moved to Pi | Use `http://172.16.0.99:3000`; remove leftover `grafana_data` volume on CT 231 when ready |
+| PVE targets down | Step 19 / node-exporter missing | `papita-pve-node-exporter.sh` on each node, or re-run `setup-monitoring` |

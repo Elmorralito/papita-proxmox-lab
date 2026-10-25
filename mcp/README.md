@@ -42,7 +42,9 @@ Bundled skills (teach agents when to invoke MCPs):
 | ----- | ---- |
 | `papita-proxmox-lab-map` | Repo map / file inventory |
 | `proxmox-ve-mcp` | Invoke `proxmox-ve` MCP |
-| `truenas-mcp` | Invoke `truenas` MCP |
+| `truenas-mcp` | Invoke `truenas` MCP (`TRUENAS_VERIFY_SSL` defaults **true**) |
+
+Root `poetry.lock` is **tracked** so Dependabot and `poetry install` stay reproducible. After `git pull`, prefer `./deploy/mcp.sh update` so the lockfile and editable MCP packages stay aligned. OpenWrt ops are documented in [`openwrt-mcp/README.md`](./openwrt-mcp/README.md) (no separate Cursor skill yet).
 
 ```bash
 ./deploy/mcp.sh install --scope user

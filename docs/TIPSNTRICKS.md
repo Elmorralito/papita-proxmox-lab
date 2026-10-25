@@ -1658,6 +1658,25 @@ curl -fsS "http://<kuma-host>:31050/api/push/<TOKEN>?status=up&msg=scrub+ok"
 
 ---
 
+## Lab metrics stack (Prometheus / Grafana / Kuma)
+
+| Component | Where | URL / port |
+|-----------|--------|------------|
+| Prometheus + Alertmanager | LXC **231** `172.16.20.11` | `:9090` / `:9093` |
+| Grafana | QDevice Pi `172.16.0.99` | `:3000` (not on CT 231) |
+| PVE node-exporter | each PVE + Pi | `:9100` |
+| Uptime Kuma | LXC **1004** (typical) | `:3001` |
+
+Deploy / refresh from workstation:
+
+```bash
+./deploy/proxmox.sh setup-monitoring --ip-address 172.16.0.101
+```
+
+Grafana install on the Pi: `deploy/setup/misc/monitoring/papita-qdevice-grafana.sh` (see that folder’s README). Alertmanager runs as a **single** instance with `--cluster.listen-address=` so gossip does not break compose networking. If scrapes go empty after a sync, re-run `setup-monitoring` or `docker compose up -d --remove-orphans` inside CT 231.
+
+---
+
 ## OpenWrt gateway (openwrt-mcp)
 
 - Agents manage the OpenWrt firewall only through `mcp/openwrt-mcp` (plan → human approval → apply → confirm). No shell/UCI passthrough.

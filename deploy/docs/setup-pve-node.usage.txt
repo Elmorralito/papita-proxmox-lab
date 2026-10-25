@@ -36,7 +36,8 @@ Failure behavior
   Gate: answer "n" at 1. QUESTION to skip the entire step.
   Repositories: Debian bookworm base + PVE trixie .sources (no-subscription, enterprise, ceph-squid).
   Then: apt update && dist-upgrade && autoremove && clean.
-  Dependencies from apt-dependencies.list (1.1 confirm before install).
+  Dependencies from apt-dependencies.list (1.1 confirm before install), including
+  gnupg (required for Tailscale signed apt in step 8), jq, corosync-qdevice, etc.
   Enables unattended-upgrades; upgrade cron (default 0 4 * * 6).
   Optional 1.3: install intel-microcode or amd64-microcode based on CPU vendor.
 
@@ -80,7 +81,7 @@ Failure behavior
 
 --- Step 9 — tailscale up ---
   Hostname, tags; tailscale up --accept-dns --ssh --reset.
-  9.0: main vs worker — workers skip --advertise-routes (pfSense advertises 172.16.0.0/16).
+  9.0: main vs worker — workers skip --advertise-routes (OpenWrt advertises 172.16.0.0/16).
   Main node: route advertisement usually unnecessary; optional fallback in default.lan.routes.list.
   Optional 9.4: post-init sanity (status, IPv4, MagicDNS, admin-console reminders).
 
@@ -89,7 +90,8 @@ Failure behavior
   - Every PVE node: steps 8–9 (Tailscale client for EFS over tailnet).
   - Main node only: step 10.2 (/etc/default/pve-main-node), step 17 (Tailscale TLS :8006).
   - Worker nodes: no subnet routes, no step 17.
-  - pfSense (172.16.0.1): subnet router for 172.16.0.0/16 — remote admin reaches LAN via pfSense.
+  - OpenWrt openwrt-pi (LAN gw 172.16.0.1): subnet router for 172.16.0.0/16 — remote admin
+    reaches LAN via that route (pfSense remains a supported alternate LAN_ROUTER_NAME).
   - deploy/tailscale-pfsense-lan.sh configure — approve route + patch ACLs from workstation.
   - deploy/proxmox.sh --ip-address 172.16.0.101 — cluster ops via main node LAN IP.
 
@@ -134,7 +136,8 @@ Failure behavior
   (NOT TrueNAS 172.16.0.236). Edit misc/cluster/default.truenas.nfs.env for NFS export path.
 
 --- Step 19 — prometheus-node-exporter ---
-  Installs prometheus-node-exporter on this node (:9100) for the PVE Grafana dashboard.
-  Cluster Grafana/Prometheus stack (CT 231): from workstation run
+  Installs prometheus-node-exporter on this node (:9100) for Prometheus scrape jobs.
+  Prometheus/Alertmanager live on CT 231 (172.16.20.11); Grafana is on the QDevice Pi
+  (172.16.0.99:3000), not CT 231. From workstation:
   ./deploy/proxmox.sh setup-monitoring --ip-address <MAIN_NODE_LAN_IP>
-  Assets live in deploy/setup/misc/monitoring/ (no tokens).
+  Assets live in deploy/setup/misc/monitoring/ (no tokens). See that folder's README.
