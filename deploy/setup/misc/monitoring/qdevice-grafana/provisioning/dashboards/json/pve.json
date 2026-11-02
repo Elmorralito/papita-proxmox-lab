@@ -20,7 +20,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": ""
+        "uid": "papita-prometheus"
       },
       "targets": [
         {
@@ -29,7 +29,7 @@
           "legendFormat": "{{instance}}",
           "datasource": {
             "type": "prometheus",
-            "uid": ""
+            "uid": "papita-prometheus"
           }
         }
       ],
@@ -66,7 +66,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": ""
+        "uid": "papita-prometheus"
       },
       "targets": [
         {
@@ -75,7 +75,7 @@
           "legendFormat": "{{instance}}",
           "datasource": {
             "type": "prometheus",
-            "uid": ""
+            "uid": "papita-prometheus"
           }
         }
       ],
@@ -113,7 +113,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": ""
+        "uid": "papita-prometheus"
       },
       "targets": [
         {
@@ -122,7 +122,7 @@
           "legendFormat": "{{instance}}",
           "datasource": {
             "type": "prometheus",
-            "uid": ""
+            "uid": "papita-prometheus"
           }
         }
       ],
@@ -150,7 +150,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": ""
+        "uid": "papita-prometheus"
       },
       "targets": [
         {
@@ -159,7 +159,7 @@
           "legendFormat": "{{instance}}",
           "datasource": {
             "type": "prometheus",
-            "uid": ""
+            "uid": "papita-prometheus"
           }
         }
       ],
@@ -186,7 +186,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": ""
+        "uid": "papita-prometheus"
       },
       "targets": [
         {
@@ -195,7 +195,7 @@
           "legendFormat": "{{instance}}",
           "datasource": {
             "type": "prometheus",
-            "uid": ""
+            "uid": "papita-prometheus"
           }
         }
       ],
@@ -223,7 +223,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": ""
+        "uid": "papita-prometheus"
       },
       "targets": [
         {
@@ -232,7 +232,7 @@
           "legendFormat": "{{instance}}",
           "datasource": {
             "type": "prometheus",
-            "uid": ""
+            "uid": "papita-prometheus"
           }
         }
       ],
@@ -260,7 +260,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": ""
+        "uid": "papita-prometheus"
       },
       "targets": [
         {
@@ -269,7 +269,7 @@
           "legendFormat": "{{instance}}",
           "datasource": {
             "type": "prometheus",
-            "uid": ""
+            "uid": "papita-prometheus"
           }
         }
       ],
@@ -297,7 +297,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": ""
+        "uid": "papita-prometheus"
       },
       "targets": [
         {
@@ -306,7 +306,7 @@
           "legendFormat": "{{instance}}",
           "datasource": {
             "type": "prometheus",
-            "uid": ""
+            "uid": "papita-prometheus"
           }
         }
       ],
@@ -334,7 +334,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": ""
+        "uid": "papita-prometheus"
       },
       "targets": [
         {
@@ -343,7 +343,7 @@
           "legendFormat": "{{instance}}",
           "datasource": {
             "type": "prometheus",
-            "uid": ""
+            "uid": "papita-prometheus"
           }
         }
       ],
@@ -371,7 +371,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": ""
+        "uid": "papita-prometheus"
       },
       "targets": [
         {
@@ -380,7 +380,7 @@
           "legendFormat": "{{instance}}",
           "datasource": {
             "type": "prometheus",
-            "uid": ""
+            "uid": "papita-prometheus"
           }
         }
       ],
@@ -408,7 +408,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": ""
+        "uid": "papita-prometheus"
       },
       "targets": [
         {
@@ -417,7 +417,7 @@
           "legendFormat": "{{instance}}",
           "datasource": {
             "type": "prometheus",
-            "uid": ""
+            "uid": "papita-prometheus"
           }
         }
       ],
@@ -445,7 +445,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": ""
+        "uid": "papita-prometheus"
       },
       "targets": [
         {
@@ -454,7 +454,7 @@
           "legendFormat": "{{instance}}",
           "datasource": {
             "type": "prometheus",
-            "uid": ""
+            "uid": "papita-prometheus"
           }
         }
       ],
