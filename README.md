@@ -252,7 +252,7 @@ Prepares the repo Poetry venv, Cursor launch configs, and agent skills that teac
 | `cursor-sync` | Merge `mcp.json.example` into user and/or project mcp.json (keeps existing secrets)                  |
 | `skills-sync` | Copy/refresh bundled skills for `--scope` (no Poetry)                                                |
 
-Bundled skills (source `.cursor/skills/`): `papita-proxmox-lab-map`, `proxmox-ve-mcp`, `truenas-mcp`. With `--scope user` or `both`, copies land in `~/.cursor/skills/` (repo-relative links rewritten to absolute paths).
+Bundled skills (source `.cursor/skills/`): `papita-proxmox-lab-map`, `proxmox-ve-mcp`, `truenas-mcp`, `openwrt-mcp`. With `--scope user` or `both`, copies land in `~/.cursor/skills/` (repo-relative links rewritten to absolute paths).
 
 Options: `--scope user|project|both`, `--no-sync`, `--no-skills`, `--server NAME`, `--all-targets` (alias for `--scope both`).
 

@@ -27,6 +27,7 @@ Last aligned to repo tree (~46 tracked files). Gitignored paths listed separatel
 | `.cursor/skills/papita-proxmox-lab-map/reference.md` | Full file inventory (this file)                       |
 | `.cursor/skills/proxmox-ve-mcp/SKILL.md`             | When/how to invoke `proxmox-ve` MCP                   |
 | `.cursor/skills/truenas-mcp/SKILL.md`                | When/how to invoke `truenas` MCP                      |
+| `.cursor/skills/openwrt-mcp/SKILL.md`                | When/how to invoke `openwrt` MCP                      |
 
 ---
 

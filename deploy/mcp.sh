@@ -126,7 +126,8 @@ _mcp_bundled_skills() {
     printf '%s\n' \
         papita-proxmox-lab-map \
         proxmox-ve-mcp \
-        truenas-mcp
+        truenas-mcp \
+        openwrt-mcp
 }
 
 _verify_project_skills() {

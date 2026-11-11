@@ -43,8 +43,9 @@ Bundled skills (teach agents when to invoke MCPs):
 | `papita-proxmox-lab-map` | Repo map / file inventory |
 | `proxmox-ve-mcp` | Invoke `proxmox-ve` MCP |
 | `truenas-mcp` | Invoke `truenas` MCP (`TRUENAS_VERIFY_SSL` defaults **true**) |
+| `openwrt-mcp` | Invoke `openwrt` MCP (plan → human approve → apply → confirm) |
 
-Root `poetry.lock` is **tracked** so Dependabot and `poetry install` stay reproducible. After `git pull`, prefer `./deploy/mcp.sh update` so the lockfile and editable MCP packages stay aligned. OpenWrt ops are documented in [`openwrt-mcp/README.md`](./openwrt-mcp/README.md) (no separate Cursor skill yet).
+Root `poetry.lock` is **tracked** so Dependabot and `poetry install` stay reproducible. After `git pull`, prefer `./deploy/mcp.sh update` so the lockfile and editable MCP packages stay aligned. OpenWrt ops: [`openwrt-mcp/README.md`](./openwrt-mcp/README.md) and [`.cursor/skills/openwrt-mcp/SKILL.md`](../.cursor/skills/openwrt-mcp/SKILL.md).
 
 ```bash
 ./deploy/mcp.sh install --scope user
@@ -67,7 +68,7 @@ Root `poetry.lock` is **tracked** so Dependabot and `poetry install` stay reprod
 | `test`        | `pytest` for MCP test suites                                                                            |
 | `smoke`       | Run post-install smoke tests (loads creds from `~/.cursor/mcp.json`)                                    |
 | `cursor-sync` | Merge each `mcp/*/mcp.json.example` into Cursor MCP configs (preserves existing `env` secrets)          |
-| `skills-sync` | Install/refresh `.cursor/skills/{papita-proxmox-lab-map,proxmox-ve-mcp,truenas-mcp}` for `--scope`     |
+| `skills-sync` | Install/refresh `.cursor/skills/{papita-proxmox-lab-map,proxmox-ve-mcp,truenas-mcp,openwrt-mcp}` for `--scope` |
 
 **Auto-sync (recommended once per clone):**
 
