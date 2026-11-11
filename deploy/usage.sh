@@ -251,6 +251,7 @@ usage_mcp() {
     papita-proxmox-lab-map   Repo map / inventory
     proxmox-ve-mcp           When/how to invoke proxmox-ve MCP
     truenas-mcp              When/how to invoke truenas MCP
+    openwrt-mcp              When/how to invoke openwrt MCP
 
   Options:
     -s, --server NAME     MCP package or server id (e.g. proxmox-ve-mcp or proxmox-ve)
