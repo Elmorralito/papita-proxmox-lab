@@ -30,9 +30,10 @@ Live state lives on the host under `/home/llama`, `/etc/systemd/system`, `/usr/l
 ## Apply notes (manual)
 
 1. Copy `bin/*` → `/home/llama/bin/` and `/usr/local/sbin/{aictl,llamactl}` as appropriate; `chown`/`chmod` to match host.
-2. Install `systemd/*.service` → `/etc/systemd/system/`; `daemon-reload`; enable wanted units.
-3. Install `ssh/`, `apt/`, `fail2ban/` drop-ins; reload `ssh` / restart `fail2ban`.
-4. Create secrets under `/etc/llama/secrets` (mode `640`, group `ai`) before starting servers.
+2. When building `/home/llama/src/llama.cpp`, apply `patches/llama-server-output-indices.patch` (`git apply`) before building `llama-server`, and run `bin/finsentqwen-export-gguf.sh` to produce `/home/llama/models/FinSentQwen-14B-Q4_K_M.gguf` and `finsentqwen-score-head.{json,pt}`.
+3. Install `systemd/*.service` → `/etc/systemd/system/`; run `systemctl daemon-reload`; enable wanted units.
+4. Install `ssh/`, `apt/`, `fail2ban/` drop-ins; reload `ssh` / restart `fail2ban`.
+5. Create secrets under `/etc/llama/secrets` (mode `640`, group `ai`) before starting servers.
 
 Do **not** add continuous health probes that compete with inference (operator policy).
 
