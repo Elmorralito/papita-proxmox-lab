@@ -36,6 +36,7 @@ sysctl -q vm.swappiness=1 2>/dev/null || true
 echo "[4/5] Validate artifacts"
 [[ -x "${LLAMA_BIN}" ]] || die "missing binary: ${LLAMA_BIN}"
 [[ -f "${LLAMA_MODEL}" ]] || die "missing model: ${LLAMA_MODEL}"
+[[ -z "${LLAMA_SCORE_HEAD:-}" || -f "${LLAMA_SCORE_HEAD}" ]] || die "missing score head: ${LLAMA_SCORE_HEAD}"
 [[ -r /home/llama/bin/run-server.sh ]] || die "missing run-server.sh"
 
 echo "[5/5] Bootstrap OK"

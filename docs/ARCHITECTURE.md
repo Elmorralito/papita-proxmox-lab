@@ -28,7 +28,7 @@ LAN 172.16.0.0/16  ◄── OpenWrt LAN (gateway 172.16.0.1)
 | Shared storage | TrueNAS `172.16.0.236` | Pool `main_data_storage` → NFS |
 | QDevice | `172.16.0.99` | `corosync-qnetd` + Grafana (guardrailed) — **not** TrueNAS |
 | Metrics | CT `231` `172.16.20.11` | Prometheus `:9090`, Alertmanager `:9093` |
-| AI inference (bare metal) | `barely-ai-agent` `172.16.0.105` | Qwen2.5-14B llama.cpp `:8080` (GPU) + Kev-0.8B `:8009` (CPU); see `deploy/setup/misc/barely-ai/` |
+| AI inference (bare metal) | `barely-ai-agent` `172.16.0.105` | FinSentQwen-14B (`Qwen3-14B` + LoRA) llama.cpp `:8080` (GPU) + Kev-0.8B `:8009` (CPU); see `deploy/setup/misc/barely-ai/` |
 
 ---
 

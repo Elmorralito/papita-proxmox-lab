@@ -1,0 +1,95 @@
+diff --git a/tools/server/server-context.cpp b/tools/server/server-context.cpp
+index 5d97267..4ac78bc 100644
+--- a/tools/server/server-context.cpp
++++ b/tools/server/server-context.cpp
+@@ -4509,13 +4509,19 @@ private:
+                             break;
+                         }
+ 
+-                        // embedding requires all tokens in the batch to be output;
++                        // embedding requires all tokens in the batch to be output unless
++                        // explicit output_indices were requested for pooling=none;
+                         // MTP also wants logits at every prompt position so the
+                         // streaming hook can mirror t_h_nextn into ctx_dft.
++                        const int32_t cur_tok_idx = slot.prompt.n_tokens();
++                        const bool need_tok_output = slot.need_embd() && (
++                            slot.task->embd_indices.empty() ||
++                            std::find(slot.task->embd_indices.begin(), slot.task->embd_indices.end(), cur_tok_idx) != slot.task->embd_indices.end()
++                        );
+                         add_ok &= batch.add(slot.id,
+                             cur_tok,
+                             /* pos       = */ slot.prompt.tokens.pos_next(),
+-                            /* output    = */ slot.need_embd(),
++                            /* output    = */ need_tok_output,
+                             /* is_prompt = */ true);
+                         if (!slot.task->decision.order.empty()) {
+                             batch.set_decision_order(batch.size() - 1, slot.task->decision.order[slot.prompt.n_tokens()]);
+@@ -4570,8 +4576,10 @@ private:
+ 
+                         GGML_ASSERT(batch.size() > 0);
+ 
+-                        // extract the logits only for the last token
+-                        batch.set_output(batch.size() - 1, true);
++                        if (slot.task->type != SERVER_TASK_TYPE_EMBEDDING || slot.task->embd_indices.empty()) {
++                            // extract the logits only for the last token
++                            batch.set_output(batch.size() - 1, true);
++                        }
+ 
+                         slot.stats.n_gen = 0;
+                         slot.i_batch     = batch.size() - 1;
+@@ -4636,10 +4644,14 @@ private:
+             const llama_token cur_tok = input_tokens[cur_token_idx];
+ 
+             if (cur_tok != LLAMA_TOKEN_NULL) {
++                const bool need_tok_output = slot.need_embd() && (
++                    slot.task->embd_indices.empty() ||
++                    std::find(slot.task->embd_indices.begin(), slot.task->embd_indices.end(), (int32_t) cur_token_idx) != slot.task->embd_indices.end()
++                );
+                 const bool add_ok = batch.add(slot.id,
+                     cur_tok,
+                     /* pos       = */ slot.prompt.tokens.pos_next(),
+-                    /* output    = */ slot.need_embd(),
++                    /* output    = */ need_tok_output,
+                     /* is_prompt = */ true);
+                 GGML_ASSERT(add_ok);
+                 if (!slot.task->decision.order.empty()) {
+@@ -6857,6 +6869,17 @@ std::unique_ptr<server_res_generator> server_routes::handle_embeddings_impl(cons
+         }
+     }
+ 
++    std::vector<int32_t> embd_indices;
++    if (body.count("output_indices") != 0) {
++        if (!body.at("output_indices").is_array()) {
++            res->error(format_error_response("\"output_indices\" must be an array of integers", ERROR_TYPE_INVALID_REQUEST));
++            return res;
++        }
++        for (const auto & idx : body.at("output_indices")) {
++            embd_indices.push_back(idx.get<int32_t>());
++        }
++    }
++
+     // create and queue the task
+     json responses = json::array();
+     auto & rd = res->rd;
+@@ -6871,6 +6894,7 @@ std::unique_ptr<server_res_generator> server_routes::handle_embeddings_impl(cons
+             // OAI-compat
+             task.params.res_type = res_type;
+             task.params.embd_normalize = embd_normalize;
++            task.embd_indices = embd_indices;
+ 
+             tasks.push_back(std::move(task));
+         }
+diff --git a/tools/server/server-task.h b/tools/server/server-task.h
+index 6d550d1..44d31f7 100644
+--- a/tools/server/server-task.h
++++ b/tools/server/server-task.h
+@@ -243,6 +243,9 @@ struct server_task {
+     // used by SERVER_TASK_TYPE_SET_LORA
+     std::map<int, float> set_lora; // mapping adapter ID -> scale
+ 
++    // used by SERVER_TASK_TYPE_EMBEDDING (optional token indices when pooling=none)
++    std::vector<int32_t> embd_indices;
++
+     // used by SERVER_TASK_TYPE_TTS
+     mtmd_helper::gen_audio::inp tts_inp;
+ 

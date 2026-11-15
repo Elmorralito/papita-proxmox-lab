@@ -1,6 +1,6 @@
 # barely-ai-agent — vendored host config
 
-Reference copies of units/scripts for Debian host **`barely-ai-agent`** (`172.16.0.105`): Qwen2.5-14B via llama.cpp (GPU `:8080`) + Kev-0.8B System One (CPU `:8009`).
+Reference copies of units/scripts for Debian host **`barely-ai-agent`** (`172.16.0.105`): FinSentQwen-14B (`Qwen/Qwen3-14B` + `neoyipeng/FinSentQwen-14B` merged `Q4_K_M` + exported 3-class `score` head) via llama.cpp (GPU `:8080`, `--embedding --pooling none` + `output_indices` patch) + Kev-0.8B System One (CPU `:8009`).
 
 Live state lives on the host under `/home/llama`, `/etc/systemd/system`, `/usr/local/sbin`. This tree is the lab-repo source of truth to reduce drift.
 
@@ -9,7 +9,8 @@ Live state lives on the host under `/home/llama`, `/etc/systemd/system`, `/usr/l
 | Path | Purpose |
 |------|---------|
 | `systemd/` | `llama-*.service`, `kev*.service` |
-| `bin/` | `aictl`, `llamactl` (shim), env/bootstrap/run/wait helpers, `torch-cpu.constraints.txt` |
+| `bin/` | `aictl`, `llamactl` (shim), `finsentqwen-export-gguf.sh`, env/bootstrap/run/wait helpers, `torch-cpu.constraints.txt` |
+| `patches/` | `llama-server-output-indices.patch` (`output_indices` support on `/embedding` for single-pass 5-aspect extraction) |
 | `ssh/` | `99-papita-hardening.conf` (key-only, `AllowUsers root`) |
 | `apt/` | `20auto-upgrades` |
 | `fail2ban/` | `sshd.local` (sshd jail only; LAN ignored) |
@@ -21,7 +22,7 @@ Live state lives on the host under `/home/llama`, `/etc/systemd/system`, `/usr/l
 
 | Service | Port | User | CPUs | Control |
 |---------|------|------|------|---------|
-| Qwen (`llama-server`) | `8080` | `llama` | 0–5 | `aictl … qwen` |
+| FinSentQwen-14B (`llama-server`) | `8080` | `llama` | 0–3 | `aictl … qwen` |
 | Kev | `8009` | `kev` | 6–7 | `aictl … kev` |
 
 `llamactl` is a deprecated shim → `aictl` (qwen). Prefer `aictl`.
@@ -37,6 +38,7 @@ Do **not** add continuous health probes that compete with inference (operator po
 
 ## Pins (see `docs/SUPPLY_CHAIN.md`)
 
+- FinSentQwen-14B base (`Qwen/Qwen3-14B`): `40c069824f4251a91eefaf281ebe4c544efd3e18` + `neoyipeng/FinSentQwen-14B` LoRA (built via `bin/finsentqwen-export-gguf.sh` → `/home/llama/models/FinSentQwen-14B-Q4_K_M.gguf` + `/home/llama/models/finsentqwen-score-head.json`)
 - Kev git: `2074cc44256200bb37540103fa4572901faa10f3`
 - HF `jaredpalmer/kev-0.8b@v1.0`: `bf75a6a8848ea6960ff2ed108d9ed44c2941174f`
 - Torch: `2.8.0+cpu` (`KEV_BOOTSTRAP_OFFLINE=1` after first seed)

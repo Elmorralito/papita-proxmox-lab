@@ -23,8 +23,8 @@ KillMode=mixed
 KillSignal=SIGINT
 TimeoutStopSec=60
 
-# CPU partition: logical CPUs 0-5 (leave 6-7 for Kev)
-AllowedCPUs=0-5
+# CPU partition: physical cores 0-3 (4 threads, no SMT contention); leave 6-7 for Kev
+AllowedCPUs=0-3
 Nice=-5
 OOMScoreAdjust=-50
 MemoryMax=22G

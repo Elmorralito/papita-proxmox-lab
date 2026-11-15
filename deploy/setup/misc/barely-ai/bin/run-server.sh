@@ -12,6 +12,12 @@ fi
 if [[ "${LLAMA_WEBUI:-1}" == "0" ]]; then
   extra+=(--no-ui)
 fi
+if [[ "${LLAMA_EMBEDDING:-0}" == "1" ]]; then
+  extra+=(--embedding)
+fi
+if [[ -n "${LLAMA_POOLING:-}" ]]; then
+  extra+=(--pooling "${LLAMA_POOLING}")
+fi
 exec "${LLAMA_BIN}" \
   -m "${LLAMA_MODEL}" \
   --alias "${LLAMA_ALIAS}" \
