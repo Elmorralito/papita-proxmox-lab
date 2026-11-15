@@ -1,0 +1,62 @@
+[Unit]
+Description=Kev-0.8B System One API (CPU; coexists with llama-server)
+Documentation=file:///home/llama/README.md
+After=network-online.target kev-bootstrap.service
+Requires=kev-bootstrap.service
+Wants=network-online.target
+StartLimitIntervalSec=600
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=kev
+Group=ai
+EnvironmentFile=-/home/llama/bin/kev-env
+EnvironmentFile=-/etc/llama/secrets/kev.env
+Environment=HF_HOME=/home/llama/hf-cache
+Environment=HUGGINGFACE_HUB_CACHE=/home/llama/hf-cache/huggingface
+Environment=TRANSFORMERS_CACHE=/home/llama/hf-cache/huggingface
+WorkingDirectory=/home/llama/kev/src
+ExecStart=/home/llama/bin/run-kev.sh
+ExecStartPost=/home/llama/bin/kev-wait-healthy.sh
+Restart=always
+RestartSec=10
+TimeoutStartSec=900
+KillMode=mixed
+KillSignal=SIGINT
+TimeoutStopSec=60
+
+# CPU partition: logical CPUs 6-7 exclusive (2 threads)
+AllowedCPUs=6-7
+Nice=5
+OOMScoreAdjust=200
+MemoryMax=6G
+MemoryHigh=4G
+TasksMax=256
+LimitNOFILE=1048576
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectHostname=true
+ProtectClock=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+RestrictNamespaces=true
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
+ReadWritePaths=/home/llama/logs /home/llama/hf-cache /tmp
+ReadOnlyPaths=/home/llama/kev /home/llama/bin /etc/llama
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

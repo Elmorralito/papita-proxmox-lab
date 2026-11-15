@@ -1,0 +1,67 @@
+[Unit]
+Description=llama.cpp OpenAI-compatible server (Qwen AI agent)
+Documentation=file:///home/llama/README.md
+After=network-online.target llama-bootstrap.service llama-cpu-performance.service llama-gpu-perf.service
+Requires=llama-bootstrap.service
+Wants=network-online.target llama-cpu-performance.service llama-gpu-perf.service
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=llama
+Group=ai
+SupplementaryGroups=video render
+EnvironmentFile=-/home/llama/bin/llama-env
+WorkingDirectory=/home/llama
+ExecStart=/home/llama/bin/run-server.sh
+ExecStartPost=/home/llama/bin/llama-wait-healthy.sh
+Restart=always
+RestartSec=8
+TimeoutStartSec=240
+KillMode=mixed
+KillSignal=SIGINT
+TimeoutStopSec=60
+
+# CPU partition: physical cores 0-3 (4 threads, no SMT contention); leave 6-7 for Kev
+AllowedCPUs=0-3
+Nice=-5
+OOMScoreAdjust=-50
+MemoryMax=22G
+MemoryHigh=18G
+TasksMax=512
+LimitMEMLOCK=infinity
+LimitNOFILE=1048576
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+PrivateDevices=false
+DevicePolicy=closed
+DeviceAllow=/dev/nvidia0 rw
+DeviceAllow=/dev/nvidiactl rw
+DeviceAllow=/dev/nvidia-modeset rw
+DeviceAllow=/dev/nvidia-uvm rw
+DeviceAllow=/dev/nvidia-uvm-tools rw
+DeviceAllow=char-drm rw
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectHostname=true
+ProtectClock=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+RestrictNamespaces=true
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
+ReadWritePaths=/home/llama/logs /tmp
+ReadOnlyPaths=/home/llama/models /home/llama/src /home/llama/bin /etc/llama
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

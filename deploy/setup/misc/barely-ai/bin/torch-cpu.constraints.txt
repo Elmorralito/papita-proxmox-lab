@@ -1,0 +1,2 @@
+# Force CPU torch; keep CUDA wheels out of kev venv (GPU is for llama.cpp)
+torch==2.8.0+cpu

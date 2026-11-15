@@ -1,0 +1,9 @@
+[Unit]
+Description=Daily barely-ai snapshot (04:40 local)
+[Timer]
+OnCalendar=*-*-* 04:40:00
+Persistent=true
+RandomizedDelaySec=10m
+Unit=papita-ai-snapshot@daily.service
+[Install]
+WantedBy=timers.target

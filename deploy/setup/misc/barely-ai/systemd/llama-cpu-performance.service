@@ -1,0 +1,12 @@
+[Unit]
+Description=Force CPU performance governor for llama.cpp
+After=local-fs.target
+Before=llama-bootstrap.service llama-server.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/cpupower frequency-set -g performance
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
