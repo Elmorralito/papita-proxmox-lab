@@ -1,0 +1,26 @@
+KEV_SRC=/home/llama/kev/src
+KEV_GIT_REMOTE=https://github.com/jaredpalmer/kev.git
+KEV_GIT_SHA=2074cc44256200bb37540103fa4572901faa10f3
+KEV_RUN=jaredpalmer/kev-0.8b@v1.0
+KEV_HF_REVISION=bf75a6a8848ea6960ff2ed108d9ed44c2941174f
+KEV_BASE_MODEL=Qwen/Qwen3.5-0.8B-Base
+KEV_HOST=0.0.0.0
+KEV_PORT=8009
+KEV_DEVICE=cpu
+# CPU: AllowedCPUs=6-7 in kev.service; 2 BLAS/Torch threads
+OMP_NUM_THREADS=2
+MKL_NUM_THREADS=2
+OPENBLAS_NUM_THREADS=2
+TORCH_NUM_THREADS=2
+UV_LINK_MODE=copy
+KEV_DTYPE=bf16
+KEV_HEALTH_URL=http://127.0.0.1:8009/v1/models
+KEV_HEALTH_TIMEOUT_SEC=600
+# After first successful seed, bootstrap stays offline (no Hub / no git network)
+KEV_BOOTSTRAP_OFFLINE=1
+
+# Auth: see /etc/llama/secrets/kev.env (not in this file)
+HF_HOME=/home/llama/hf-cache
+HUGGINGFACE_HUB_CACHE=/home/llama/hf-cache/huggingface
+UV_CACHE_DIR=/home/llama/kev/uv-cache
+UV_PYTHON_INSTALL_DIR=/home/llama/kev/uv-python

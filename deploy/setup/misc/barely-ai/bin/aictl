@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# Control plane for Qwen (llama-server) + Kev on barely-ai-agent
+set -euo pipefail
+usage() {
+  cat <<EOF
+Usage: aictl <command> [qwen|kev|all]
+
+  status [target]    unit + health snapshots
+  start  [target]    start stack (default: all)
+  stop   [target]    stop stack
+  restart [target]   restart stack
+  enable             enable boot for both
+  disable            disable kev+llama at boot
+  health             curl both health endpoints
+  logs [qwen|kev]    follow journals
+EOF
+}
+target=${2:-all}
+cmd=${1:-}
+case "$cmd" in
+  ""|-h|--help) usage; exit 0 ;;
+  status)
+    [[ "$target" == all || "$target" == qwen ]] && { echo '=== qwen ==='; systemctl --no-pager --full status llama-server.service | head -18; curl -fsS http://127.0.0.1:8080/health 2>/dev/null || echo unhealthy; echo; }
+    [[ "$target" == all || "$target" == kev ]] && { echo '=== kev ==='; systemctl --no-pager --full status kev.service | head -18; curl -fsS http://127.0.0.1:8009/v1/models 2>/dev/null | head -c 240 || echo unhealthy; echo; }
+    echo '=== resources ==='
+    free -h | head -2
+    nvidia-smi --query-gpu=memory.used,memory.total,utilization.gpu --format=csv 2>/dev/null || true
+    ;;
+  start)
+    [[ "$target" == all || "$target" == qwen ]] && { systemctl start llama-bootstrap.service; systemctl start llama-server.service; /home/llama/bin/llama-wait-healthy.sh; }
+    [[ "$target" == all || "$target" == kev ]] && { systemctl start kev-bootstrap.service; systemctl start kev.service; /home/llama/bin/kev-wait-healthy.sh; }
+    ;;
+  stop)
+    [[ "$target" == all || "$target" == kev ]] && systemctl stop kev.service || true
+    [[ "$target" == all || "$target" == qwen ]] && systemctl stop llama-server.service || true
+    ;;
+  restart)
+    [[ "$target" == all || "$target" == qwen ]] && { systemctl start llama-bootstrap.service; systemctl restart llama-server.service; /home/llama/bin/llama-wait-healthy.sh; }
+    [[ "$target" == all || "$target" == kev ]] && { systemctl start kev-bootstrap.service; systemctl restart kev.service; /home/llama/bin/kev-wait-healthy.sh; }
+    ;;
+  enable)
+    systemctl enable llama-bootstrap.service llama-server.service kev-bootstrap.service kev.service
+    echo enabled
+    ;;
+  disable)
+    systemctl disable llama-server.service kev.service
+    echo 'disabled llama-server + kev at boot'
+    ;;
+  health)
+    LKEY=$(head -n1 /etc/llama/secrets/llama.api-keys 2>/dev/null || true)
+    KKEY=$(cat /etc/llama/secrets/kev.api-key 2>/dev/null || true)
+    echo -n 'qwen health: '; curl -fsS http://127.0.0.1:8080/health; echo
+    echo -n 'qwen models (auth): '; curl -fsS -H "Authorization: Bearer ${LKEY}" http://127.0.0.1:8080/v1/models | head -c 120; echo
+    echo -n 'kev models (auth): '; curl -fsS -H "Authorization: Bearer ${KKEY}" http://127.0.0.1:8009/v1/models | head -c 120; echo
+    echo -n 'kev models (no auth expect 401): '; curl -sS -o /tmp/kev401 -w '%{http_code}' http://127.0.0.1:8009/v1/models; echo
+    ;;
+  logs)
+    case "${2:-qwen}" in
+      qwen) exec journalctl -u llama-server.service -f -n 80 ;;
+      kev) exec journalctl -u kev.service -f -n 80 ;;
+      *) echo 'logs qwen|kev'; exit 2 ;;
+    esac
+    ;;
+  *) echo "unknown: $cmd"; usage; exit 2 ;;
+esac

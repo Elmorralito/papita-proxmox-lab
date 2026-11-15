@@ -1,0 +1,14 @@
+[Unit]
+Description=NVIDIA persistence mode for llama.cpp
+After=nvidia-persistenced.service
+Wants=nvidia-persistenced.service
+Before=llama-bootstrap.service llama-server.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/nvidia-smi -pm 1
+ExecStart=-/usr/bin/nvidia-smi -ac 3504,1911
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,17 @@
+[Unit]
+Description=Bootstrap Kev-0.8B (TypeSafe System One) weights/deps
+After=network-online.target local-fs.target
+Wants=network-online.target
+Before=kev.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/home/llama/bin/kev-env
+ExecStart=/home/llama/bin/kev-bootstrap.sh
+RemainAfterExit=yes
+TimeoutStartSec=900
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

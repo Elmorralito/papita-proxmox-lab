@@ -1,0 +1,18 @@
+[Unit]
+Description=Bootstrap host for llama.cpp AI agent
+Documentation=file:///home/llama/README.md
+DefaultDependencies=yes
+After=local-fs.target systemd-modules-load.service nvidia-persistenced.service
+Wants=nvidia-persistenced.service
+Before=llama-server.service
+
+[Service]
+Type=oneshot
+ExecStart=/home/llama/bin/llama-bootstrap.sh
+RemainAfterExit=yes
+TimeoutStartSec=120
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

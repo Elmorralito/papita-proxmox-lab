@@ -1,0 +1,12 @@
+[Unit]
+Description=barely-ai snapshot (%i) to /mnt/ai-snapshots
+After=local-fs.target
+RequiresMountsFor=/mnt/ai-snapshots
+
+[Service]
+Type=oneshot
+Nice=19
+IOSchedulingClass=idle
+IOSchedulingPriority=7
+CPUWeight=1
+ExecStart=/usr/local/sbin/papita-ai-snapshot.sh %i
