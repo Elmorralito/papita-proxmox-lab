@@ -18,6 +18,9 @@ fi
 if [[ -n "${LLAMA_POOLING:-}" ]]; then
   extra+=(--pooling "${LLAMA_POOLING}")
 fi
+if [[ -n "${LLAMA_EMBD_NORMALIZE:-}" ]]; then
+  extra+=(--embd-normalize "${LLAMA_EMBD_NORMALIZE}")
+fi
 exec "${LLAMA_BIN}" \
   -m "${LLAMA_MODEL}" \
   --alias "${LLAMA_ALIAS}" \
