@@ -556,6 +556,16 @@ EOF
         return 1
     fi
     log INFO "Wake-on-LAN for MAC address in cluster config enabled."
+
+    # Intel e1000e "Hardware Unit Hang" → NFS/corosync loss → HA softdog reboot.
+    harden_script="${SCRIPT_DIR}/misc/papita-e1000e-harden.sh"
+    if [[ -x "$harden_script" ]] || [[ -f "$harden_script" ]]; then
+        log INFO "Applying e1000e hang mitigations on ${interface}..."
+        bash "$harden_script" "$interface" || log WARN "e1000e harden script failed (non-fatal)."
+    else
+        log WARN "Missing ${harden_script}; skip e1000e harden (see docs/TIPSNTRICKS.md)."
+    fi
+
     log INFO "Done."
     return 0
 }

@@ -141,6 +141,35 @@ rm -rf /etc/pve/nodes/<NODE_NAME>
 
 Reference: [Proxmox Cluster Manager](https://pve.proxmox.com/pve-docs/chapter-pvecm.html). This lab uses corosync over the management LAN (typically `ring0_addr` on `vmbr0`).
 
+### Intel e1000e NIC hang → node “crash” / softdog reboot
+
+**Symptom:** `last -x` shows `crash` (not a clean shutdown); journal ends with `e1000e … Detected Hardware Unit Hang`, then NFS storages “not online”, QDevice connect failures, and `watchdog-mux: … watchdog expired` (HA LRM softdog).
+
+**Cause:** Intel I219/`e1000e` TX hang under load. Corosync + `hard` NFS stall → LRM cannot pet softdog → node reboots. Keep NFS as `hard` for VM disks (data integrity); fix the NIC instead of switching to `soft`.
+
+**Mitigation (applied by setup step 3 + script):**
+
+```bash
+# On each PVE node (or after setup-node SCP):
+bash /root/deploy/misc/papita-e1000e-harden.sh nic0
+# Installed copy:
+bash /usr/local/sbin/papita-e1000e-harden.sh nic0
+```
+
+What it does:
+
+| Change | Why |
+| ------ | --- |
+| `ethtool -K … tso/gso/gro off` | Primary hang trigger |
+| `ethtool --set-eee … eee off` | Energy Efficient Ethernet flaps |
+| `ethtool -G … rx/tx 1024` | Fewer TX descriptor stalls |
+| `pcie_aspm=off` in GRUB | PCIe power management hangs (needs reboot once) |
+| `papita-e1000e-harden.service` + interfaces `post-up` | Persist across boots |
+
+**Verify:** `ethtool -k nic0` (TSO/GSO/GRO off), `ethtool --show-eee nic0`, `ethtool -g nic0`, `grep pcie_aspm /proc/cmdline`, `journalctl -k \| grep 'Hardware Unit Hang'`.
+
+**Further resilience (not automated):** dedicated/USB NIC or bond if hangs persist; keep chrony healthy; avoid putting latency-sensitive etcd disks solely on NFS without timeouts tuned for the NAS.
+
 ### How do I delete or destroy an entire cluster?
 
 Proxmox has **no single “delete cluster” action**. You remove members until one node remains, then convert that node to **standalone**, or reinstall hosts you no longer need.

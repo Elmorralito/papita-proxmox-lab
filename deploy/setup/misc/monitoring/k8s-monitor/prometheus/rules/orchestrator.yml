@@ -1,0 +1,102 @@
+# Hatchet Lite control plane (issue #88). Relies on job hatchet-lite in prometheus.yml.
+groups:
+  - name: papita.orchestrator.recording
+    interval: 30s
+    rules:
+      - record: papita:hatchet_failed_tasks:rate5m
+        expr: sum(rate(hatchet_failed_tasks_total[5m])) or vector(0)
+      - record: papita:hatchet_failed_tasks:increase5m
+        expr: sum(increase(hatchet_failed_tasks_total[5m])) or vector(0)
+      - record: papita:hatchet_assigned_tasks:rate5m
+        expr: sum(rate(hatchet_assigned_tasks[5m])) or vector(0)
+      - record: papita:hatchet_queue_assign_p95_seconds
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum(rate(hatchet_queued_to_assigned_time_seconds_bucket[5m])) by (le)
+          )
+
+  - name: papita.orchestrator.alerts
+    rules:
+      - alert: HatchetLiteDown
+        expr: |
+          up{job="hatchet-lite"} == 0
+          or
+          absent(up{job="hatchet-lite"})
+        for: 2m
+        labels:
+          severity: critical
+          cluster: k8s-oldtimers
+          addon: orchestrator
+        annotations:
+          summary: "Hatchet Lite metrics scrape is down"
+          description: "job=hatchet-lite is down or absent for 2m. Workers miss heartbeats; tasks stay QUEUED."
+
+      - alert: HatchetLitePodNotReady
+        expr: |
+          (
+            kube_deployment_status_replicas_available{namespace="orchestrator",deployment="hatchet-lite"} < 1
+          )
+          or
+          absent(kube_deployment_status_replicas_available{namespace="orchestrator",deployment="hatchet-lite"})
+        for: 3m
+        labels:
+          severity: critical
+          cluster: k8s-oldtimers
+          addon: orchestrator
+        annotations:
+          summary: "hatchet-lite Deployment has no available replicas"
+          description: "orchestrator/hatchet-lite available replicas missing or <1 for 3m."
+
+      - alert: HatchetFailedTasksSeen
+        # One failing */60 cron is ~0.017/s; catch any sustained failures, not only bursts.
+        expr: papita:hatchet_failed_tasks:increase5m > 0
+        for: 10m
+        labels:
+          severity: warning
+          cluster: k8s-oldtimers
+          addon: orchestrator
+        annotations:
+          summary: "Hatchet recorded failed tasks in the last 5m (sustained 10m)"
+          description: >-
+            increase≈{{ $value | humanize }}. Prefer piggies-* tenants over historical
+            Default empty receipt-extract noise.
+
+      - alert: HatchetHighFailedTaskRate
+        expr: papita:hatchet_failed_tasks:rate5m > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          cluster: k8s-oldtimers
+          addon: orchestrator
+        annotations:
+          summary: "Hatchet failed-task rate elevated"
+          description: "Failed tasks ≈ {{ $value | humanize }} /s over 5m."
+
+      - alert: HatchetQueueAssignLatencyHigh
+        expr: papita:hatchet_queue_assign_p95_seconds > 15
+        for: 10m
+        labels:
+          severity: warning
+          cluster: k8s-oldtimers
+          addon: orchestrator
+        annotations:
+          summary: "Hatchet queue→assign p95 above 15s"
+          description: >-
+            p95={{ $value | humanizeDuration }}. Usually pool saturation (DATABASE_MAX_CONNS),
+            sub-minute cron flood, or clock skew >5s vs Postgres NOW().
+
+      - alert: HatchetNoWorkerSlots
+        # Fire only when every observed series is saturated (max available == 0).
+        expr: |
+          max(hatchet_tenant_available_worker_slots) == 0
+          and
+          max(hatchet_tenant_worker_slots) > 0
+        for: 10m
+        labels:
+          severity: warning
+          cluster: k8s-oldtimers
+          addon: orchestrator
+        annotations:
+          summary: "Hatchet has workers registered but zero free slots"
+          description: "available slots=0 for 10m (OCR/heavy backlog or stuck task)."

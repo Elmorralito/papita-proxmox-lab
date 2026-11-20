@@ -36,6 +36,7 @@ push_file docker-compose.yml
 push_file prometheus/prometheus.yml
 push_file prometheus/rules/k8s.yml
 push_file prometheus/rules/pve.yml
+push_file prometheus/rules/orchestrator.yml
 push_file alertmanager/alertmanager.yml
 
 if ! pct exec "$VMID" -- test -s "${DEST}/secrets/k8s-bearer.token"; then
